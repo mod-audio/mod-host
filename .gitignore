@@ -1,0 +1,9 @@
+*~
+*.o
+*.so
+*.pyc
+*.swp
+*.tar.xz
+*.log
+mod-host
+tests/effectlib_test
