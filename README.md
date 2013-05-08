@@ -6,9 +6,9 @@ mod-host
 About
 -----
 
-mod-host is LV2 host for Jack that can be controlled via socket or shell.
+mod-host is an LV2 host for Jack, that can be controlled via a socket or shell.
 
-Currently the host support the following LV2 features:
+Currently the host supports the following LV2 features:
 
 * lv2core
 * atom
@@ -20,13 +20,13 @@ Currently the host support the following LV2 features:
 * urid
 * worker
 
-mod-host is part of [MOD project](http://portalmod.com).
+mod-host is part of the [MOD project](http://portalmod.com).
 
 
 Build
 -----
 
-mod-host use a simple Makefile to build the source code.
+mod-host uses a simple Makefile to build the source code.
 The steps to build and install are:
 
     make
@@ -46,13 +46,17 @@ Dependencies:
 Run
 ---
 
-mod-host do not startup JACK automatically, so you need start it before run mod-host.
+mod-host does not startup JACK automatically, so you need to start it before
+run mod-host.
 
-If you run mod-host without parameters the process will be forked and can only be controlled by socket.
-The default socket port is 5555, this can be changed passing the parameter -p (or --socket-port) to mod-host.
+If you run mod-host without parameters the process will be forked and can only
+be controlled through the socket.
+The default socket port is 5555, this can be changed, passing the parameter
+-p (or --socket-port) to mod-host.
 
-The other way to control mod-host is the interactive mode, in this case the commands must be provided manually, via shell.
-When you are in the interactive mode, the socket communication don't work.
+The other way to control mod-host is the interactive mode, in this case the
+commands must be provided on the shell prompt.
+When you are in the interactive mode, the socket communication does not work.
 
 
 Commands (or Protocol)
@@ -62,7 +66,7 @@ The commands supported by mod-host are:
 
     add <lv2_uri> <instance_number>
         e.g.: add http://lv2plug.in/plugins/eg-amp 0
-        instance_number must be any value between 0 ~ 9999, inclusive
+        instance_number must be any value between 0 ~ 9999, inclusively
 
     remove <instance_number>
         e.g.: remove 0
@@ -83,13 +87,22 @@ The commands supported by mod-host are:
         e.g.: bypass 0 1
         bypass_value = 1 bypass the effect and bypass_value = 0 process the effect
 
-For each effect added one client on JACK will be created. The names of clients follow the standard: effect_\<instance_number\>
+    help
+        show a help message
 
-For each command sent one response is given. If the command is valid, the response format will be:
+    quit
+        bye!
+
+For each effect added, one client on JACK will be created. The names of clients
+follow the standard: effect_\<instance_number\>
+
+For each command sent, one response is given. If the command is valid, the
+response format will be:
 
     resp <status> [value]
 
-If status is a negative number an error occurred. The error will be one of the follow:
+If status is a negative number, an error occurred. The error will be one of the
+following:
 
 | status  | error                           |
 | --------|---------------------------------|
@@ -106,5 +119,6 @@ If status is a negative number an error occurred. The error will be one of the f
 | -206    | ERR_JACK_PORT_DISCONNECTION     |
 | -301    | ERR_MEMORY_ALLOCATION           |
 
-An status zero or positive means that the command has executed with success. On case of add command the status returned is the instance number.
-The value field just exist to param_get command.
+A status of zero or positive means, that the command was executed successfully.
+In case of the add command, the status returned is the instance number.
+The value field currently only exists for the param_get command.

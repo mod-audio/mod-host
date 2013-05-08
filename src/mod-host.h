@@ -58,6 +58,8 @@
 #define EFFECT_BYPASS       "bypass %i %i"
 #define EFFECT_PARAM_SET    "param_set %i %s %f"
 #define EFFECT_PARAM_GET    "param_get %i %s"
+#define HELP                "help"
+#define QUIT                "quit"
 
 
 /*

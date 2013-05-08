@@ -59,6 +59,39 @@
 ************************************************************************************************************************
 */
 
+const char HELP_MESSAGE[] = {
+"\n\
+Valid commands:\n\n\
+add <lv2_uri> <instance_number>\n\
+    e.g.: add http://lv2plug.in/plugins/eg-amp 0\n\
+    instance_number must be any value between 0 ~ 9999, inclusively\n\
+\n\
+remove <instance_number>\n\
+    e.g.: remove 0\n\
+\n\
+connect <origin_port> <destination_port>\n\
+    e.g.: connect system:capture_1 effect_0:in\n\
+\n\
+disconnect <origin_port> <destination_port>\n\
+    e.g.: disconnect system:capture_1 effect_0:in\n\
+\n\
+param_set <instance_number> <param_symbol> <param_value>\n\
+    e.g.: param_set 0 gain 2.50\n\
+\n\
+param_get <instance_number> <param_symbol>\n\
+    e.g.: param_get 0 gain\n\
+\n\
+bypass <instance_number> <bypass_value>\n\
+    e.g.: bypass 0 1\n\
+    bypass_value = 1 bypass the effect and bypass_value = 0 process the effect\n\
+\n\
+help\n\
+    show this message\n\
+\n\
+quit\n\
+    bye!\n"
+};
+
 
 /*
 ************************************************************************************************************************
@@ -165,23 +198,47 @@ static void effects_get_param_cb(void *arg)
     sprintf(proto->response, "resp %i %.04f", resp, value);
 }
 
+static void help_cb(void *arg)
+{
+    protocol_t *proto = arg;
+    *(proto->response) = 0;
+
+    fprintf(stdout, HELP_MESSAGE);
+    fflush(stdout);
+}
+
+static void quit_cb(void *arg)
+{
+    protocol_t *proto = arg;
+    *(proto->response) = 0;
+
+    protocol_remove_commands();
+    socket_finish();
+    effects_finish();
+    exit(EXIT_SUCCESS);
+}
+
 void interactive_mode(void)
 {
     socket_msg_t msg;
-    char buffer[SOCKET_MSG_BUFFER_SIZE];
+    char *input;
 
     msg.origin = STDOUT_FILENO;
 
     while (1)
     {
-        msg.buffer = readline(">>> ");
+        input = readline("mod-host> ");
 
-        if (msg.buffer)
+        if (input)
         {
-            msg.size = strlen(buffer);
+            msg.size = strlen(input);
+            msg.buffer = input;
             protocol_parse(&msg);
-            add_history(msg.buffer);
             printf("\n");
+
+            add_history(input);
+            free(input);
+            input = NULL;
         }
         else break;
     }
@@ -270,6 +327,8 @@ int main(int argc, char **argv)
     protocol_add_command(EFFECT_BYPASS, effects_bypass_cb);
     protocol_add_command(EFFECT_PARAM_SET, effects_set_param_cb);
     protocol_add_command(EFFECT_PARAM_GET, effects_get_param_cb);
+    protocol_add_command(HELP, help_cb);
+    protocol_add_command(QUIT, quit_cb);
 
     /* Startup the effects */
     if (effects_init()) return -1;
