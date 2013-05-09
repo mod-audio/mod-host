@@ -67,6 +67,9 @@ str_array_t string_split(const char *str, const char token)
 
 void free_str_array(str_array_t str_array)
 {
-    if (str_array.data[0]) free(str_array.data[0]);
-    if (str_array.data) free(str_array.data);
+    if (str_array.data)
+    {
+        if (str_array.data[0]) free(str_array.data[0]);
+        free(str_array.data);
+    }
 }

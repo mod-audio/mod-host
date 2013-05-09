@@ -106,7 +106,7 @@ static int not_is_wildcard(const char *str);
 
 static int not_is_wildcard(const char *str)
 {
-    if (strchr(str, '%') == NULL) return 1;
+    if (str && strchr(str, '%') == NULL) return 1;
     return 0;
 }
 
@@ -133,7 +133,7 @@ void protocol_parse(void *arg)
         for (i = 0; i < g_index; i++)
         {
             /* Checks if counters match */
-            if (g_commands[i].count == proto.received.count)
+            if (proto.received.count >= g_commands[i].count)
             {
                 index = i;
 

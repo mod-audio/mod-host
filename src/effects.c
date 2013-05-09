@@ -1143,3 +1143,26 @@ int effects_bypass(int effect_id, int value)
     return ERR_INSTANCE_NON_EXISTS;
 }
 
+
+int effects_get_controls_symbols(int effect_id, char** symbols)
+{
+    if (!InstanceExist(effect_id))
+    {
+        symbols = NULL;
+        return ERR_INSTANCE_NON_EXISTS;
+    }
+
+    uint32_t i;
+    effect_t *effect = &Effects[effect_id];
+    const LilvNode* symbol_node;
+
+    for (i = 0; i < effect->control_ports_count; i++)
+    {
+        symbol_node = lilv_port_get_symbol(effect->lilv_plugin, effect->control_ports[i]->lilv_port);
+        symbols[i] = (char *) lilv_node_as_string(symbol_node);
+    }
+
+    symbols[i] = NULL;
+
+    return SUCCESS;
+}

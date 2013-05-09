@@ -42,6 +42,7 @@
 #include "effects.h"
 #include "socket.h"
 #include "protocol.h"
+#include "completer.h"
 
 
 /*
@@ -223,11 +224,14 @@ void interactive_mode(void)
     socket_msg_t msg;
     char *input;
 
+    completer_init();
+
     msg.origin = STDOUT_FILENO;
 
     while (1)
     {
         input = readline("mod-host> ");
+        rl_bind_key('\t', rl_complete);
 
         if (input)
         {
