@@ -196,7 +196,10 @@ static void effects_get_param_cb(void *arg)
     int resp;
     float value;
     resp = effects_get_parameter(atoi(proto->received.data[1]), proto->received.data[2], &value);
-    sprintf(proto->response, "resp %i %.04f", resp, value);
+    if (resp >= 0)
+        sprintf(proto->response, "resp %i %.04f", resp, value);
+    else
+        sprintf(proto->response, "resp %i", resp);
 }
 
 static void help_cb(void *arg)

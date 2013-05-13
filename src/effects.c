@@ -1085,6 +1085,8 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
                 return SUCCESS;
             }
         }
+
+        return ERR_LV2_INVALID_PARAM_SYMBOL;
     }
 
     return ERR_INSTANCE_NON_EXISTS;
@@ -1126,6 +1128,8 @@ int effects_get_parameter(int effect_id, const char *control_symbol, float *valu
                 return SUCCESS;
             }
         }
+
+        return ERR_LV2_INVALID_PARAM_SYMBOL;
     }
 
     return ERR_INSTANCE_NON_EXISTS;
