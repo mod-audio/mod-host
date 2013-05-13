@@ -133,7 +133,7 @@ void protocol_parse(void *arg)
         for (i = 0; i < g_index; i++)
         {
             /* Checks if counters match */
-            if (proto.received.count >= g_commands[i].count)
+            if (proto.received.count == g_commands[i].count)
             {
                 index = i;
 
