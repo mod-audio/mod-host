@@ -371,13 +371,14 @@ static int ProcessAudio(jack_nframes_t nframes, void *arg)
         /* Run the effect */
         lilv_instance_run(effect->lilv_instance, nframes);
 
-        /* Process any replies from the worker. */
-        worker_emit_responses(&effect->worker);
-
         /* Notify the plugin the run() cycle is finished */
-        if (effect->worker.iface && effect->worker.iface->end_run)
+        if (effect->worker.iface)
         {
-            effect->worker.iface->end_run(effect->lilv_instance->lv2_handle);
+            /* Process any replies from the worker. */
+            worker_emit_responses(&effect->worker);
+            if (effect->worker.iface->end_run) {
+                effect->worker.iface->end_run(effect->lilv_instance->lv2_handle);
+            }
         }
 
         /* Copy the output buffers audio */
@@ -697,6 +698,11 @@ int effects_add(const char *uid, int instance)
     /* Worker */
     effect->worker.instance = lilv_instance;
     zix_sem_init(&effect->worker.sem, 0);
+	effect->worker.iface = NULL;
+	effect->worker.requests  = NULL;
+	effect->worker.responses = NULL;
+	effect->worker.response  = NULL;
+
     lilv_worker_interface = lilv_new_uri(LV2_Data, LV2_WORKER__interface);
 	if (lilv_plugin_has_extension_data(effect->lilv_plugin, lilv_worker_interface))
     {
