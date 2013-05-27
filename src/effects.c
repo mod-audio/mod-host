@@ -49,6 +49,7 @@
 
 /* Local */
 #include "effects.h"
+#include "monitor.h"
 #include "uridmap.h"
 #include "lv2_evbuf.h"
 #include "worker.h"
@@ -114,6 +115,14 @@ typedef struct PORT_T {
     bool old_ev_api;
 } port_t;
 
+typedef struct MONITOR_T {
+    int port_id;
+    char *op;
+    float value;
+    float last_notified_value;
+} monitor_t;
+
+
 typedef struct EFFECT_T {
     int instance;
     jack_client_t *jack_client;
@@ -140,6 +149,9 @@ typedef struct EFFECT_T {
 
     port_t **control_ports;
     uint32_t control_ports_count;
+
+    monitor_t **monitors;
+    uint32_t monitors_count;
 
     worker_t worker;
 
@@ -386,6 +398,18 @@ static int ProcessAudio(jack_nframes_t nframes, void *arg)
         {
             buffer_out = jack_port_get_buffer(effect->output_audio_ports[i]->jack_port, nframes);
             memcpy(buffer_out, effect->output_audio_ports[i]->buffer, (sizeof(float) * nframes));
+        }
+
+        for (i = 0; i < effect->monitors_count; i++) {
+            int port_id = effect->monitors[i]->port_id;
+            float value = *(effect->ports[port_id]->buffer);
+            if (monitor_check_condition(effect->monitors[i]->op, effect->monitors[i]->value, value) && 
+                value != effect->monitors[i]->last_notified_value) {
+                const LilvNode *symbol_node = lilv_port_get_symbol(effect->lilv_plugin, effect->ports[port_id]->lilv_port);
+                char *symbol = lilv_node_as_string(symbol_node);
+                monitor_send(effect->instance, symbol, value);
+                effect->monitors[i]->last_notified_value = value;
+            }
         }
     }
 
@@ -731,6 +755,8 @@ int effects_add(const char *uid, int instance)
     event_ports_count = 0;
     input_event_ports_count = 0;
     output_event_ports_count = 0;
+    effect->monitors_count = 0;
+    effect->monitors = NULL;
     effect->ports_count = ports_count;
     effect->ports = (port_t **) calloc(ports_count, sizeof(port_t *));
     for (i = 0; i < ports_count; i++) effect->ports[i] = NULL;
@@ -1098,6 +1124,30 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
     return ERR_INSTANCE_NON_EXISTS;
 }
 
+int effects_monitor_parameter(int effect_id, const char *control_symbol, const char *op, float value)
+{
+    float v;
+    int ret = effects_get_parameter(effect_id, control_symbol, &v);
+
+    if (ret != SUCCESS)
+        return ret;
+
+    const LilvNode *symbol = lilv_new_string(LV2_Data, control_symbol);
+    const LilvPort *port = lilv_plugin_get_port_by_symbol(Effects[effect_id].lilv_plugin, symbol);
+
+    int port_id = lilv_port_get_index(Effects[effect_id].lilv_plugin, port);
+
+    Effects[effect_id].monitors_count++;
+    Effects[effect_id].monitors = (monitor_t**)realloc(Effects[effect_id].monitors, sizeof(monitor_t *) * Effects[effect_id].monitors_count);
+    int idx = Effects[effect_id].monitors_count - 1;
+    Effects[effect_id].monitors[idx] = (monitor_t*)malloc(sizeof(monitor_t));
+    Effects[effect_id].monitors[idx]->port_id = port_id;
+    Effects[effect_id].monitors[idx]->op = (char*)malloc(strlen(op)*sizeof(char));
+    strcpy(Effects[effect_id].monitors[idx]->op, op);
+    Effects[effect_id].monitors[idx]->value = value;
+    Effects[effect_id].monitors[idx]->last_notified_value = 0.0;
+    return 0;
+}
 
 int effects_get_parameter(int effect_id, const char *control_symbol, float *value)
 {

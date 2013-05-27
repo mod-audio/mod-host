@@ -183,7 +183,8 @@ static char **completion(const char *text, int start, int end)
                 }
             }
             else if ((strcmp(cmd.data[0], "param_set") == 0) ||
-                     (strcmp(cmd.data[0], "param_get") == 0))
+                     (strcmp(cmd.data[0], "param_get") == 0) ||
+                     (strcmp(cmd.data[0], "param_monitor") == 0))
             {
                 if (cmd.count == 2)
                 {

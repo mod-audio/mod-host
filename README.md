@@ -83,6 +83,12 @@ The commands supported by mod-host are:
     param_get <instance_number> <param_symbol>
         e.g.: param_get 0 gain
 
+    param_monitor <instance_number> <param_symbol> <cond_op> <value>
+        e.g: param_monitor 0 gain > 2.50
+
+    monitor <addr> <port> <status>
+        e.g: monitor localhost 12345 1
+
     bypass <instance_number> <bypass_value>
         e.g.: bypass 0 1
         bypass_value = 1 bypass the effect and bypass_value = 0 process the effect

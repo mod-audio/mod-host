@@ -18,111 +18,178 @@
 
 /*
 ************************************************************************************************************************
-*
-************************************************************************************************************************
-*/
-
-#ifndef EFFECT_H
-#define EFFECT_H
-
-
-/*
-************************************************************************************************************************
 *           INCLUDE FILES
 ************************************************************************************************************************
 */
 
+#include <stdio.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netdb.h>
+#include <fcntl.h>
 
-/*
-************************************************************************************************************************
-*           DO NOT CHANGE THESE DEFINES
-************************************************************************************************************************
-*/
+#include <jack/jack.h>
+#include <lilv/lilv.h>
 
-/* Errors definitions */
-enum {
-    SUCCESS = 0,
-    ERR_INSTANCE_INVALID = -1,
-    ERR_INSTANCE_ALREADY_EXISTS = -2,
-    ERR_INSTANCE_NON_EXISTS = -3,
-
-    ERR_LV2_INVALID_URI = -101,
-    ERR_LILV_INSTANTIATION = -102,
-    ERR_LV2_INVALID_PARAM_SYMBOL = -103,
-
-    ERR_JACK_CLIENT_CREATION = -201,
-    ERR_JACK_CLIENT_ACTIVATION = -202,
-    ERR_JACK_CLIENT_DEACTIVATION = -203,
-    ERR_JACK_PORT_REGISTER = -204,
-    ERR_JACK_PORT_CONNECTION = -205,
-    ERR_JACK_PORT_DISCONNECTION = -206,
-
-    ERR_MEMORY_ALLOCATION = -301,
-};
+#include "monitor.h"
 
 
 /*
 ************************************************************************************************************************
-*           CONFIGURATION DEFINES
-************************************************************************************************************************
-*/
-
-#define MAX_INSTANCES           10000
-#define AUDIO_INPUT_PORTS       2
-#define AUDIO_OUTPUT_PORTS      2
-
-
-/*
-************************************************************************************************************************
-*           DATA TYPES
+*           LOCAL DEFINES
 ************************************************************************************************************************
 */
 
 
 /*
 ************************************************************************************************************************
-*           GLOBAL VARIABLES
+*           LOCAL CONSTANTS
 ************************************************************************************************************************
 */
 
 
 /*
 ************************************************************************************************************************
-*           MACRO'S
+*           LOCAL DATA TYPES
 ************************************************************************************************************************
 */
 
 
 /*
 ************************************************************************************************************************
-*           FUNCTION PROTOTYPES
+*           LOCAL MACROS
 ************************************************************************************************************************
 */
 
-int effects_init(void);
-int effects_finish(void);
-int effects_add(const char *uid, int instance);
-int effects_remove(int effect_id);
-int effects_connect(const char *portA, const char *portB);
-int effects_disconnect(const char *portA, const char *portB);
-int effects_set_parameter(int effect_id, const char *control_symbol, float value);
-int effects_get_parameter(int effect_id, const char *control_symbol, float *value);
-int effects_monitor_parameter(int effect_id, const char *control_symbol, const char *op, float value);
-int effects_bypass(int effect_id, int value);
-int effects_get_controls_symbols(int effect_id, char** symbols);
+#define OFF 0
+#define ON 1
+
+/*
+************************************************************************************************************************
+*           LOCAL GLOBAL VARIABLES
+************************************************************************************************************************
+*/
+
+static int g_status, g_sockfd;
+
+/*
+************************************************************************************************************************
+*           LOCAL FUNCTION PROTOTYPES
+************************************************************************************************************************
+*/
 
 
 /*
 ************************************************************************************************************************
-*           CONFIGURATION ERRORS
+*           LOCAL CONFIGURATION ERRORS
 ************************************************************************************************************************
 */
 
 
 /*
 ************************************************************************************************************************
-*           END HEADER
+*           LOCAL FUNCTIONS
 ************************************************************************************************************************
 */
 
-#endif
+
+/*
+************************************************************************************************************************
+*           GLOBAL FUNCTIONS
+************************************************************************************************************************
+*/
+
+int monitor_start(char *addr, int port) 
+{
+    /* connects to the address specified by the client and starts 
+     * monitoring and sending information according to the settings 
+     * for each monitoring plugin */
+
+    struct sockaddr_in serv_addr;
+    struct hostent *server;
+
+    g_sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (g_sockfd < 0)
+        perror("ERROR opening socket");
+    
+    server = gethostbyname(addr);
+    
+    if (server == NULL)
+    {
+      fprintf(stderr,"ERROR, no such host");
+    }
+
+    bzero((char *) &serv_addr, sizeof(serv_addr));
+    serv_addr.sin_family = AF_INET;
+    bcopy((char *)server->h_addr,
+          (char *)&serv_addr.sin_addr.s_addr,
+          server->h_length);
+    serv_addr.sin_port = htons(port);
+    
+    if (connect(g_sockfd,(struct sockaddr*)&serv_addr,sizeof(serv_addr)) < 0)
+        perror("ERROR connecting");
+
+    g_status = ON;
+
+    int flags = fcntl(g_sockfd, F_GETFL, 0);
+    if(fcntl(g_sockfd, F_SETFL, flags | O_NONBLOCK) != 0)
+        perror("ERROR setting socket to nonblocking");
+
+
+    return 0;
+}
+
+
+int monitor_status() 
+{
+    return g_status;
+}
+
+int monitor_stop() 
+{
+    close(g_sockfd);
+    g_status = OFF;
+    return 0;
+}
+
+int monitor_send(int instance, char *symbol, float value)
+{
+    int ret;
+
+    char msg[255];
+    sprintf(msg, "monitor %d %s %f", instance, symbol, value);
+
+    ret = write(g_sockfd, msg, strlen(msg) + 1);
+    if (ret < 0)
+    {
+        perror("send error");
+    }
+
+    return ret;
+}
+
+
+int monitor_check_condition(char *op, float cond_value, float value)
+{
+    if(strcmp(op, ">") == 0) {
+        if(value > cond_value) return 1;
+    } else if (strcmp(op, ">=") == 0) {
+        if(value >= cond_value) return 1;
+    } else if (strcmp(op, "<") == 0) {
+        if(value < cond_value) return 1;
+    } else if (strcmp(op, "<=") == 0) {
+        if(value <= cond_value) return 1;
+    } else if (strcmp(op, "==") == 0) {
+        if(value == cond_value) return 1;
+    } else if (strcmp(op, "!=") == 0) {
+        if(value != cond_value) return 1;
+    } else if (strcmp(op, "<>") == 0) {
+        return 1;
+    }
+    return 0;
+}
+
+

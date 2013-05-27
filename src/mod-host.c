@@ -43,6 +43,7 @@
 #include "socket.h"
 #include "protocol.h"
 #include "completer.h"
+#include "monitor.h"
 
 
 /*
@@ -202,6 +203,32 @@ static void effects_get_param_cb(void *arg)
         sprintf(proto->response, "resp %i", resp);
 }
 
+static void effects_monitor_param_cb(void *arg)
+{
+    protocol_t *proto = arg;
+
+    int resp;
+    if (monitor_status()) 
+        resp = effects_monitor_parameter(atoi(proto->received.data[1]), proto->received.data[2], 
+                                     proto->received.data[3], (float)strtof(proto->received.data[4], NULL));
+    else 
+        resp = -1;
+    sprintf(proto->response, "resp %i", resp);
+}
+
+static void monitor_addr_set_cb(void *arg)
+{
+    protocol_t *proto = arg;
+
+    int resp;
+    if (atoi(proto->received.data[3]) == 1) {
+        resp = monitor_start(proto->received.data[1], atoi(proto->received.data[2]));
+    } else {
+        resp = monitor_stop();
+    }
+    sprintf(proto->response, "resp %i", resp);
+}
+
 static void help_cb(void *arg)
 {
     protocol_t *proto = arg;
@@ -334,6 +361,8 @@ int main(int argc, char **argv)
     protocol_add_command(EFFECT_BYPASS, effects_bypass_cb);
     protocol_add_command(EFFECT_PARAM_SET, effects_set_param_cb);
     protocol_add_command(EFFECT_PARAM_GET, effects_get_param_cb);
+    protocol_add_command(EFFECT_PARAM_MON, effects_monitor_param_cb);
+    protocol_add_command(MONITOR_ADDR_SET, monitor_addr_set_cb);
     protocol_add_command(HELP, help_cb);
     protocol_add_command(QUIT, quit_cb);
 
