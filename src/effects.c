@@ -117,7 +117,7 @@ typedef struct PORT_T {
 
 typedef struct MONITOR_T {
     int port_id;
-    char *op;
+    int op;
     float value;
     float last_notified_value;
 } monitor_t;
@@ -407,8 +407,8 @@ static int ProcessAudio(jack_nframes_t nframes, void *arg)
                 value != effect->monitors[i]->last_notified_value) {
                 const LilvNode *symbol_node = lilv_port_get_symbol(effect->lilv_plugin, effect->ports[port_id]->lilv_port);
                 char *symbol = lilv_node_as_string(symbol_node);
-                monitor_send(effect->instance, symbol, value);
-                effect->monitors[i]->last_notified_value = value;
+                if(monitor_send(effect->instance, symbol, value) >= 0)
+                    effect->monitors[i]->last_notified_value = value;
             }
         }
     }
@@ -1132,6 +1132,23 @@ int effects_monitor_parameter(int effect_id, const char *control_symbol, const c
     if (ret != SUCCESS)
         return ret;
 
+    int iop;
+    if(strcmp(op, ">") == 0) 
+        iop = 0;
+    else if(strcmp(op, ">=") == 0)
+        iop = 1;
+    else if(strcmp(op, "<") == 0)
+        iop = 2;
+    else if(strcmp(op, "<=") == 0)
+        iop = 3;
+    else if(strcmp(op, "==") == 0)
+        iop = 4;
+    else if(strcmp(op, "!=") == 0)
+        iop = 5;
+    else 
+        return -1;
+
+
     const LilvNode *symbol = lilv_new_string(LV2_Data, control_symbol);
     const LilvPort *port = lilv_plugin_get_port_by_symbol(Effects[effect_id].lilv_plugin, symbol);
 
@@ -1142,8 +1159,7 @@ int effects_monitor_parameter(int effect_id, const char *control_symbol, const c
     int idx = Effects[effect_id].monitors_count - 1;
     Effects[effect_id].monitors[idx] = (monitor_t*)malloc(sizeof(monitor_t));
     Effects[effect_id].monitors[idx]->port_id = port_id;
-    Effects[effect_id].monitors[idx]->op = (char*)malloc(strlen(op)*sizeof(char));
-    strcpy(Effects[effect_id].monitors[idx]->op, op);
+    Effects[effect_id].monitors[idx]->op = iop;
     Effects[effect_id].monitors[idx]->value = value;
     Effects[effect_id].monitors[idx]->last_notified_value = 0.0;
     return 0;

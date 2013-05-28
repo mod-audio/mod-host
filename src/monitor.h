@@ -88,4 +88,4 @@ int monitor_status();
 int monitor_stop();
 
 int monitor_send(int instance, char *symbol, float value);
-int monitor_check_condition(char *op, float cond_value, float value);
+int monitor_check_condition(int op, float cond_value, float value);

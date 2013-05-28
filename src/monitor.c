@@ -172,24 +172,22 @@ int monitor_send(int instance, char *symbol, float value)
 }
 
 
-int monitor_check_condition(char *op, float cond_value, float value)
+int monitor_check_condition(int op, float cond_value, float value)
 {
-    if(strcmp(op, ">") == 0) {
-        if(value > cond_value) return 1;
-    } else if (strcmp(op, ">=") == 0) {
-        if(value >= cond_value) return 1;
-    } else if (strcmp(op, "<") == 0) {
-        if(value < cond_value) return 1;
-    } else if (strcmp(op, "<=") == 0) {
-        if(value <= cond_value) return 1;
-    } else if (strcmp(op, "==") == 0) {
-        if(value == cond_value) return 1;
-    } else if (strcmp(op, "!=") == 0) {
-        if(value != cond_value) return 1;
-    } else if (strcmp(op, "<>") == 0) {
-        return 1;
+    switch(op) {
+        case 0:
+            return value > cond_value ? 1 : 0;
+        case 1:
+            return value >= cond_value ? 1 : 0;
+        case 2:
+            return value < cond_value ? 1 : 0;
+        case 3:
+            return value <= cond_value ? 1 : 0;
+        case 4:
+            return value == cond_value ? 1 : 0;
+        case 5:
+            return value != cond_value ? 1 : 0;
     }
     return 0;
 }
-
 

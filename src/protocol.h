@@ -48,7 +48,7 @@
 ************************************************************************************************************************
 */
 
-#define PROTOCOL_MAX_COMMANDS       10
+#define PROTOCOL_MAX_COMMANDS       12
 #define MESSAGE_COMMAND_NOT_FOUND   "not found"
 #define MESSAGE_MANY_ARGUMENTS      "many arguments"
 #define MESSAGE_FEW_ARGUMENTS       "few arguments"
