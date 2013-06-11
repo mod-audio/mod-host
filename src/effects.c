@@ -1006,7 +1006,7 @@ int effects_remove(int effect_id)
         }
 
         start = 0;
-        end = MAX_INSTANCES;
+        end = MAX_INSTANCES - 10; // TODO: better way to exclude the Tools (10)
     }
     else
     {
