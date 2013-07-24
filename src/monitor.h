@@ -87,5 +87,5 @@ int monitor_start(char *addr, int port);
 int monitor_status();
 int monitor_stop();
 
-int monitor_send(int instance, char *symbol, float value);
+int monitor_send(int instance, const char *symbol, float value);
 int monitor_check_condition(int op, float cond_value, float value);

@@ -102,10 +102,10 @@ static int g_status, g_sockfd;
 ************************************************************************************************************************
 */
 
-int monitor_start(char *addr, int port) 
+int monitor_start(char *addr, int port)
 {
-    /* connects to the address specified by the client and starts 
-     * monitoring and sending information according to the settings 
+    /* connects to the address specified by the client and starts
+     * monitoring and sending information according to the settings
      * for each monitoring plugin */
 
     struct sockaddr_in serv_addr;
@@ -114,9 +114,9 @@ int monitor_start(char *addr, int port)
     g_sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (g_sockfd < 0)
         perror("ERROR opening socket");
-    
+
     server = gethostbyname(addr);
-    
+
     if (server == NULL)
     {
       fprintf(stderr,"ERROR, no such host");
@@ -128,7 +128,7 @@ int monitor_start(char *addr, int port)
           (char *)&serv_addr.sin_addr.s_addr,
           server->h_length);
     serv_addr.sin_port = htons(port);
-    
+
     if (connect(g_sockfd,(struct sockaddr*)&serv_addr,sizeof(serv_addr)) < 0)
         perror("ERROR connecting");
 
@@ -143,19 +143,19 @@ int monitor_start(char *addr, int port)
 }
 
 
-int monitor_status() 
+int monitor_status()
 {
     return g_status;
 }
 
-int monitor_stop() 
+int monitor_stop()
 {
     close(g_sockfd);
     g_status = OFF;
     return 0;
 }
 
-int monitor_send(int instance, char *symbol, float value)
+int monitor_send(int instance, const char *symbol, float value)
 {
     int ret;
 

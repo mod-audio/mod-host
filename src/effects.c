@@ -368,7 +368,7 @@ static int ProcessAudio(jack_nframes_t nframes, void *arg)
 
                 memset(effect->output_audio_ports[i]->buffer, 0, (sizeof(float) * nframes));
             }
-        } 
+        }
         else // generator plugins
         {
             for (i = 0; i < effect->output_audio_ports_count; i++)
@@ -412,11 +412,11 @@ static int ProcessAudio(jack_nframes_t nframes, void *arg)
         for (i = 0; i < effect->monitors_count; i++) {
             int port_id = effect->monitors[i]->port_id;
             float value = *(effect->ports[port_id]->buffer);
-            if (monitor_check_condition(effect->monitors[i]->op, effect->monitors[i]->value, value) && 
+            if (monitor_check_condition(effect->monitors[i]->op, effect->monitors[i]->value, value) &&
                 value != effect->monitors[i]->last_notified_value) {
                 const LilvNode *symbol_node = lilv_port_get_symbol(effect->lilv_plugin, effect->ports[port_id]->lilv_port);
-                char *symbol = lilv_node_as_string(symbol_node);
-                if(monitor_send(effect->instance, symbol, value) >= 0)
+                const char *symbol = lilv_node_as_string(symbol_node);
+                if (monitor_send(effect->instance, symbol, value) >= 0)
                     effect->monitors[i]->last_notified_value = value;
             }
         }
@@ -1142,7 +1142,7 @@ int effects_monitor_parameter(int effect_id, const char *control_symbol, const c
         return ret;
 
     int iop;
-    if(strcmp(op, ">") == 0) 
+    if(strcmp(op, ">") == 0)
         iop = 0;
     else if(strcmp(op, ">=") == 0)
         iop = 1;
@@ -1154,7 +1154,7 @@ int effects_monitor_parameter(int effect_id, const char *control_symbol, const c
         iop = 4;
     else if(strcmp(op, "!=") == 0)
         iop = 5;
-    else 
+    else
         return -1;
 
 
