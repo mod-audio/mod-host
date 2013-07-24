@@ -368,6 +368,15 @@ static int ProcessAudio(jack_nframes_t nframes, void *arg)
 
                 memset(effect->output_audio_ports[i]->buffer, 0, (sizeof(float) * nframes));
             }
+        } 
+        else // generator plugins
+        {
+            for (i = 0; i < effect->output_audio_ports_count; i++)
+            {
+                buffer_out = jack_port_get_buffer(effect->output_audio_ports[i]->jack_port, nframes);
+                memset(buffer_out, 0, (sizeof(float) * nframes));
+                lilv_instance_run(effect->lilv_instance, nframes);
+            }
         }
     }
     /* Effect process */
