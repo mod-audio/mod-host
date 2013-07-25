@@ -26,7 +26,6 @@
 #include <string.h>
 
 #include "protocol.h"
-#include "socket.h"
 #include "utils.h"
 
 
@@ -62,6 +61,13 @@ const char *g_error_messages[] = {
 ************************************************************************************************************************
 */
 
+typedef struct CMD_T {
+    char* command;
+    char** list;
+    uint32_t count;
+    void (*callback)(proto_t *proto);
+} cmd_t;
+
 
 /*
 ************************************************************************************************************************
@@ -77,9 +83,8 @@ const char *g_error_messages[] = {
 */
 
 static int g_verbose = 0;
-static unsigned int g_index = 0;
-static str_array_t g_commands[PROTOCOL_MAX_COMMANDS];
-static void (*g_callbacks[PROTOCOL_MAX_COMMANDS])(void *arg);
+static unsigned int g_command_count = 0;
+static cmd_t g_commands[PROTOCOL_MAX_COMMANDS];
 
 
 /*
@@ -87,8 +92,6 @@ static void (*g_callbacks[PROTOCOL_MAX_COMMANDS])(void *arg);
 *           LOCAL FUNCTION PROTOTYPES
 ************************************************************************************************************************
 */
-
-static int not_is_wildcard(const char *str);
 
 
 /*
@@ -104,9 +107,9 @@ static int not_is_wildcard(const char *str);
 ************************************************************************************************************************
 */
 
-static int not_is_wildcard(const char *str)
+static int is_wildcard(const char *str)
 {
-    if (str && strchr(str, '%') == NULL) return 1;
+    if (str && strchr(str, '%') != NULL) return 1;
     return 0;
 }
 
@@ -117,83 +120,126 @@ static int not_is_wildcard(const char *str)
 ************************************************************************************************************************
 */
 
-void protocol_parse(void *arg)
+void protocol_parse(msg_t *msg)
 {
-    socket_msg_t *msg = arg;
-    protocol_t proto;
-    unsigned int i, j;
-    int index = NOT_FOUND;
+    uint32_t i, j;
+    int32_t index;
+    proto_t proto;
 
-    proto.received = string_split(msg->buffer, ' ');
+    proto.list = strarr_split(msg->data);
+    proto.list_count = strarr_length(proto.list);
+    proto.response = NULL;
 
-    /* TODO: few arguments, many arguments, check invalid argument (wildcards) */
+    // TODO: check invalid argumets (wildcards)
 
-    if (proto.received.count > 0)
+    if (proto.list_count == 0) return;
+
+    unsigned int match, variable_arguments = 0;
+
+    // loop all registered commands
+    for (i = 0; i < g_command_count; i++)
     {
-        for (i = 0; i < g_index; i++)
+        match = 0;
+        index = NOT_FOUND;
+
+        // checks received protocol
+        for (j = 0; j < proto.list_count && j < g_commands[i].count; j++)
         {
-            /* Checks if counters match */
-            if (proto.received.count == g_commands[i].count)
+            if (strcmp(g_commands[i].list[j], proto.list[j]) == 0)
+            {
+                match++;
+            }
+            else if (match > 0)
+            {
+                if (is_wildcard(g_commands[i].list[j])) match++;
+                else if (strcmp(g_commands[i].list[j], "...") == 0)
+                {
+                    match++;
+                    variable_arguments = 1;
+                }
+            }
+        }
+
+        if (match > 0)
+        {
+            // checks if the last argument is ...
+            if (j < g_commands[i].count)
+            {
+                if (strcmp(g_commands[i].list[j], "...") == 0) variable_arguments = 1;
+            }
+
+            // few arguments
+            if (proto.list_count < (g_commands[i].count - variable_arguments))
+            {
+                index = FEW_ARGUMENTS;
+            }
+
+            // many arguments
+            else if (proto.list_count > g_commands[i].count && !variable_arguments)
+            {
+                index = MANY_ARGUMENTS;
+            }
+
+            // arguments match
+            else if (match == proto.list_count || variable_arguments)
             {
                 index = i;
-
-                /* Checks the commands */
-                for (j = 0; j < proto.received.count; j++)
-                {
-                    if (not_is_wildcard(g_commands[i].data[j]) &&
-                        strcmp(g_commands[i].data[j], proto.received.data[j]) != 0)
-                    {
-                        index = NOT_FOUND;
-                        break;
-                    }
-                }
-
-                if (index >= 0) break;
             }
+
+            break;
         }
-
-        /* Protocol OK */
-        if (index >= 0)
-        {
-            if (g_callbacks[index])
-            {
-                g_callbacks[index](&proto);
-                socket_send(msg->origin, proto.response, strlen(proto.response) + 1);
-
-                if (g_verbose)
-                {
-                    printf("received: %s\n", msg->buffer);
-                    printf("response: %s\n", proto.response);
-                }
-            }
-        }
-        /* Protocol error */
-        else
-        {
-            socket_send(msg->origin, g_error_messages[-index-1], strlen(g_error_messages[-index-1]) + 1);
-
-            if (g_verbose)
-            {
-                printf("error: %s\n", g_error_messages[-index-1]);
-            }
-        }
-
-        free_str_array(proto.received);
     }
+
+    // Protocol OK
+    if (index >= 0)
+    {
+        if (g_commands[index].callback)
+        {
+            g_commands[index].callback(&proto);
+            if (g_verbose) printf("received: %s\n", msg->data);
+
+            if (proto.response)
+            {
+                SEND_TO_SENDER(msg->sender_id, proto.response, proto.response_size);
+                if (g_verbose) printf("response: %s\n", proto.response);
+
+                FREE(proto.response);
+            }
+        }
+    }
+    // Protocol error
+    else
+    {
+        SEND_TO_SENDER(msg->sender_id, g_error_messages[-index-1], strlen(g_error_messages[-index-1]));
+        if (g_verbose) printf("error: %s\n", g_error_messages[-index-1]);
+    }
+
+    FREE(proto.list);
 }
 
 
-void protocol_add_command(const char *command, void (*callback)(void *arg))
+void protocol_add_command(const char *command, void (*callback)(proto_t *proto))
 {
-    if (g_index >= PROTOCOL_MAX_COMMANDS)
+    if (g_command_count >= PROTOCOL_MAX_COMMANDS)
     {
         printf("error: PROTOCOL_MAX_COMMANDS reached (reconfigure it)\n");
         return;
     }
 
-    g_commands[g_index] = string_split(command, ' ');
-    g_callbacks[g_index] = callback;
-    g_index++;
+    char *cmd = str_duplicate(command);
+    g_commands[g_command_count].command = cmd;
+    g_commands[g_command_count].list = strarr_split(cmd);
+    g_commands[g_command_count].count = strarr_length(g_commands[g_command_count].list);
+    g_commands[g_command_count].callback = callback;
+    g_command_count++;
+}
+
+
+void protocol_response(const char *response, proto_t *proto)
+{
+    proto->response_size = strlen(response);
+    proto->response = MALLOC(proto->response_size + 1);
+    strcpy(proto->response, response);
 }
 
 
@@ -201,9 +247,10 @@ void protocol_remove_commands(void)
 {
     unsigned int i;
 
-    for (i = 0; i < g_index; i++)
+    for (i = 0; i < g_command_count; i++)
     {
-        free_str_array(g_commands[i]);
+        FREE(g_commands[i].command);
+        FREE(g_commands[i].list);
     }
 }
 

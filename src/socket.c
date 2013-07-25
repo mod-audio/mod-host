@@ -67,7 +67,7 @@
 */
 
 static int g_serverfd, g_buffer_size;
-static void (*g_receive_cb)(void *arg);
+static void (*g_receive_cb)(msg_t *msg);
 
 
 /*
@@ -144,7 +144,7 @@ void socket_finish(void)
 }
 
 
-void socket_set_receive_cb(void (*receive_cb)(void *arg))
+void socket_set_receive_cb(void (*receive_cb)(msg_t *msg))
 {
     g_receive_cb = receive_cb;
 }
@@ -170,7 +170,7 @@ void socket_run(void)
     struct sockaddr_in cli_addr;
     socklen_t clilen;
     char *buffer;
-    socket_msg_t msg;
+    msg_t msg;
 
     /* Allocates memory to receive buffer */
     buffer = malloc(g_buffer_size);
@@ -197,9 +197,9 @@ void socket_run(void)
 
         if (count > 0) /* Data received */
         {
-            msg.origin = clientfd;
-            msg.buffer = buffer;
-            msg.size = count;
+            msg.sender_id = clientfd;
+            msg.data = buffer;
+            msg.data_size = count;
             if (g_receive_cb) g_receive_cb(&msg);
         }
         else if (count < 0) /* Error */

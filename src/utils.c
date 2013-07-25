@@ -16,60 +16,211 @@
  *
  */
 
-#include <string.h>
-#include <stdlib.h>
+/*
+************************************************************************************************************************
+*           INCLUDE FILES
+************************************************************************************************************************
+*/
+
 #include "utils.h"
+#include <string.h>
 
-str_array_t string_split(const char *str, const char token)
+
+/*
+************************************************************************************************************************
+*           LOCAL DEFINES
+************************************************************************************************************************
+*/
+
+
+/*
+************************************************************************************************************************
+*           LOCAL CONSTANTS
+************************************************************************************************************************
+*/
+
+
+/*
+************************************************************************************************************************
+*           LOCAL DATA TYPES
+************************************************************************************************************************
+*/
+
+
+/*
+************************************************************************************************************************
+*           LOCAL MACROS
+************************************************************************************************************************
+*/
+
+
+/*
+************************************************************************************************************************
+*           LOCAL GLOBAL VARIABLES
+************************************************************************************************************************
+*/
+
+
+/*
+************************************************************************************************************************
+*           LOCAL FUNCTION PROTOTYPES
+************************************************************************************************************************
+*/
+
+
+/*
+************************************************************************************************************************
+*           LOCAL CONFIGURATION ERRORS
+************************************************************************************************************************
+*/
+
+
+/*
+************************************************************************************************************************
+*           LOCAL FUNCTIONS
+************************************************************************************************************************
+*/
+
+static void parse_quote(char *str)
 {
-    unsigned int i = 0, j = 0, k = 0;
-    char *str_copy, *pstr;
-    str_array_t str_array;
+    char *pquote, *pstr = str;
 
-    str_array.count = 0;
-    str_array.data = NULL;
-    if (!str) return str_array;
-
-    str_copy = strdup(str);
-    pstr = str_copy;
-
-    /* count the tokens */
-    str_array.count = 1;
     while (*pstr)
     {
-        if (*pstr == token) str_array.count++;
-        pstr++;
-    }
-
-    /* allocates memory to list */
-    str_array.data = calloc(str_array.count, sizeof(char *));
-
-    /* fill the list pointers */
-    pstr = str_copy;
-    while (*pstr)
-    {
-        if (*pstr == token)
+        if (*pstr == '"')
         {
-            *pstr = '\0';
-            str_array.data[j] = &str_copy[k];
-            j++;
-            k = i + 1;
+            // shift the string to left
+            pquote = pstr;
+            while (*pquote)
+            {
+                *pquote = *(pquote+1);
+                pquote++;
+            }
         }
-
-        i++;
         pstr++;
     }
-
-    str_array.data[j] = &str_copy[k];
-
-    return str_array;
 }
 
-void free_str_array(str_array_t str_array)
+static void trim_spaces(char *str)
 {
-    if (str_array.data)
+    char *pstr = str;
+
+    while (*pstr) pstr++;
+    while (1)
     {
-        if (str_array.data[0]) free(str_array.data[0]);
-        free(str_array.data);
+        pstr--;
+        if ((*pstr) == ' ') *pstr = 0;
+        else break;
     }
+}
+
+
+/*
+************************************************************************************************************************
+*           GLOBAL FUNCTIONS
+************************************************************************************************************************
+*/
+
+char** strarr_split(char *str)
+{
+    uint32_t count;
+    char *pstr, **list = NULL;
+    const char token = ' ';
+    uint8_t quote = 0;
+
+    if (!str) return list;
+
+    trim_spaces(str);
+
+    // count the tokens
+    pstr = str;
+    count = 1;
+    while (*pstr)
+    {
+        if (*pstr == token && quote == 0)
+        {
+            count++;
+        }
+#ifdef ENABLE_QUOTATION_MARKS
+        if (*pstr == '"')
+        {
+            if (quote == 0) quote = 1;
+            else
+            {
+                if (*(pstr+1) == '"') pstr++;
+                else quote = 0;
+            }
+        }
+#endif
+        pstr++;
+    }
+
+    // allocates memory to list
+    list = MALLOC((count + 1) * sizeof(char *));
+    if (list == NULL) return NULL;
+
+    // fill the list pointers
+    pstr = str;
+    list[0] = pstr;
+    count = 0;
+    while (*pstr)
+    {
+        if (*pstr == token && quote == 0)
+        {
+            *pstr = '\0';
+            list[++count] = pstr + 1;
+        }
+#ifdef ENABLE_QUOTATION_MARKS
+        if (*pstr == '"')
+        {
+            if (quote == 0) quote = 1;
+            else
+            {
+                if (*(pstr+1) == '"') pstr++;
+                else quote = 0;
+            }
+        }
+#endif
+        pstr++;
+    }
+
+    list[++count] = NULL;
+
+#ifdef ENABLE_QUOTATION_MARKS
+    count = 0;
+    while (list[count]) parse_quote(list[count++]);
+#endif
+
+    return list;
+}
+
+
+uint32_t strarr_length(char** const str_array)
+{
+    uint32_t count = 0;
+
+    if (str_array) while (str_array[count]) count++;
+    return count;
+}
+
+
+char* strarr_join(char **str_array)
+{
+    uint32_t i, len = strarr_length(str_array);
+
+    if (!str_array) return NULL;
+
+    for (i = 1; i < len; i++)
+    {
+        (*(str_array[i] - 1)) = ' ';
+    }
+
+    return (*str_array);
+}
+
+char *str_duplicate(const char *str)
+{
+    char *copy = MALLOC(strlen(str) + 1);
+    strcpy(copy, str);
+    return copy;
 }

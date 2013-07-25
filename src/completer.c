@@ -92,6 +92,7 @@ static char **g_list, **g_plugins_list, **g_ports_list, **g_symbols, **g_instanc
 */
 
 static char *dupstr(char *s);
+static uint32_t spaces_count(const char *str);
 static char **completion(const char *text, int start, int end);
 static char *generator(const char *text, int state);
 static void update_ports_list(const char *flow);
@@ -127,6 +128,35 @@ static char *dupstr(char *s)
     return (r);
 }
 
+static uint32_t spaces_count(const char *str)
+{
+    const char *pstr = str;
+    uint8_t quote = 0;
+    uint32_t count = 0;
+
+    while (*pstr)
+    {
+        if (*pstr == ' ' && quote == 0)
+        {
+            count++;
+        }
+
+        if (*pstr == '"')
+        {
+            if (quote == 0) quote = 1;
+            else
+            {
+                if (*(pstr+1) == '"') pstr++;
+                else quote = 0;
+            }
+        }
+
+        pstr++;
+    }
+
+    return count;
+}
+
 
 /* Attempt to complete on the contents of TEXT.  START and END bound the
    region of rl_line_buffer that contains the word to complete.  TEXT is
@@ -151,54 +181,58 @@ static char **completion(const char *text, int start, int end)
     {
         g_list = NULL;
 
-        str_array_t cmd;
-        cmd = string_split(rl_line_buffer, ' ');
-        if (cmd.count > 0)
+        char *line, **cmd;
+        line = str_duplicate(rl_line_buffer);
+        cmd = strarr_split(line);
+        uint32_t count = spaces_count(rl_line_buffer);
+
+        if (count > 0)
         {
-            if (strcmp(cmd.data[0], "add") == 0)
+            if (strcmp(cmd[0], "add") == 0)
             {
-                if (cmd.count == 2) g_list = g_plugins_list;
+                if (count == 1) g_list = g_plugins_list;
             }
-            else if ((strcmp(cmd.data[0], "remove") == 0) ||
-                     (strcmp(cmd.data[0], "bypass") == 0))
+            else if ((strcmp(cmd[0], "remove") == 0) ||
+                     (strcmp(cmd[0], "bypass") == 0))
             {
-                if (cmd.count == 2)
+                if (count == 1)
                 {
                     update_instances_list();
                     g_list = g_instances_list;
                 }
             }
-            else if ((strcmp(cmd.data[0], "connect") == 0) ||
-                     (strcmp(cmd.data[0], "disconnect") == 0))
+            else if ((strcmp(cmd[0], "connect") == 0) ||
+                     (strcmp(cmd[0], "disconnect") == 0))
             {
-                if (cmd.count == 2)
+                if (count == 1)
                 {
                     update_ports_list("output");
                     g_list = g_ports_list;
                 }
-                else if (cmd.count == 3)
+                else if (count == 2)
                 {
                     update_ports_list("input");
                     g_list = g_ports_list;
                 }
             }
-            else if ((strcmp(cmd.data[0], "param_set") == 0) ||
-                     (strcmp(cmd.data[0], "param_get") == 0) ||
-                     (strcmp(cmd.data[0], "param_monitor") == 0))
+            else if ((strcmp(cmd[0], "param_set") == 0) ||
+                     (strcmp(cmd[0], "param_get") == 0) ||
+                     (strcmp(cmd[0], "param_monitor") == 0))
             {
-                if (cmd.count == 2)
+                if (count == 1)
                 {
                     update_instances_list();
                     g_list = g_instances_list;
                 }
-                else if (cmd.count == 3)
+                else if (count == 2)
                 {
-                    effects_get_controls_symbols(atoi(cmd.data[1]), g_symbols);
+                    effects_get_controls_symbols(atoi(cmd[1]), g_symbols);
                     g_list = g_symbols;
                 }
             }
 
-            free_str_array(cmd);
+            FREE(cmd);
+            FREE(line);
         }
     }
 

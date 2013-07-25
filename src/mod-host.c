@@ -136,112 +136,119 @@ quit\n\
 ************************************************************************************************************************
 */
 
-static void effects_add_cb(void *arg)
+static void effects_add_cb(proto_t *proto)
 {
-    protocol_t *proto = arg;
-
     int resp;
-    resp = effects_add(proto->received.data[1], atoi(proto->received.data[2]));
-    sprintf(proto->response, "resp %i", resp);
+    resp = effects_add(proto->list[1], atoi(proto->list[2]));
+
+    char buffer[128];
+    sprintf(buffer, "resp %i", resp);
+    protocol_response(buffer, proto);
 }
 
-static void effects_remove_cb(void *arg)
+static void effects_remove_cb(proto_t *proto)
 {
-    protocol_t *proto = arg;
-
     int resp;
-    resp = effects_remove(atoi(proto->received.data[1]));
-    sprintf(proto->response, "resp %i", resp);
+    resp = effects_remove(atoi(proto->list[1]));
+
+    char buffer[128];
+    sprintf(buffer, "resp %i", resp);
+    protocol_response(buffer, proto);
 }
 
-static void effects_connect_cb(void *arg)
+static void effects_connect_cb(proto_t *proto)
 {
-    protocol_t *proto = arg;
-
     int resp;
-    resp = effects_connect(proto->received.data[1], proto->received.data[2]);
-    sprintf(proto->response, "resp %i", resp);
+    resp = effects_connect(proto->list[1], proto->list[2]);
+
+    char buffer[128];
+    sprintf(buffer, "resp %i", resp);
+    protocol_response(buffer, proto);
 }
 
-static void effects_disconnect_cb(void *arg)
+static void effects_disconnect_cb(proto_t *proto)
 {
-    protocol_t *proto = arg;
-
     int resp;
-    resp = effects_disconnect(proto->received.data[1], proto->received.data[2]);
-    sprintf(proto->response, "resp %i", resp);
+    resp = effects_disconnect(proto->list[1], proto->list[2]);
+
+    char buffer[128];
+    sprintf(buffer, "resp %i", resp);
+    protocol_response(buffer, proto);
 }
 
-static void effects_bypass_cb(void *arg)
+static void effects_bypass_cb(proto_t *proto)
 {
-    protocol_t *proto = arg;
-
     int resp;
-    resp = effects_bypass(atoi(proto->received.data[1]), atoi(proto->received.data[2]));
-    sprintf(proto->response, "resp %i", resp);
+    resp = effects_bypass(atoi(proto->list[1]), atoi(proto->list[2]));
+
+    char buffer[128];
+    sprintf(buffer, "resp %i", resp);
+    protocol_response(buffer, proto);
 }
 
-static void effects_set_param_cb(void *arg)
+static void effects_set_param_cb(proto_t *proto)
 {
-    protocol_t *proto = arg;
-
     int resp;
-    resp = effects_set_parameter(atoi(proto->received.data[1]), proto->received.data[2], atof(proto->received.data[3]));
-    sprintf(proto->response, "resp %i", resp);
+    resp = effects_set_parameter(atoi(proto->list[1]), proto->list[2], atof(proto->list[3]));
+
+    char buffer[128];
+    sprintf(buffer, "resp %i", resp);
+    protocol_response(buffer, proto);
 }
 
-static void effects_get_param_cb(void *arg)
+static void effects_get_param_cb(proto_t *proto)
 {
-    protocol_t *proto = arg;
-
     int resp;
     float value;
-    resp = effects_get_parameter(atoi(proto->received.data[1]), proto->received.data[2], &value);
+    resp = effects_get_parameter(atoi(proto->list[1]), proto->list[2], &value);
+
+    char buffer[128];
     if (resp >= 0)
-        sprintf(proto->response, "resp %i %.04f", resp, value);
+        sprintf(buffer, "resp %i %.04f", resp, value);
     else
-        sprintf(proto->response, "resp %i", resp);
+        sprintf(buffer, "resp %i", resp);
+
+    protocol_response(buffer, proto);
 }
 
-static void effects_monitor_param_cb(void *arg)
+static void effects_monitor_param_cb(proto_t *proto)
 {
-    protocol_t *proto = arg;
-
     int resp;
-    if (monitor_status()) 
-        resp = effects_monitor_parameter(atoi(proto->received.data[1]), proto->received.data[2], 
-                                     proto->received.data[3], (float)strtof(proto->received.data[4], NULL));
-    else 
+    if (monitor_status())
+        resp = effects_monitor_parameter(atoi(proto->list[1]), proto->list[2],
+                                         proto->list[3], atof(proto->list[4]));
+    else
         resp = -1;
-    sprintf(proto->response, "resp %i", resp);
+
+    char buffer[128];
+    sprintf(buffer, "resp %i", resp);
+    protocol_response(buffer, proto);
 }
 
-static void monitor_addr_set_cb(void *arg)
+static void monitor_addr_set_cb(proto_t *proto)
 {
-    protocol_t *proto = arg;
-
     int resp;
-    if (atoi(proto->received.data[3]) == 1) {
-        resp = monitor_start(proto->received.data[1], atoi(proto->received.data[2]));
-    } else {
+    if (atoi(proto->list[3]) == 1)
+        resp = monitor_start(proto->list[1], atoi(proto->list[2]));
+    else
         resp = monitor_stop();
-    }
-    sprintf(proto->response, "resp %i", resp);
+
+    char buffer[128];
+    sprintf(buffer, "resp %i", resp);
+    protocol_response(buffer, proto);
 }
 
-static void help_cb(void *arg)
+static void help_cb(proto_t *proto)
 {
-    protocol_t *proto = arg;
-    *(proto->response) = 0;
+    protocol_response("resp 0", proto);
 
     fprintf(stdout, HELP_MESSAGE);
     fflush(stdout);
 }
 
-static void quit_cb(void *arg)
+static void quit_cb(proto_t *proto)
 {
-    protocol_t *proto = arg;
-    *(proto->response) = 0;
+    protocol_response("resp 0", proto);
 
     protocol_remove_commands();
     socket_finish();
@@ -251,12 +258,12 @@ static void quit_cb(void *arg)
 
 void interactive_mode(void)
 {
-    socket_msg_t msg;
+    msg_t msg;
     char *input;
 
     completer_init();
 
-    msg.origin = STDOUT_FILENO;
+    msg.sender_id = STDOUT_FILENO;
 
     while (1)
     {
@@ -265,14 +272,17 @@ void interactive_mode(void)
 
         if (input)
         {
-            msg.size = strlen(input);
-            msg.buffer = input;
-            protocol_parse(&msg);
-            printf("\n");
+            if (*input)
+            {
+                msg.data = input;
+                msg.data_size = strlen(input);
+                protocol_parse(&msg);
+                printf("\n");
 
-            add_history(input);
-            free(input);
-            input = NULL;
+                add_history(rl_line_buffer);
+                free(input);
+                input = NULL;
+            }
         }
         else break;
     }

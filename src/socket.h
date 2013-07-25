@@ -31,6 +31,8 @@
 ************************************************************************************************************************
 */
 
+#include "utils.h"       // just for get the msg_t struct
+
 
 /*
 ************************************************************************************************************************
@@ -51,12 +53,6 @@
 *           DATA TYPES
 ************************************************************************************************************************
 */
-
-typedef struct SOCKET_MSG_T {
-    int origin;
-    const char *buffer;
-    int size;
-} socket_msg_t;
 
 
 /*
@@ -81,7 +77,7 @@ typedef struct SOCKET_MSG_T {
 
 int socket_start(int port, int buffer_size);
 void socket_finish(void);
-void socket_set_receive_cb(void (*receive_cb)(void *arg));
+void socket_set_receive_cb(void (*receive_cb)(msg_t *msg));
 int socket_send(int destination, const char *buffer, int size);
 void socket_run(void);
 

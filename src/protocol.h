@@ -33,7 +33,7 @@
 */
 
 #include "utils.h"
-
+#include "socket.h"
 
 /*
 ************************************************************************************************************************
@@ -48,11 +48,16 @@
 ************************************************************************************************************************
 */
 
-#define PROTOCOL_MAX_COMMANDS       12
+#define PROTOCOL_MAX_COMMANDS       20
+
+// error messages configuration
 #define MESSAGE_COMMAND_NOT_FOUND   "not found"
 #define MESSAGE_MANY_ARGUMENTS      "many arguments"
 #define MESSAGE_FEW_ARGUMENTS       "few arguments"
 #define MESSAGE_INVALID_ARGUMENT    "invalid argument"
+
+// defines the function to send responses to sender
+#define SEND_TO_SENDER(id,msg,len)  socket_send((id),(msg),(len)+1)
 
 
 /*
@@ -61,10 +66,13 @@
 ************************************************************************************************************************
 */
 
-typedef struct PROTOCOL_T {
-    str_array_t received;
-    char response[32];
-} protocol_t;
+// This struct is used on callbacks argument
+typedef struct PROTO_T {
+    char **list;
+    uint32_t list_count;
+    char *response;
+    uint32_t response_size;
+} proto_t;
 
 
 /*
@@ -87,8 +95,9 @@ typedef struct PROTOCOL_T {
 ************************************************************************************************************************
 */
 
-void protocol_parse(void *arg);
-void protocol_add_command(const char *command, void (*callback)(void *arg));
+void protocol_parse(msg_t *msg);
+void protocol_add_command(const char *command, void (*callback)(proto_t *proto));
+void protocol_response(const char *response, proto_t *proto);
 void protocol_remove_commands(void);
 void protocol_verbose(int verbose);
 
