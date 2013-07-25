@@ -83,9 +83,19 @@ param_set <instance_number> <param_symbol> <param_value>\n\
 param_get <instance_number> <param_symbol>\n\
     e.g.: param_get 0 gain\n\
 \n\
+param_monitor <instance_number> <param_symbol> <cond_op> <value>\n\
+    e.g: param_monitor 0 gain > 2.50\n\
+\n\
 bypass <instance_number> <bypass_value>\n\
     e.g.: bypass 0 1\n\
     bypass_value = 1 bypass the effect and bypass_value = 0 process the effect\n\
+\n\
+load <filename>\n\
+    e.g.: load my_preset\n\
+\n\
+save <filename>\n\
+    e.g.: save my_preset\n\
+    this command saves the history of typed commands\n\
 \n\
 help\n\
     show this message\n\
@@ -238,10 +248,59 @@ static void monitor_addr_set_cb(proto_t *proto)
     protocol_response(buffer, proto);
 }
 
+static void load_cb(proto_t *proto)
+{
+    FILE *fp;
+
+    fp = fopen(proto->list[1], "r");
+    if (fp)
+    {
+        char line[1024];
+        msg_t msg;
+        msg.sender_id = STDOUT_FILENO;
+
+        while (fgets(line, sizeof(line), fp))
+        {
+            printf(line);
+
+            /* removes the \n at end of line */
+            line[strlen(line)-1] = 0;
+
+            /* fills the message struct and parse it */
+            msg.data = line;
+            msg.data_size = strlen(line);
+            protocol_parse(&msg);
+
+            printf("\n");
+        }
+
+        fclose(fp);
+    }
+    else
+    {
+        protocol_response("error: can't open the file", proto);
+    }
+}
+
+static void save_cb(proto_t *proto)
+{
+    HIST_ENTRY *entry;
+
+    if (history_length > 0)
+    {
+        /* removes the save command from history */
+        entry = remove_history(history_length-1);
+        free_history_entry(entry);
+
+        /* saves the history in the file */
+        write_history(proto->list[1]);
+        protocol_response("resp 0", proto);
+    }
+}
+
 static void help_cb(proto_t *proto)
 {
-    protocol_response("resp 0", proto);
-
+    proto->response = 0;
     fprintf(stdout, HELP_MESSAGE);
     fflush(stdout);
 }
@@ -274,12 +333,15 @@ void interactive_mode(void)
         {
             if (*input)
             {
+                /* adds the line on history */
+                add_history(input);
+
+                /* fills the message struct and parse it */
                 msg.data = input;
                 msg.data_size = strlen(input);
                 protocol_parse(&msg);
                 printf("\n");
 
-                add_history(rl_line_buffer);
                 free(input);
                 input = NULL;
             }
@@ -373,6 +435,8 @@ int main(int argc, char **argv)
     protocol_add_command(EFFECT_PARAM_GET, effects_get_param_cb);
     protocol_add_command(EFFECT_PARAM_MON, effects_monitor_param_cb);
     protocol_add_command(MONITOR_ADDR_SET, monitor_addr_set_cb);
+    protocol_add_command(LOAD_COMMANDS, load_cb);
+    protocol_add_command(SAVE_COMMANDS, save_cb);
     protocol_add_command(HELP, help_cb);
     protocol_add_command(QUIT, quit_cb);
 

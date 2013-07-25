@@ -54,6 +54,9 @@ static char *g_commands[] = {
   "bypass",
   "param_set",
   "param_get",
+  "param_monitor",
+  "load",
+  "save",
   "help",
   "quit",
   NULL

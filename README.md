@@ -93,6 +93,13 @@ The commands supported by mod-host are:
         e.g.: bypass 0 1
         bypass_value = 1 bypass the effect and bypass_value = 0 process the effect
 
+    load <filename>
+        e.g.: load my_preset
+
+    save <filename>
+        e.g.: save my_preset
+        this command saves the history of typed commands
+
     help
         show a help message
 
@@ -117,6 +124,7 @@ following:
 | -3      | ERR_INSTANCE_NON_EXISTS         |
 | -101    | ERR_LV2_INVALID_URI             |
 | -102    | ERR_LILV_INSTANTIATION          |
+| -103    | ERR_LV2_INVALID_PARAM_SYMBOL    |
 | -201    | ERR_JACK_CLIENT_CREATION        |
 | -202    | ERR_JACK_CLIENT_ACTIVATION      |
 | -203    | ERR_JACK_CLIENT_DEACTIVATION    |

@@ -60,6 +60,8 @@
 #define EFFECT_PARAM_GET    "param_get %i %s"
 #define EFFECT_PARAM_MON    "param_monitor %i %s %s %f"
 #define MONITOR_ADDR_SET    "monitor %s %i %i"
+#define LOAD_COMMANDS       "load %s"
+#define SAVE_COMMANDS       "save %s"
 #define HELP                "help"
 #define QUIT                "quit"
 
