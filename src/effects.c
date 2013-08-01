@@ -198,30 +198,30 @@ typedef struct URIDS_T {
 ************************************************************************************************************************
 */
 
-static effect_t Effects[MAX_INSTANCES];
+static effect_t g_effects[MAX_INSTANCES];
 
 /* Jack */
-static jack_client_t *Jack_Global_Client;
-static jack_nframes_t Sample_Rate, BlockLength;
-static size_t MidiBufferSize;
+static jack_client_t *g_jack_global_client;
+static jack_nframes_t g_sample_rate, g_block_length;
+static size_t g_midi_buffer_size;
 
 /* LV2 and Lilv */
-static LilvWorld *LV2_Data;
-static const LilvPlugins *Plugins;
+static LilvWorld *g_lv2_data;
+static const LilvPlugins *g_plugins;
 
 /* Global features */
-static Symap* symap;
-static urids_t urids;
-static LV2_URI_Map_Feature uri_map;
-static LV2_URID_Map urid_map;
-static LV2_URID_Unmap urid_unmap;
-static LV2_Options_Option options[5];
+static Symap* g_symap;
+static urids_t g_urids;
+static LV2_URI_Map_Feature g_uri_map;
+static LV2_URID_Map g_urid_map;
+static LV2_URID_Unmap g_urid_unmap;
+static LV2_Options_Option g_options[5];
 
-static LV2_Feature uri_map_feature = {LV2_URI_MAP_URI, &uri_map};
-static LV2_Feature urid_map_feature = {LV2_URID__map, &urid_map};
-static LV2_Feature urid_unmap_feature = {LV2_URID__unmap, &urid_unmap};
-static LV2_Feature options_feature = {LV2_OPTIONS__options, &options};
-static LV2_Feature buf_size_features[3] = {
+static LV2_Feature g_uri_map_feature = {LV2_URI_MAP_URI, &g_uri_map};
+static LV2_Feature g_urid_map_feature = {LV2_URID__map, &g_urid_map};
+static LV2_Feature g_urid_unmap_feature = {LV2_URID__unmap, &g_urid_unmap};
+static LV2_Feature g_options_feature = {LV2_OPTIONS__options, &g_options};
+static LV2_Feature g_buf_size_features[3] = {
     { LV2_BUF_SIZE__powerOf2BlockLength, NULL },
     { LV2_BUF_SIZE__fixedBlockLength, NULL },
     { LV2_BUF_SIZE__boundedBlockLength, NULL }
@@ -259,35 +259,33 @@ static void InstanceDelete(int effect_id)
 {
     if (INSTANCE_IS_VALID(effect_id))
     {
-        Effects[effect_id].lilv_instance = NULL;
+        g_effects[effect_id].lilv_instance = NULL;
     }
 }
-
 
 static int InstanceExist(int effect_id)
 {
     if (INSTANCE_IS_VALID(effect_id))
     {
-        return (int)(Effects[effect_id].lilv_instance != NULL);
+        return (int)(g_effects[effect_id].lilv_instance != NULL);
     }
 
     return 0;
 }
 
-
 static void AllocatePortBuffers(effect_t* effect)
 {
     uint32_t i;
 
-    MidiBufferSize = jack_port_type_get_buffer_size(effect->jack_client, JACK_DEFAULT_MIDI_TYPE);
+    g_midi_buffer_size = jack_port_type_get_buffer_size(effect->jack_client, JACK_DEFAULT_MIDI_TYPE);
     for (i = 0; i < effect->event_ports_count; i++)
     {
         lv2_evbuf_free(effect->event_ports[i]->evbuf);
         effect->event_ports[i]->evbuf = lv2_evbuf_new(
-            MidiBufferSize,
+            g_midi_buffer_size,
             effect->event_ports[i]->old_ev_api ? LV2_EVBUF_EVENT : LV2_EVBUF_ATOM,
-            urid_map.map(urid_map.handle, lilv_node_as_string(lilv_new_uri(LV2_Data, LV2_ATOM__Chunk))),
-            urid_map.map(urid_map.handle, lilv_node_as_string(lilv_new_uri(LV2_Data, LV2_ATOM__Sequence))));
+            g_urid_map.map(g_urid_map.handle, lilv_node_as_string(lilv_new_uri(g_lv2_data, LV2_ATOM__Chunk))),
+            g_urid_map.map(g_urid_map.handle, lilv_node_as_string(lilv_new_uri(g_lv2_data, LV2_ATOM__Sequence))));
 
         LV2_Atom_Sequence *buf;
         buf = lv2_evbuf_get_buffer(effect->event_ports[i]->evbuf);
@@ -295,16 +293,14 @@ static void AllocatePortBuffers(effect_t* effect)
     }
 }
 
-
 static int BufferSize(jack_nframes_t nframes, void* data)
 {
     effect_t *effect = data;
-    BlockLength = nframes;
-    MidiBufferSize = jack_port_type_get_buffer_size(effect->jack_client, JACK_DEFAULT_MIDI_TYPE);
+    g_block_length = nframes;
+    g_midi_buffer_size = jack_port_type_get_buffer_size(effect->jack_client, JACK_DEFAULT_MIDI_TYPE);
     AllocatePortBuffers(effect);
     return SUCCESS;
 }
-
 
 static int ProcessAudio(jack_nframes_t nframes, void *arg)
 {
@@ -328,7 +324,7 @@ static int ProcessAudio(jack_nframes_t nframes, void *arg)
         {
             jack_midi_event_t ev;
             jack_midi_event_get(&ev, buf, j);
-            if (!lv2_evbuf_write(&iter, ev.time, 0, urids.midi_MidiEvent, ev.size, ev.buffer))
+            if (!lv2_evbuf_write(&iter, ev.time, 0, g_urids.midi_MidiEvent, ev.size, ev.buffer))
             {
                 fprintf(stderr, "lv2 evbuf write failed\n");
             }
@@ -343,7 +339,7 @@ static int ProcessAudio(jack_nframes_t nframes, void *arg)
     /* Bypass */
     if (effect->bypass)
     {
-        /* Plugins with audio inputs */
+        /* g_plugins with audio inputs */
         if (effect->input_audio_ports_count > 0)
         {
             for (i = 0; i < effect->output_audio_ports_count; i++)
@@ -436,7 +432,7 @@ static int ProcessAudio(jack_nframes_t nframes, void *arg)
                 uint32_t frames, subframes, type, size;
                 uint8_t* body;
                 lv2_evbuf_get(i, &frames, &subframes, &type, &size, &body);
-                if (type == urids.midi_MidiEvent)
+                if (type == g_urids.midi_MidiEvent)
                 {
                     jack_midi_event_write(buf, frames, body, size);
                 }
@@ -445,7 +441,6 @@ static int ProcessAudio(jack_nframes_t nframes, void *arg)
     }
     return SUCCESS;
 }
-
 
 static void GetFeatures(effect_t *effect)
 {
@@ -460,7 +455,7 @@ static void GetFeatures(effect_t *effect)
     work_schedule_feature->URI = LV2_WORKER__schedule;
     work_schedule_feature->data = NULL;
 
-    LilvNode *lilv_worker_schedule = lilv_new_uri(LV2_Data, LV2_WORKER__schedule);
+    LilvNode *lilv_worker_schedule = lilv_new_uri(g_lv2_data, LV2_WORKER__schedule);
     if (lilv_plugin_has_feature(effect->lilv_plugin, lilv_worker_schedule))
     {
         LV2_Worker_Schedule *schedule = (LV2_Worker_Schedule*) malloc(sizeof(LV2_Worker_Schedule));
@@ -473,19 +468,18 @@ static void GetFeatures(effect_t *effect)
     /* Buf-size Feature is the same for all instances (global declaration) */
 
     /* Features array */
-    features[URI_MAP_FEATURE]           = &uri_map_feature;
-    features[URID_MAP_FEATURE]          = &urid_map_feature;
-    features[URID_UNMAP_FEATURE]        = &urid_unmap_feature;
-    features[OPTIONS_FEATURE]           = &options_feature;
+    features[URI_MAP_FEATURE]           = &g_uri_map_feature;
+    features[URID_MAP_FEATURE]          = &g_urid_map_feature;
+    features[URID_UNMAP_FEATURE]        = &g_urid_unmap_feature;
+    features[OPTIONS_FEATURE]           = &g_options_feature;
     features[WORKER_FEATURE]            = work_schedule_feature;
-    features[BUF_SIZE_POWER2_FEATURE]   = &buf_size_features[0];
-    features[BUF_SIZE_FIXED_FEATURE]    = &buf_size_features[1];
-    features[BUF_SIZE_BOUNDED_FEATURE]  = &buf_size_features[2];
+    features[BUF_SIZE_POWER2_FEATURE]   = &g_buf_size_features[0];
+    features[BUF_SIZE_FIXED_FEATURE]    = &g_buf_size_features[1];
+    features[BUF_SIZE_BOUNDED_FEATURE]  = &g_buf_size_features[2];
     features[FEATURE_TERMINATOR]        = NULL;
 
     effect->features = features;
 }
-
 
 void FreeFeatures(effect_t *effect)
 {
@@ -511,114 +505,112 @@ void FreeFeatures(effect_t *effect)
 int effects_init(void)
 {
     /* This global client is for connections / disconnections */
-    Jack_Global_Client = jack_client_open("Global", JackNoStartServer, NULL);
+    g_jack_global_client = jack_client_open("Global", JackNoStartServer, NULL);
 
-    if (Jack_Global_Client == NULL)
+    if (g_jack_global_client == NULL)
     {
         return ERR_JACK_CLIENT_CREATION;
     }
 
     /* Get sample rate */
-    Sample_Rate = jack_get_sample_rate(Jack_Global_Client);
+    g_sample_rate = jack_get_sample_rate(g_jack_global_client);
 
     /* Get buffers size */
-    BlockLength = jack_get_buffer_size(Jack_Global_Client);
-    MidiBufferSize = jack_port_type_get_buffer_size(Jack_Global_Client, JACK_DEFAULT_MIDI_TYPE);
+    g_block_length = jack_get_buffer_size(g_jack_global_client);
+    g_midi_buffer_size = jack_port_type_get_buffer_size(g_jack_global_client, JACK_DEFAULT_MIDI_TYPE);
 
     /* Load all LV2 data */
-    LV2_Data = lilv_world_new();
-    lilv_world_load_all(LV2_Data);
-    Plugins = lilv_world_get_all_plugins(LV2_Data);
+    g_lv2_data = lilv_world_new();
+    lilv_world_load_all(g_lv2_data);
+    g_plugins = lilv_world_get_all_plugins(g_lv2_data);
 
     /* URI and URID Feature initialization */
     urid_sem_init();
-    symap = symap_new();
+    g_symap = symap_new();
 
-    uri_map.callback_data = symap;
-    uri_map.uri_to_id = &uri_to_id;
+    g_uri_map.callback_data = g_symap;
+    g_uri_map.uri_to_id = &uri_to_id;
 
-    urid_map.handle = symap;
-    urid_map.map = urid_to_id;
-    urid_unmap.handle = symap;
-    urid_unmap.unmap = id_to_urid;
+    g_urid_map.handle = g_symap;
+    g_urid_map.map = urid_to_id;
+    g_urid_unmap.handle = g_symap;
+    g_urid_unmap.unmap = id_to_urid;
 
-    urids.atom_Float           = urid_to_id(symap, LV2_ATOM__Float);
-    urids.atom_Int             = urid_to_id(symap, LV2_ATOM__Int);
-    urids.atom_eventTransfer   = urid_to_id(symap, LV2_ATOM__eventTransfer);
-    urids.bufsz_maxBlockLength = urid_to_id(symap, LV2_BUF_SIZE__maxBlockLength);
-    urids.bufsz_minBlockLength = urid_to_id(symap, LV2_BUF_SIZE__minBlockLength);
-    urids.bufsz_sequenceSize   = urid_to_id(symap, LV2_BUF_SIZE__sequenceSize);
-    urids.midi_MidiEvent       = urid_to_id(symap, LV2_MIDI__MidiEvent);
-    urids.param_sampleRate     = urid_to_id(symap, LV2_PARAMETERS__sampleRate);
-    urids.patch_Set            = urid_to_id(symap, LV2_PATCH__Set);
-    urids.patch_property       = urid_to_id(symap, LV2_PATCH__property);
-    urids.patch_value          = urid_to_id(symap, LV2_PATCH__value);
-    urids.time_Position        = urid_to_id(symap, LV2_TIME__Position);
-    urids.time_bar             = urid_to_id(symap, LV2_TIME__bar);
-    urids.time_barBeat         = urid_to_id(symap, LV2_TIME__barBeat);
-    urids.time_beatUnit        = urid_to_id(symap, LV2_TIME__beatUnit);
-    urids.time_beatsPerBar     = urid_to_id(symap, LV2_TIME__beatsPerBar);
-    urids.time_beatsPerMinute  = urid_to_id(symap, LV2_TIME__beatsPerMinute);
-    urids.time_frame           = urid_to_id(symap, LV2_TIME__frame);
-    urids.time_speed           = urid_to_id(symap, LV2_TIME__speed);
+    g_urids.atom_Float           = urid_to_id(g_symap, LV2_ATOM__Float);
+    g_urids.atom_Int             = urid_to_id(g_symap, LV2_ATOM__Int);
+    g_urids.atom_eventTransfer   = urid_to_id(g_symap, LV2_ATOM__eventTransfer);
+    g_urids.bufsz_maxBlockLength = urid_to_id(g_symap, LV2_BUF_SIZE__maxBlockLength);
+    g_urids.bufsz_minBlockLength = urid_to_id(g_symap, LV2_BUF_SIZE__minBlockLength);
+    g_urids.bufsz_sequenceSize   = urid_to_id(g_symap, LV2_BUF_SIZE__sequenceSize);
+    g_urids.midi_MidiEvent       = urid_to_id(g_symap, LV2_MIDI__MidiEvent);
+    g_urids.param_sampleRate     = urid_to_id(g_symap, LV2_PARAMETERS__sampleRate);
+    g_urids.patch_Set            = urid_to_id(g_symap, LV2_PATCH__Set);
+    g_urids.patch_property       = urid_to_id(g_symap, LV2_PATCH__property);
+    g_urids.patch_value          = urid_to_id(g_symap, LV2_PATCH__value);
+    g_urids.time_Position        = urid_to_id(g_symap, LV2_TIME__Position);
+    g_urids.time_bar             = urid_to_id(g_symap, LV2_TIME__bar);
+    g_urids.time_barBeat         = urid_to_id(g_symap, LV2_TIME__barBeat);
+    g_urids.time_beatUnit        = urid_to_id(g_symap, LV2_TIME__beatUnit);
+    g_urids.time_beatsPerBar     = urid_to_id(g_symap, LV2_TIME__beatsPerBar);
+    g_urids.time_beatsPerMinute  = urid_to_id(g_symap, LV2_TIME__beatsPerMinute);
+    g_urids.time_frame           = urid_to_id(g_symap, LV2_TIME__frame);
+    g_urids.time_speed           = urid_to_id(g_symap, LV2_TIME__speed);
 
     /* Options Feature initialization */
-    options[0].context = LV2_OPTIONS_INSTANCE;
-    options[0].subject = 0;
-    options[0].key = urids.param_sampleRate;
-    options[0].size = sizeof(float);
-    options[0].type = urids.atom_Int;
-    options[0].value = &BlockLength;
+    g_options[0].context = LV2_OPTIONS_INSTANCE;
+    g_options[0].subject = 0;
+    g_options[0].key = g_urids.param_sampleRate;
+    g_options[0].size = sizeof(float);
+    g_options[0].type = g_urids.atom_Int;
+    g_options[0].value = &g_block_length;
 
-    options[1].context = LV2_OPTIONS_INSTANCE;
-    options[1].subject = 0;
-    options[1].key = urids.bufsz_minBlockLength;
-    options[1].size = sizeof(int32_t);
-    options[1].type = urids.atom_Int;
-    options[1].value = &BlockLength;
+    g_options[1].context = LV2_OPTIONS_INSTANCE;
+    g_options[1].subject = 0;
+    g_options[1].key = g_urids.bufsz_minBlockLength;
+    g_options[1].size = sizeof(int32_t);
+    g_options[1].type = g_urids.atom_Int;
+    g_options[1].value = &g_block_length;
 
-    options[2].context = LV2_OPTIONS_INSTANCE;
-    options[2].subject = 0;
-    options[2].key = urids.bufsz_maxBlockLength;
-    options[2].size = sizeof(int32_t);
-    options[2].type = urids.atom_Int;
-    options[2].value = &BlockLength;
+    g_options[2].context = LV2_OPTIONS_INSTANCE;
+    g_options[2].subject = 0;
+    g_options[2].key = g_urids.bufsz_maxBlockLength;
+    g_options[2].size = sizeof(int32_t);
+    g_options[2].type = g_urids.atom_Int;
+    g_options[2].value = &g_block_length;
 
-    options[3].context = LV2_OPTIONS_INSTANCE;
-    options[3].subject = 0;
-    options[3].key = urids.bufsz_sequenceSize;
-    options[3].size = sizeof(int32_t);
-    options[3].type = urids.atom_Int;
-    options[3].value = &MidiBufferSize;
+    g_options[3].context = LV2_OPTIONS_INSTANCE;
+    g_options[3].subject = 0;
+    g_options[3].key = g_urids.bufsz_sequenceSize;
+    g_options[3].size = sizeof(int32_t);
+    g_options[3].type = g_urids.atom_Int;
+    g_options[3].value = &g_midi_buffer_size;
 
-    options[4].context = LV2_OPTIONS_INSTANCE;
-    options[4].subject = 0;
-    options[4].key = 0;
-    options[4].size = 0;
-    options[4].type = 0;
-    options[4].value = NULL;
+    g_options[4].context = LV2_OPTIONS_INSTANCE;
+    g_options[4].subject = 0;
+    g_options[4].key = 0;
+    g_options[4].size = 0;
+    g_options[4].type = 0;
+    g_options[4].value = NULL;
 
     /* Init lilv_instance as NULL for all plugins */
     int i;
     for (i = 0; i < MAX_INSTANCES; i++)
     {
-        Effects[i].lilv_instance = NULL;
+        g_effects[i].lilv_instance = NULL;
     }
 
     return SUCCESS;
 }
 
-
 int effects_finish(void)
 {
     effects_remove(REMOVE_ALL);
-    jack_client_close(Jack_Global_Client);
-    symap_free(symap);
-    lilv_world_free(LV2_Data);
+    jack_client_close(g_jack_global_client);
+    symap_free(g_symap);
+    lilv_world_free(g_lv2_data);
 
     return SUCCESS;
 }
-
 
 int effects_add(const char *uid, int instance)
 {
@@ -649,7 +641,7 @@ int effects_add(const char *uid, int instance)
     if (!INSTANCE_IS_VALID(instance)) return ERR_INSTANCE_INVALID;
     if (InstanceExist(instance)) return ERR_INSTANCE_ALREADY_EXISTS;
 
-    effect = &Effects[instance];
+    effect = &g_effects[instance];
 
     /* Init the struct */
     effect->instance = instance;
@@ -688,19 +680,19 @@ int effects_add(const char *uid, int instance)
     effect->jack_client = jack_client;
 
     /* Get the plugin */
-    plugin_uri = lilv_new_uri(LV2_Data, uid);
-    plugin = lilv_plugins_get_by_uri(Plugins, plugin_uri);
+    plugin_uri = lilv_new_uri(g_lv2_data, uid);
+    plugin = lilv_plugins_get_by_uri(g_plugins, plugin_uri);
     lilv_node_free(plugin_uri);
 
     if (!plugin)
     {
         /* If the plugin are not found reload all plugins */
-        lilv_world_load_all(LV2_Data);
-        Plugins = lilv_world_get_all_plugins(LV2_Data);
+        lilv_world_load_all(g_lv2_data);
+        g_plugins = lilv_world_get_all_plugins(g_lv2_data);
 
         /* Try get the plugin again */
-        plugin_uri = lilv_new_uri(LV2_Data, uid);
-        plugin = lilv_plugins_get_by_uri(Plugins, plugin_uri);
+        plugin_uri = lilv_new_uri(g_lv2_data, uid);
+        plugin = lilv_plugins_get_by_uri(g_plugins, plugin_uri);
         lilv_node_free(plugin_uri);
 
         if (!plugin)
@@ -717,7 +709,7 @@ int effects_add(const char *uid, int instance)
     GetFeatures(effect);
 
     /* Create and activate the plugin instance */
-    lilv_instance = lilv_plugin_instantiate(plugin, Sample_Rate, effect->features);
+    lilv_instance = lilv_plugin_instantiate(plugin, g_sample_rate, effect->features);
 
     if (!lilv_instance)
     {
@@ -735,7 +727,7 @@ int effects_add(const char *uid, int instance)
     effect->worker.responses = NULL;
     effect->worker.response  = NULL;
 
-    lilv_worker_interface = lilv_new_uri(LV2_Data, LV2_WORKER__interface);
+    lilv_worker_interface = lilv_new_uri(g_lv2_data, LV2_WORKER__interface);
     if (lilv_plugin_has_extension_data(effect->lilv_plugin, lilv_worker_interface))
     {
         LV2_Worker_Interface * worker_interface;
@@ -747,13 +739,13 @@ int effects_add(const char *uid, int instance)
 
     /* Create the URI for identify the ports */
     ports_count = lilv_plugin_get_num_ports(plugin);
-    lilv_audio = lilv_new_uri(LV2_Data, LILV_URI_AUDIO_PORT);
-    lilv_control = lilv_new_uri(LV2_Data, LILV_URI_CONTROL_PORT);
-    lilv_input = lilv_new_uri(LV2_Data, LILV_URI_INPUT_PORT);
-    lilv_output = lilv_new_uri(LV2_Data, LILV_URI_OUTPUT_PORT);
-    lilv_event = lilv_new_uri(LV2_Data, LILV_URI_EVENT_PORT);
-    lilv_atom_port = lilv_new_uri(LV2_Data, LV2_ATOM__AtomPort);
-    lilv_midi = lilv_new_uri(LV2_Data, LILV_URI_MIDI_EVENT);
+    lilv_audio = lilv_new_uri(g_lv2_data, LILV_URI_AUDIO_PORT);
+    lilv_control = lilv_new_uri(g_lv2_data, LILV_URI_CONTROL_PORT);
+    lilv_input = lilv_new_uri(g_lv2_data, LILV_URI_INPUT_PORT);
+    lilv_output = lilv_new_uri(g_lv2_data, LILV_URI_OUTPUT_PORT);
+    lilv_event = lilv_new_uri(g_lv2_data, LILV_URI_EVENT_PORT);
+    lilv_atom_port = lilv_new_uri(g_lv2_data, LV2_ATOM__AtomPort);
+    lilv_midi = lilv_new_uri(g_lv2_data, LILV_URI_MIDI_EVENT);
 
     /* Allocate memory to ports */
     audio_ports_count  = 0;
@@ -804,7 +796,7 @@ int effects_add(const char *uid, int instance)
             effect->ports[i]->type = TYPE_AUDIO;
 
             /* Allocate memory to audio buffer */
-            audio_buffer = (float *) calloc(Sample_Rate, sizeof(float));
+            audio_buffer = (float *) calloc(g_sample_rate, sizeof(float));
 
             if (!audio_buffer)
             {
@@ -813,7 +805,7 @@ int effects_add(const char *uid, int instance)
                 goto error;
             }
             effect->ports[i]->buffer = audio_buffer;
-            effect->ports[i]->buffer_count = Sample_Rate;
+            effect->ports[i]->buffer_count = g_sample_rate;
             lilv_instance_connect_port(lilv_instance, i, audio_buffer);
 
             /* Jack port creation */
@@ -990,7 +982,6 @@ int effects_add(const char *uid, int instance)
     return error;
 }
 
-
 int effects_remove(int effect_id)
 {
     uint32_t i;
@@ -1027,7 +1018,7 @@ int effects_remove(int effect_id)
     {
         if (InstanceExist(j))
         {
-            effect = &Effects[j];
+            effect = &g_effects[j];
             FreeFeatures(effect);
 
             if (jack_deactivate(effect->jack_client) != 0) return ERR_JACK_CLIENT_DEACTIVATION;
@@ -1061,13 +1052,12 @@ int effects_remove(int effect_id)
     return SUCCESS;
 }
 
-
 int effects_connect(const char *portA, const char *portB)
 {
     int ret;
 
-    ret = jack_connect(Jack_Global_Client, portA, portB);
-    if (ret != 0) ret = jack_connect(Jack_Global_Client, portB, portA);
+    ret = jack_connect(g_jack_global_client, portA, portB);
+    if (ret != 0) ret = jack_connect(g_jack_global_client, portB, portA);
     if (ret == EEXIST) ret = 0;
 
     if (ret != 0) return ERR_JACK_PORT_CONNECTION;
@@ -1075,20 +1065,18 @@ int effects_connect(const char *portA, const char *portB)
     return ret;
 }
 
-
 int effects_disconnect(const char *portA, const char *portB)
 {
     int ret;
 
-    ret = jack_disconnect(Jack_Global_Client, portA, portB);
-    if (ret != 0) ret = jack_disconnect(Jack_Global_Client, portB, portA);
+    ret = jack_disconnect(g_jack_global_client, portA, portB);
+    if (ret != 0) ret = jack_disconnect(g_jack_global_client, portB, portA);
     if (ret == EEXIST) ret = 0;
 
     if (ret != 0) return ERR_JACK_PORT_DISCONNECTION;
 
     return ret;
 }
-
 
 int effects_set_parameter(int effect_id, const char *control_symbol, float value)
 {
@@ -1102,10 +1090,10 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
 
     if (InstanceExist(effect_id))
     {
-        for (i = 0; i < Effects[effect_id].control_ports_count; i++)
+        for (i = 0; i < g_effects[effect_id].control_ports_count; i++)
         {
-            lilv_plugin = Effects[effect_id].lilv_plugin;
-            lilv_port = Effects[effect_id].control_ports[i]->lilv_port;
+            lilv_plugin = g_effects[effect_id].lilv_plugin;
+            lilv_port = g_effects[effect_id].control_ports[i]->lilv_port;
             symbol_node = lilv_port_get_symbol(lilv_plugin, lilv_port);
             symbol = lilv_node_as_string(symbol_node);
 
@@ -1121,7 +1109,7 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
 
                 if (value > max) value = max;
                 else if (value < min) value = min;
-                *(Effects[effect_id].control_ports[i]->buffer) = value;
+                *(g_effects[effect_id].control_ports[i]->buffer) = value;
 
                 return SUCCESS;
             }
@@ -1158,19 +1146,19 @@ int effects_monitor_parameter(int effect_id, const char *control_symbol, const c
         return -1;
 
 
-    const LilvNode *symbol = lilv_new_string(LV2_Data, control_symbol);
-    const LilvPort *port = lilv_plugin_get_port_by_symbol(Effects[effect_id].lilv_plugin, symbol);
+    const LilvNode *symbol = lilv_new_string(g_lv2_data, control_symbol);
+    const LilvPort *port = lilv_plugin_get_port_by_symbol(g_effects[effect_id].lilv_plugin, symbol);
 
-    int port_id = lilv_port_get_index(Effects[effect_id].lilv_plugin, port);
+    int port_id = lilv_port_get_index(g_effects[effect_id].lilv_plugin, port);
 
-    Effects[effect_id].monitors_count++;
-    Effects[effect_id].monitors = (monitor_t**)realloc(Effects[effect_id].monitors, sizeof(monitor_t *) * Effects[effect_id].monitors_count);
-    int idx = Effects[effect_id].monitors_count - 1;
-    Effects[effect_id].monitors[idx] = (monitor_t*)malloc(sizeof(monitor_t));
-    Effects[effect_id].monitors[idx]->port_id = port_id;
-    Effects[effect_id].monitors[idx]->op = iop;
-    Effects[effect_id].monitors[idx]->value = value;
-    Effects[effect_id].monitors[idx]->last_notified_value = 0.0;
+    g_effects[effect_id].monitors_count++;
+    g_effects[effect_id].monitors = (monitor_t**)realloc(g_effects[effect_id].monitors, sizeof(monitor_t *) * g_effects[effect_id].monitors_count);
+    int idx = g_effects[effect_id].monitors_count - 1;
+    g_effects[effect_id].monitors[idx] = (monitor_t*)malloc(sizeof(monitor_t));
+    g_effects[effect_id].monitors[idx]->port_id = port_id;
+    g_effects[effect_id].monitors[idx]->op = iop;
+    g_effects[effect_id].monitors[idx]->value = value;
+    g_effects[effect_id].monitors[idx]->last_notified_value = 0.0;
     return 0;
 }
 
@@ -1186,10 +1174,10 @@ int effects_get_parameter(int effect_id, const char *control_symbol, float *valu
 
     if (InstanceExist(effect_id))
     {
-        for (i = 0; i < Effects[effect_id].control_ports_count; i++)
+        for (i = 0; i < g_effects[effect_id].control_ports_count; i++)
         {
-            lilv_plugin = Effects[effect_id].lilv_plugin;
-            lilv_port = Effects[effect_id].control_ports[i]->lilv_port;
+            lilv_plugin = g_effects[effect_id].lilv_plugin;
+            lilv_port = g_effects[effect_id].control_ports[i]->lilv_port;
             symbol_node = lilv_port_get_symbol(lilv_plugin, lilv_port);
             symbol = lilv_node_as_string(symbol_node);
 
@@ -1203,7 +1191,7 @@ int effects_get_parameter(int effect_id, const char *control_symbol, float *valu
                 if (lilv_node_is_float(lilv_maximum) || lilv_node_is_int(lilv_maximum) || lilv_node_is_bool(lilv_maximum))
                     max = lilv_node_as_float(lilv_maximum);
 
-                (*value) = *(Effects[effect_id].control_ports[i]->buffer);
+                (*value) = *(g_effects[effect_id].control_ports[i]->buffer);
                 if ((*value) > max) (*value) = max;
                 else if ((*value) < min) (*value) = min;
                 return SUCCESS;
@@ -1216,18 +1204,16 @@ int effects_get_parameter(int effect_id, const char *control_symbol, float *valu
     return ERR_INSTANCE_NON_EXISTS;
 }
 
-
 int effects_bypass(int effect_id, int value)
 {
     if (InstanceExist(effect_id))
     {
-        Effects[effect_id].bypass = value;
+        g_effects[effect_id].bypass = value;
         return SUCCESS;
     }
 
     return ERR_INSTANCE_NON_EXISTS;
 }
-
 
 int effects_get_controls_symbols(int effect_id, char** symbols)
 {
@@ -1238,7 +1224,7 @@ int effects_get_controls_symbols(int effect_id, char** symbols)
     }
 
     uint32_t i;
-    effect_t *effect = &Effects[effect_id];
+    effect_t *effect = &g_effects[effect_id];
     const LilvNode* symbol_node;
 
     for (i = 0; i < effect->control_ports_count; i++)
