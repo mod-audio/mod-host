@@ -54,6 +54,7 @@
 #include "lv2_evbuf.h"
 #include "worker.h"
 #include "symap.h"
+#include "atomic.h"
 
 
 /*
@@ -208,6 +209,7 @@ static effect_t Effects[MAX_INSTANCES];
 static jack_client_t *Jack_Global_Client;
 static jack_nframes_t Sample_Rate, BlockLength;
 static size_t MidiBufferSize;
+volatile int xruns;
 
 /* LV2 and Lilv */
 static LilvWorld *LV2_Data;
@@ -244,6 +246,7 @@ static void AllocatePortBuffers(effect_t* effect);
 static int BufferSize(jack_nframes_t nframes, void* data);
 static int ProcessAudio(jack_nframes_t nframes, void *arg);
 static void GetFeatures(effect_t *effect);
+static int XRun(void* data);
 
 
 /*
@@ -309,6 +312,11 @@ static int BufferSize(jack_nframes_t nframes, void* data)
 	return SUCCESS;
 }
 
+static int XRun(void* data)
+{
+    INC_ATOMIC(data);
+    return SUCCESS;
+}
 
 static int ProcessAudio(jack_nframes_t nframes, void *arg)
 {
@@ -515,10 +523,15 @@ int effects_init(void)
     /* This global client is for connections / disconnections */
     Jack_Global_Client = jack_client_open("Global", JackNoStartServer, NULL);
 
+
     if (Jack_Global_Client == NULL)
     {
         return ERR_JACK_CLIENT_CREATION;
     }
+
+    /* Initialise XRun Info */
+    xruns = 0;
+    jack_reset_max_delayed_usecs(Jack_Global_Client);
 
     /* Get sample rate */
     Sample_Rate = jack_get_sample_rate(Jack_Global_Client);
@@ -605,6 +618,15 @@ int effects_init(void)
     for (i = 0; i < MAX_INSTANCES; i++)
     {
         Effects[i].lilv_instance = NULL;
+    }
+
+    jack_set_xrun_callback(Jack_Global_Client, &XRun, &xruns);
+
+    /* Try activate the Jack client, this is needed for the xrun callback */
+    if (jack_activate(Jack_Global_Client) != 0)
+    {
+        fprintf(stderr, "can't activate Jack_Global_Client\n");
+        return ERR_JACK_CLIENT_ACTIVATION;
     }
 
     return SUCCESS;
@@ -1249,5 +1271,14 @@ int effects_get_controls_symbols(int effect_id, char** symbols)
 
     symbols[i] = NULL;
 
+    return SUCCESS;
+}
+
+int effects_get_xruns(int *number_of_xruns, float *max_delay)
+{
+    *number_of_xruns = xruns;
+    *max_delay = jack_get_max_delayed_usecs (Jack_Global_Client);
+    RESET_ATOMIC(&xruns);
+    jack_reset_max_delayed_usecs(Jack_Global_Client);
     return SUCCESS;
 }
