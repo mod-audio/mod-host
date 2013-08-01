@@ -71,17 +71,17 @@ zix_thread_create(ZixThread* thread,
                   void*      (*function)(void*),
                   void*      arg)
 {
-	*thread = CreateThread(NULL, stack_size,
-	                       (LPTHREAD_START_ROUTINE)function, arg,
-	                       0, NULL);
-	return *thread ? ZIX_STATUS_SUCCESS : ZIX_STATUS_ERROR;
+    *thread = CreateThread(NULL, stack_size,
+                           (LPTHREAD_START_ROUTINE)function, arg,
+                           0, NULL);
+    return *thread ? ZIX_STATUS_SUCCESS : ZIX_STATUS_ERROR;
 }
 
 static inline ZixStatus
 zix_thread_join(ZixThread thread, void** retval)
 {
-	return WaitForSingleObject(thread, INFINITE)
-		? ZIX_STATUS_SUCCESS : ZIX_STATUS_ERROR;
+    return WaitForSingleObject(thread, INFINITE)
+        ? ZIX_STATUS_SUCCESS : ZIX_STATUS_ERROR;
 }
 
 #else  /* !defined(_WIN32) */
@@ -92,31 +92,31 @@ zix_thread_create(ZixThread* thread,
                   void*      (*function)(void*),
                   void*      arg)
 {
-	pthread_attr_t attr;
-	pthread_attr_init(&attr);
-	pthread_attr_setstacksize(&attr, stack_size);
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setstacksize(&attr, stack_size);
 
-	const int ret = pthread_create(thread, NULL, function, arg);
-	pthread_attr_destroy(&attr);
+    const int ret = pthread_create(thread, NULL, function, arg);
+    pthread_attr_destroy(&attr);
 
-	if (ret == EAGAIN) {
-		return ZIX_STATUS_NO_MEM;
-	} else if (ret == EINVAL) {
-		return ZIX_STATUS_BAD_ARG;
-	} else if (ret == EPERM) {
-		return ZIX_STATUS_BAD_PERMS;
-	} else if (ret) {
-		return ZIX_STATUS_ERROR;
-	}
+    if (ret == EAGAIN) {
+        return ZIX_STATUS_NO_MEM;
+    } else if (ret == EINVAL) {
+        return ZIX_STATUS_BAD_ARG;
+    } else if (ret == EPERM) {
+        return ZIX_STATUS_BAD_PERMS;
+    } else if (ret) {
+        return ZIX_STATUS_ERROR;
+    }
 
-	return ZIX_STATUS_SUCCESS;
+    return ZIX_STATUS_SUCCESS;
 }
 
 static inline ZixStatus
 zix_thread_join(ZixThread thread, void** retval)
 {
-	return pthread_join(thread, retval)
-		? ZIX_STATUS_ERROR : ZIX_STATUS_SUCCESS;
+    return pthread_join(thread, retval)
+        ? ZIX_STATUS_ERROR : ZIX_STATUS_SUCCESS;
 }
 
 #endif

@@ -29,15 +29,15 @@ extern "C" {
    Format of actual buffer.
 */
 typedef enum {
-	/**
-	   An (old) ev:EventBuffer (LV2_Event_Buffer).
-	*/
-	LV2_EVBUF_EVENT,
+    /**
+       An (old) ev:EventBuffer (LV2_Event_Buffer).
+    */
+    LV2_EVBUF_EVENT,
 
-	/**
-	   A (new) atom:Sequence (LV2_Atom_Sequence).
-	*/
-	LV2_EVBUF_ATOM
+    /**
+       A (new) atom:Sequence (LV2_Atom_Sequence).
+    */
+    LV2_EVBUF_ATOM
 } LV2_Evbuf_Type;
 
 /**
@@ -49,8 +49,8 @@ typedef struct LV2_Evbuf_Impl LV2_Evbuf;
    An iterator over an LV2_Evbuf.
 */
 typedef struct {
-	LV2_Evbuf* evbuf;
-	uint32_t   offset;
+    LV2_Evbuf* evbuf;
+    uint32_t   offset;
 } LV2_Evbuf_Iterator;
 
 /**

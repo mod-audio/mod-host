@@ -99,117 +99,117 @@ zix_sem_try_wait(ZixSem* sem);
 #ifdef __APPLE__
 
 struct ZixSemImpl {
-	semaphore_t sem;
+    semaphore_t sem;
 };
 
 static inline ZixStatus
 zix_sem_init(ZixSem* sem, unsigned initial)
 {
-	return semaphore_create(mach_task_self(), &sem->sem, SYNC_POLICY_FIFO, 0)
-		? ZIX_STATUS_ERROR : ZIX_STATUS_SUCCESS;
+    return semaphore_create(mach_task_self(), &sem->sem, SYNC_POLICY_FIFO, 0)
+        ? ZIX_STATUS_ERROR : ZIX_STATUS_SUCCESS;
 }
 
 static inline void
 zix_sem_destroy(ZixSem* sem)
 {
-	semaphore_destroy(mach_task_self(), sem->sem);
+    semaphore_destroy(mach_task_self(), sem->sem);
 }
 
 static inline void
 zix_sem_post(ZixSem* sem)
 {
-	semaphore_signal(sem->sem);
+    semaphore_signal(sem->sem);
 }
 
 static inline void
 zix_sem_wait(ZixSem* sem)
 {
-	semaphore_wait(sem->sem);
+    semaphore_wait(sem->sem);
 }
 
 static inline bool
 zix_sem_try_wait(ZixSem* sem)
 {
-	const mach_timespec_t zero = { 0, 0 };
-	return semaphore_timedwait(sem->sem, zero) == KERN_SUCCESS;
+    const mach_timespec_t zero = { 0, 0 };
+    return semaphore_timedwait(sem->sem, zero) == KERN_SUCCESS;
 }
 
 #elif defined(_WIN32)
 
 struct ZixSemImpl {
-	HANDLE sem;
+    HANDLE sem;
 };
 
 static inline ZixStatus
 zix_sem_init(ZixSem* sem, unsigned initial)
 {
-	sem->sem = CreateSemaphore(NULL, initial, LONG_MAX, NULL);
-	return (sem->sem) ? ZIX_STATUS_ERROR : ZIX_STATUS_SUCCESS;
+    sem->sem = CreateSemaphore(NULL, initial, LONG_MAX, NULL);
+    return (sem->sem) ? ZIX_STATUS_ERROR : ZIX_STATUS_SUCCESS;
 }
 
 static inline void
 zix_sem_destroy(ZixSem* sem)
 {
-	CloseHandle(sem->sem);
+    CloseHandle(sem->sem);
 }
 
 static inline void
 zix_sem_post(ZixSem* sem)
 {
-	ReleaseSemaphore(sem->sem, 1, NULL);
+    ReleaseSemaphore(sem->sem, 1, NULL);
 }
 
 static inline void
 zix_sem_wait(ZixSem* sem)
 {
-	WaitForSingleObject(sem->sem, INFINITE);
+    WaitForSingleObject(sem->sem, INFINITE);
 }
 
 static inline bool
 zix_sem_try_wait(ZixSem* sem)
 {
-	WaitForSingleObject(sem->sem, 0);
+    WaitForSingleObject(sem->sem, 0);
 }
 
 #else  /* !defined(__APPLE__) && !defined(_WIN32) */
 
 struct ZixSemImpl {
-	sem_t sem;
+    sem_t sem;
 };
 
 static inline ZixStatus
 zix_sem_init(ZixSem* sem, unsigned initial)
 {
-	return sem_init(&sem->sem, 0, initial)
-		? ZIX_STATUS_ERROR : ZIX_STATUS_SUCCESS;
+    return sem_init(&sem->sem, 0, initial)
+        ? ZIX_STATUS_ERROR : ZIX_STATUS_SUCCESS;
 }
 
 static inline void
 zix_sem_destroy(ZixSem* sem)
 {
-	sem_destroy(&sem->sem);
+    sem_destroy(&sem->sem);
 }
 
 static inline void
 zix_sem_post(ZixSem* sem)
 {
-	sem_post(&sem->sem);
+    sem_post(&sem->sem);
 }
 
 static inline void
 zix_sem_wait(ZixSem* sem)
 {
-	/* Note that sem_wait always returns 0 in practice, except in
-	   gdb (at least), where it returns nonzero, so the while is
-	   necessary (and is the correct/safe solution in any case).
-	*/
-	while (sem_wait(&sem->sem) != 0) {}
+    /* Note that sem_wait always returns 0 in practice, except in
+       gdb (at least), where it returns nonzero, so the while is
+       necessary (and is the correct/safe solution in any case).
+    */
+    while (sem_wait(&sem->sem) != 0) {}
 }
 
 static inline bool
 zix_sem_try_wait(ZixSem* sem)
 {
-	return (sem_trywait(&sem->sem) == 0);
+    return (sem_trywait(&sem->sem) == 0);
 }
 
 #endif

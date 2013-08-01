@@ -159,26 +159,26 @@ typedef struct EFFECT_T {
 } effect_t;
 
 typedef struct URIDS_T {
-	LV2_URID atom_Float;
-	LV2_URID atom_Int;
-	LV2_URID atom_eventTransfer;
-	LV2_URID bufsz_maxBlockLength;
-	LV2_URID bufsz_minBlockLength;
-	LV2_URID bufsz_sequenceSize;
-	LV2_URID log_Trace;
-	LV2_URID midi_MidiEvent;
-	LV2_URID param_sampleRate;
-	LV2_URID patch_Set;
-	LV2_URID patch_property;
-	LV2_URID patch_value;
-	LV2_URID time_Position;
-	LV2_URID time_bar;
-	LV2_URID time_barBeat;
-	LV2_URID time_beatUnit;
-	LV2_URID time_beatsPerBar;
-	LV2_URID time_beatsPerMinute;
-	LV2_URID time_frame;
-	LV2_URID time_speed;
+    LV2_URID atom_Float;
+    LV2_URID atom_Int;
+    LV2_URID atom_eventTransfer;
+    LV2_URID bufsz_maxBlockLength;
+    LV2_URID bufsz_minBlockLength;
+    LV2_URID bufsz_sequenceSize;
+    LV2_URID log_Trace;
+    LV2_URID midi_MidiEvent;
+    LV2_URID param_sampleRate;
+    LV2_URID patch_Set;
+    LV2_URID patch_property;
+    LV2_URID patch_value;
+    LV2_URID time_Position;
+    LV2_URID time_bar;
+    LV2_URID time_barBeat;
+    LV2_URID time_beatUnit;
+    LV2_URID time_beatsPerBar;
+    LV2_URID time_beatsPerMinute;
+    LV2_URID time_frame;
+    LV2_URID time_speed;
 } urids_t;
 
 
@@ -189,10 +189,6 @@ typedef struct URIDS_T {
 */
 
 #define UNUSED_PARAM(var)           do { (void)(var); } while (0)
-#define IS_HW_INPUT_PORT(port)      (1 - (port % 2))
-#define IS_HW_OUTPUT_PORT(port)     (port % 2)
-#define RELOAD_PLUGINS()            lilv_world_load_all(LV2_Data);                  \
-                                    Plugins = lilv_world_get_all_plugins(LV2_Data);
 #define INSTANCE_IS_VALID(id)       ((id >= 0) && (id < MAX_INSTANCES))
 
 
@@ -226,9 +222,9 @@ static LV2_Feature urid_map_feature = {LV2_URID__map, &urid_map};
 static LV2_Feature urid_unmap_feature = {LV2_URID__unmap, &urid_unmap};
 static LV2_Feature options_feature = {LV2_OPTIONS__options, &options};
 static LV2_Feature buf_size_features[3] = {
-	{ LV2_BUF_SIZE__powerOf2BlockLength, NULL },
-	{ LV2_BUF_SIZE__fixedBlockLength, NULL },
-	{ LV2_BUF_SIZE__boundedBlockLength, NULL }
+    { LV2_BUF_SIZE__powerOf2BlockLength, NULL },
+    { LV2_BUF_SIZE__fixedBlockLength, NULL },
+    { LV2_BUF_SIZE__boundedBlockLength, NULL }
     };
 
 
@@ -296,7 +292,7 @@ static void AllocatePortBuffers(effect_t* effect)
         LV2_Atom_Sequence *buf;
         buf = lv2_evbuf_get_buffer(effect->event_ports[i]->evbuf);
         lilv_instance_connect_port(effect->lilv_instance, effect->event_ports[i]->index, buf);
-	}
+    }
 }
 
 
@@ -306,7 +302,7 @@ static int BufferSize(jack_nframes_t nframes, void* data)
     BlockLength = nframes;
     MidiBufferSize = jack_port_type_get_buffer_size(effect->jack_client, JACK_DEFAULT_MIDI_TYPE);
     AllocatePortBuffers(effect);
-	return SUCCESS;
+    return SUCCESS;
 }
 
 
@@ -347,6 +343,7 @@ static int ProcessAudio(jack_nframes_t nframes, void *arg)
     /* Bypass */
     if (effect->bypass)
     {
+        /* Plugins with audio inputs */
         if (effect->input_audio_ports_count > 0)
         {
             for (i = 0; i < effect->output_audio_ports_count; i++)
@@ -369,7 +366,8 @@ static int ProcessAudio(jack_nframes_t nframes, void *arg)
                 memset(effect->output_audio_ports[i]->buffer, 0, (sizeof(float) * nframes));
             }
         }
-        else // generator plugins
+        /* Generator plugins */
+        else
         {
             for (i = 0; i < effect->output_audio_ports_count; i++)
             {
@@ -424,26 +422,26 @@ static int ProcessAudio(jack_nframes_t nframes, void *arg)
 
     /* MIDI out events */
     uint32_t p;
-	for (p = 0; p < effect->output_event_ports_count; p++)
+    for (p = 0; p < effect->output_event_ports_count; p++)
     {
-		port_t *port = effect->output_event_ports[p];
-		if (port->jack_port && port->flow == FLOW_OUTPUT && port->type == TYPE_EVENT)
+        port_t *port = effect->output_event_ports[p];
+        if (port->jack_port && port->flow == FLOW_OUTPUT && port->type == TYPE_EVENT)
         {
-			void* buf = jack_port_get_buffer(port->jack_port, nframes);
-			jack_midi_clear_buffer(buf);
+            void* buf = jack_port_get_buffer(port->jack_port, nframes);
+            jack_midi_clear_buffer(buf);
 
             LV2_Evbuf_Iterator i;
-			for (i = lv2_evbuf_begin(port->evbuf); lv2_evbuf_is_valid(i); i = lv2_evbuf_next(i))
+            for (i = lv2_evbuf_begin(port->evbuf); lv2_evbuf_is_valid(i); i = lv2_evbuf_next(i))
             {
-				uint32_t frames, subframes, type, size;
-				uint8_t* body;
-				lv2_evbuf_get(i, &frames, &subframes, &type, &size, &body);
-				if (type == urids.midi_MidiEvent)
+                uint32_t frames, subframes, type, size;
+                uint8_t* body;
+                lv2_evbuf_get(i, &frames, &subframes, &type, &size, &body);
+                if (type == urids.midi_MidiEvent)
                 {
-					jack_midi_event_write(buf, frames, body, size);
-				}
-			}
-		}
+                    jack_midi_event_write(buf, frames, body, size);
+                }
+            }
+        }
     }
     return SUCCESS;
 }
@@ -463,13 +461,13 @@ static void GetFeatures(effect_t *effect)
     work_schedule_feature->data = NULL;
 
     LilvNode *lilv_worker_schedule = lilv_new_uri(LV2_Data, LV2_WORKER__schedule);
-	if (lilv_plugin_has_feature(effect->lilv_plugin, lilv_worker_schedule))
+    if (lilv_plugin_has_feature(effect->lilv_plugin, lilv_worker_schedule))
     {
         LV2_Worker_Schedule *schedule = (LV2_Worker_Schedule*) malloc(sizeof(LV2_Worker_Schedule));
         schedule->handle = &effect->worker;
         schedule->schedule_work = worker_schedule;
         work_schedule_feature->data = schedule;
-	}
+    }
     lilv_node_free(lilv_worker_schedule);
 
     /* Buf-size Feature is the same for all instances (global declaration) */
@@ -544,25 +542,25 @@ int effects_init(void)
     urid_unmap.handle = symap;
     urid_unmap.unmap = id_to_urid;
 
-	urids.atom_Float           = urid_to_id(symap, LV2_ATOM__Float);
-	urids.atom_Int             = urid_to_id(symap, LV2_ATOM__Int);
-	urids.atom_eventTransfer   = urid_to_id(symap, LV2_ATOM__eventTransfer);
-	urids.bufsz_maxBlockLength = urid_to_id(symap, LV2_BUF_SIZE__maxBlockLength);
-	urids.bufsz_minBlockLength = urid_to_id(symap, LV2_BUF_SIZE__minBlockLength);
-	urids.bufsz_sequenceSize   = urid_to_id(symap, LV2_BUF_SIZE__sequenceSize);
-	urids.midi_MidiEvent       = urid_to_id(symap, LV2_MIDI__MidiEvent);
-	urids.param_sampleRate     = urid_to_id(symap, LV2_PARAMETERS__sampleRate);
-	urids.patch_Set            = urid_to_id(symap, LV2_PATCH__Set);
-	urids.patch_property       = urid_to_id(symap, LV2_PATCH__property);
-	urids.patch_value          = urid_to_id(symap, LV2_PATCH__value);
-	urids.time_Position        = urid_to_id(symap, LV2_TIME__Position);
-	urids.time_bar             = urid_to_id(symap, LV2_TIME__bar);
-	urids.time_barBeat         = urid_to_id(symap, LV2_TIME__barBeat);
-	urids.time_beatUnit        = urid_to_id(symap, LV2_TIME__beatUnit);
-	urids.time_beatsPerBar     = urid_to_id(symap, LV2_TIME__beatsPerBar);
-	urids.time_beatsPerMinute  = urid_to_id(symap, LV2_TIME__beatsPerMinute);
-	urids.time_frame           = urid_to_id(symap, LV2_TIME__frame);
-	urids.time_speed           = urid_to_id(symap, LV2_TIME__speed);
+    urids.atom_Float           = urid_to_id(symap, LV2_ATOM__Float);
+    urids.atom_Int             = urid_to_id(symap, LV2_ATOM__Int);
+    urids.atom_eventTransfer   = urid_to_id(symap, LV2_ATOM__eventTransfer);
+    urids.bufsz_maxBlockLength = urid_to_id(symap, LV2_BUF_SIZE__maxBlockLength);
+    urids.bufsz_minBlockLength = urid_to_id(symap, LV2_BUF_SIZE__minBlockLength);
+    urids.bufsz_sequenceSize   = urid_to_id(symap, LV2_BUF_SIZE__sequenceSize);
+    urids.midi_MidiEvent       = urid_to_id(symap, LV2_MIDI__MidiEvent);
+    urids.param_sampleRate     = urid_to_id(symap, LV2_PARAMETERS__sampleRate);
+    urids.patch_Set            = urid_to_id(symap, LV2_PATCH__Set);
+    urids.patch_property       = urid_to_id(symap, LV2_PATCH__property);
+    urids.patch_value          = urid_to_id(symap, LV2_PATCH__value);
+    urids.time_Position        = urid_to_id(symap, LV2_TIME__Position);
+    urids.time_bar             = urid_to_id(symap, LV2_TIME__bar);
+    urids.time_barBeat         = urid_to_id(symap, LV2_TIME__barBeat);
+    urids.time_beatUnit        = urid_to_id(symap, LV2_TIME__beatUnit);
+    urids.time_beatsPerBar     = urid_to_id(symap, LV2_TIME__beatsPerBar);
+    urids.time_beatsPerMinute  = urid_to_id(symap, LV2_TIME__beatsPerMinute);
+    urids.time_frame           = urid_to_id(symap, LV2_TIME__frame);
+    urids.time_speed           = urid_to_id(symap, LV2_TIME__speed);
 
     /* Options Feature initialization */
     options[0].context = LV2_OPTIONS_INSTANCE;
@@ -697,7 +695,8 @@ int effects_add(const char *uid, int instance)
     if (!plugin)
     {
         /* If the plugin are not found reload all plugins */
-        RELOAD_PLUGINS();
+        lilv_world_load_all(LV2_Data);
+        Plugins = lilv_world_get_all_plugins(LV2_Data);
 
         /* Try get the plugin again */
         plugin_uri = lilv_new_uri(LV2_Data, uid);
@@ -731,20 +730,20 @@ int effects_add(const char *uid, int instance)
     /* Worker */
     effect->worker.instance = lilv_instance;
     zix_sem_init(&effect->worker.sem, 0);
-	effect->worker.iface = NULL;
-	effect->worker.requests  = NULL;
-	effect->worker.responses = NULL;
-	effect->worker.response  = NULL;
+    effect->worker.iface = NULL;
+    effect->worker.requests  = NULL;
+    effect->worker.responses = NULL;
+    effect->worker.response  = NULL;
 
     lilv_worker_interface = lilv_new_uri(LV2_Data, LV2_WORKER__interface);
-	if (lilv_plugin_has_extension_data(effect->lilv_plugin, lilv_worker_interface))
+    if (lilv_plugin_has_extension_data(effect->lilv_plugin, lilv_worker_interface))
     {
         LV2_Worker_Interface * worker_interface;
         worker_interface =
             (LV2_Worker_Interface*) lilv_instance_get_extension_data(effect->lilv_instance, LV2_WORKER__interface);
 
         worker_init(&effect->worker, worker_interface);
-	}
+    }
 
     /* Create the URI for identify the ports */
     ports_count = lilv_plugin_get_num_ports(plugin);
@@ -1003,11 +1002,12 @@ int effects_remove(int effect_id)
         uint32_t j;
         char portA[64], portB[64];
 
+        /* Disconnect the system connections */
         for (i = 1; i <= AUDIO_INPUT_PORTS; i++)
         {
             sprintf(portA, "system:capture_%i", i);
 
-            for (j = 1; j <= AUDIO_INPUT_PORTS; j++)
+            for (j = 1; j <= AUDIO_OUTPUT_PORTS; j++)
             {
                 sprintf(portB, "system:playback_%i", j);
                 effects_disconnect(portA, portB);
@@ -1142,17 +1142,17 @@ int effects_monitor_parameter(int effect_id, const char *control_symbol, const c
         return ret;
 
     int iop;
-    if(strcmp(op, ">") == 0)
+    if (strcmp(op, ">") == 0)
         iop = 0;
-    else if(strcmp(op, ">=") == 0)
+    else if (strcmp(op, ">=") == 0)
         iop = 1;
-    else if(strcmp(op, "<") == 0)
+    else if (strcmp(op, "<") == 0)
         iop = 2;
-    else if(strcmp(op, "<=") == 0)
+    else if (strcmp(op, "<=") == 0)
         iop = 3;
-    else if(strcmp(op, "==") == 0)
+    else if (strcmp(op, "==") == 0)
         iop = 4;
-    else if(strcmp(op, "!=") == 0)
+    else if (strcmp(op, "!=") == 0)
         iop = 5;
     else
         return -1;

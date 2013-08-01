@@ -22,12 +22,12 @@
 #include "zix/thread.h"
 
 typedef struct WORKER_T {
-	jack_ringbuffer_t * requests;
-	jack_ringbuffer_t * responses;
-	void *response;
-	ZixSem sem;
-	ZixThread thread;
-	const LV2_Worker_Interface *iface;
+    jack_ringbuffer_t * requests;
+    jack_ringbuffer_t * responses;
+    void *response;
+    ZixSem sem;
+    ZixThread thread;
+    const LV2_Worker_Interface *iface;
     LilvInstance *instance;
     bool exit;
 } worker_t;

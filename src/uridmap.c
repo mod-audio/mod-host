@@ -32,18 +32,18 @@ void urid_sem_init(void)
 
 LV2_URID map_urid(LV2_URID_Map_Handle handle, const char* uri)
 {
-	zix_sem_wait(&symap_lock);
-	const LV2_URID id = symap_map(handle, uri);
-	zix_sem_post(&symap_lock);
-	return id;
+    zix_sem_wait(&symap_lock);
+    const LV2_URID id = symap_map(handle, uri);
+    zix_sem_post(&symap_lock);
+    return id;
 }
 
 const char* unmap_urid(LV2_URID_Unmap_Handle handle, LV2_URID urid)
 {
-	zix_sem_wait(&symap_lock);
-	const char *uri = symap_unmap(handle, urid);
-	zix_sem_post(&symap_lock);
-	return uri;
+    zix_sem_wait(&symap_lock);
+    const char *uri = symap_unmap(handle, urid);
+    zix_sem_post(&symap_lock);
+    return uri;
 }
 
 uint32_t uri_to_id(LV2_URI_Map_Callback_Data callback_data, const char* map, const char* uri)
