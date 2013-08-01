@@ -110,6 +110,7 @@ int effects_get_parameter(int effect_id, const char *control_symbol, float *valu
 int effects_monitor_parameter(int effect_id, const char *control_symbol, const char *op, float value);
 int effects_bypass(int effect_id, int value);
 int effects_get_controls_symbols(int effect_id, char** symbols);
+int effects_get_xruns(int *number_of_xruns, float *max_delay);
 
 
 /*

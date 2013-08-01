@@ -221,6 +221,22 @@ static void effects_get_param_cb(proto_t *proto)
     protocol_response(buffer, proto);
 }
 
+static void effects_get_xruns_cb(proto_t *proto)
+{
+    int resp;
+    int number_of_xruns;
+    float max_delay;
+    resp = effects_get_xruns(&number_of_xruns, &max_delay);
+
+    char buffer[128];
+    if (resp >= 0)
+        sprintf(buffer, "resp %i %i %.01f", resp, number_of_xruns, max_delay);
+    else
+        sprintf(buffer, "resp %i", resp);
+
+    protocol_response(buffer, proto);
+}
+
 static void effects_monitor_param_cb(proto_t *proto)
 {
     int resp;
@@ -430,11 +446,12 @@ int main(int argc, char **argv)
     protocol_add_command(EFFECT_REMOVE, effects_remove_cb);
     protocol_add_command(EFFECT_CONNECT, effects_connect_cb);
     protocol_add_command(EFFECT_DISCONNECT, effects_disconnect_cb);
-    protocol_add_command(EFFECT_BYPASS, effects_bypass_cb);
     protocol_add_command(EFFECT_PARAM_SET, effects_set_param_cb);
     protocol_add_command(EFFECT_PARAM_GET, effects_get_param_cb);
     protocol_add_command(EFFECT_PARAM_MON, effects_monitor_param_cb);
     protocol_add_command(MONITOR_ADDR_SET, monitor_addr_set_cb);
+    protocol_add_command(EFFECT_BYPASS, effects_bypass_cb);
+    protocol_add_command(EFFECT_XRUNS_GET, effects_get_xruns_cb);
     protocol_add_command(LOAD_COMMANDS, load_cb);
     protocol_add_command(SAVE_COMMANDS, save_cb);
     protocol_add_command(HELP, help_cb);

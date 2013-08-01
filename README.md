@@ -93,6 +93,10 @@ The commands supported by mod-host are:
         e.g.: bypass 0 1
         bypass_value = 1 bypass the effect and bypass_value = 0 process the effect
 
+    xruns_get
+        returns the number of xruns and the maximum delay reported since startup or
+        last xruns_get, response is of the format: resp 0 <number of xruns> <max delay>
+
     load <filename>
         e.g.: load my_preset
 
@@ -105,6 +109,7 @@ The commands supported by mod-host are:
 
     quit
         bye!
+
 
 For each effect added, one client on JACK will be created. The names of clients
 follow the standard: effect_\<instance_number\>

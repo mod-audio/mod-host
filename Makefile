@@ -29,7 +29,7 @@ endif
 LIBS = -ljack `pkg-config --libs lilv-0` -largtable2 -lreadline -lpthread
 
 # additional include paths
-INCS = -I/usr/include/lilv-0
+INCS = -I/usr/include/lilv-0 -Isrc/jack2/common -Isrc/jack2/linux -Isrc/jack2/posix -Isrc/jack2/common/jack
 
 # remove command
 RM = rm -f

@@ -22,8 +22,8 @@
 ************************************************************************************************************************
 */
 
-#ifndef  MODD_H
-#define  MODD_H
+#ifndef ATOMIC_H
+#define ATOMIC_H
 
 
 /*
@@ -32,6 +32,7 @@
 ************************************************************************************************************************
 */
 
+#include "jack2/common/JackAtomic.h"
 
 /*
 ************************************************************************************************************************
@@ -45,26 +46,6 @@
 *           CONFIGURATION DEFINES
 ************************************************************************************************************************
 */
-
-/* Socket definitions */
-#define SOCKET_DEFAULT_PORT     5555
-#define SOCKET_MSG_BUFFER_SIZE  1024
-
-/* Protocol commands definition */
-#define EFFECT_ADD          "add %s %i"
-#define EFFECT_REMOVE       "remove %i"
-#define EFFECT_CONNECT      "connect %s %s"
-#define EFFECT_DISCONNECT   "disconnect %s %s"
-#define EFFECT_PARAM_SET    "param_set %i %s %f"
-#define EFFECT_PARAM_GET    "param_get %i %s"
-#define EFFECT_PARAM_MON    "param_monitor %i %s %s %f"
-#define MONITOR_ADDR_SET    "monitor %s %i %i"
-#define EFFECT_BYPASS       "bypass %i %i"
-#define EFFECT_XRUNS_GET    "xruns_get"
-#define LOAD_COMMANDS       "load %s"
-#define SAVE_COMMANDS       "save %s"
-#define HELP                "help"
-#define QUIT                "quit"
 
 
 /*
@@ -94,6 +75,14 @@
 ************************************************************************************************************************
 */
 
+static inline long RESET_ATOMIC(volatile SInt32* val)
+{
+    SInt32 actual;
+    do {
+        actual = *val;
+    } while (!CAS(actual, 0, val));
+    return actual;
+}
 
 /*
 ************************************************************************************************************************
