@@ -47,19 +47,29 @@
 */
 
 static char *g_commands[] = {
-  "add",
-  "remove",
-  "connect",
-  "disconnect",
-  "bypass",
-  "param_set",
-  "param_get",
-  "param_monitor",
-  "load",
-  "save",
-  "help",
-  "quit",
-  NULL
+    "add",
+    "remove",
+    "connect",
+    "disconnect",
+    "bypass",
+    "param_set",
+    "param_get",
+    "param_monitor",
+    "load",
+    "save",
+    "help",
+    "quit",
+    NULL
+};
+
+static char *g_operation[] = {
+    ">",
+    ">=",
+    "<",
+    "<=",
+    "==",
+    "!=",
+    NULL
 };
 
 
@@ -86,7 +96,8 @@ static char *g_commands[] = {
 */
 
 static char **g_list, **g_plugins_list, **g_ports_list, **g_symbols, **g_instances_list;
-
+static const char **g_scale_points;
+static float **g_param_range;
 
 /*
 ************************************************************************************************************************
@@ -189,6 +200,8 @@ static char **completion(const char *text, int start, int end)
         cmd = strarr_split(line);
         uint32_t count = spaces_count(rl_line_buffer);
 
+        uint8_t get_instances = 0, get_symbols = 0, get_param_info = 0;
+
         if (count > 0)
         {
             if (strcmp(cmd[0], "add") == 0)
@@ -200,8 +213,7 @@ static char **completion(const char *text, int start, int end)
             {
                 if (count == 1)
                 {
-                    update_instances_list();
-                    g_list = g_instances_list;
+                    get_instances = 1;
                 }
             }
             else if ((strcmp(cmd[0], "connect") == 0) ||
@@ -218,20 +230,80 @@ static char **completion(const char *text, int start, int end)
                     g_list = g_ports_list;
                 }
             }
-            else if ((strcmp(cmd[0], "param_set") == 0) ||
-                     (strcmp(cmd[0], "param_get") == 0) ||
-                     (strcmp(cmd[0], "param_monitor") == 0))
+            else if (strcmp(cmd[0], "param_get") == 0)
             {
                 if (count == 1)
                 {
-                    update_instances_list();
-                    g_list = g_instances_list;
+                    get_instances = 1;
                 }
                 else if (count == 2)
                 {
-                    effects_get_controls_symbols(atoi(cmd[1]), g_symbols);
-                    g_list = g_symbols;
+                    get_symbols = 1;
                 }
+            }
+            else if (strcmp(cmd[0], "param_set") == 0)
+            {
+                if (count == 1)
+                {
+                    get_instances = 1;
+                }
+                else if (count == 2)
+                {
+                    get_symbols = 1;
+                }
+                else if (count == 3)
+                {
+                    get_param_info = 1;
+                }
+            }
+            else if (strcmp(cmd[0], "param_monitor") == 0)
+            {
+                if (count == 1)
+                {
+                    get_instances = 1;
+                }
+                else if (count == 2)
+                {
+                    get_symbols = 1;
+                }
+                else if (count == 3)
+                {
+                    g_list = g_operation;
+                }
+                else if (count == 4)
+                {
+                    get_param_info = 1;
+                }
+            }
+
+            if (get_instances)
+            {
+                update_instances_list();
+                g_list = g_instances_list;
+            }
+            if (get_symbols)
+            {
+                effects_get_parameter_symbols(atoi(cmd[1]), g_symbols);
+                g_list = g_symbols;
+            }
+            if (get_param_info)
+            {
+                effects_get_parameter_info(atoi(cmd[1]), cmd[2], g_param_range, g_scale_points);
+
+                printf("\ndef: %.03f, min: %.03f, max: %.03f, curr: %.03f\n",
+                       *g_param_range[0], *g_param_range[1], *g_param_range[2], *g_param_range[3]);
+
+                if (g_scale_points[0])
+                {
+                    uint32_t i;
+                    printf("scale points:\n");
+                    for (i = 0; g_scale_points[i]; i+=2)
+                    {
+                        printf("   %s: %s\n", g_scale_points[i], g_scale_points[i+1]);
+                    }
+                }
+
+                rl_on_new_line();
             }
 
             FREE(cmd);
@@ -436,6 +508,14 @@ void completer_init(void)
     g_ports_list = NULL;
     g_instances_list = NULL;
 
-    /* Create a array of strings */
+    /* Create a array of strings to symbols and scale points */
     g_symbols = (char **) calloc(128, sizeof(char *));
+    g_scale_points = (const char **) calloc(256, sizeof(char *));
+
+    /* Allocates memory to parameter range */
+    g_param_range = (float **) calloc(4, sizeof(float *));
+    g_param_range[0] = (float *) malloc(sizeof(float));
+    g_param_range[1] = (float *) malloc(sizeof(float));
+    g_param_range[2] = (float *) malloc(sizeof(float));
+    g_param_range[3] = (float *) malloc(sizeof(float));
 }

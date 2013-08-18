@@ -42,6 +42,7 @@ Dependencies:
     liblilv         >= 0.14.2
     libargtable2    >= 2.13
     libreadline     >= 6.2
+    lilv-utils      (optional)
 
 Run
 ---
@@ -51,13 +52,15 @@ run mod-host.
 
 If you run mod-host without parameters the process will be forked and can only
 be controlled through the socket.
-The default socket port is 5555, this can be changed, passing the parameter
+The default socket port is 5555, this can be changed passing the parameter
 -p (or --socket-port) to mod-host.
 
 The other way to control mod-host is the interactive mode, in this case the
 commands must be provided on the shell prompt.
-When you are in the interactive mode, the socket communication does not work.
+The interactive mode is featured with autocomplete resource, therefore, you can type [TAB]
+twice always that need of one hint.
 
+Obs.: When you are in the interactive mode, the socket communication does not work.
 
 Commands (or Protocol)
 ----------------------
@@ -106,10 +109,10 @@ The commands supported by mod-host are:
     quit
         bye!
 
-For each effect added, one client on JACK will be created. The names of clients
+For each effect added one client on JACK will be created. The names of clients
 follow the standard: effect_\<instance_number\>
 
-For each command sent, one response is given. If the command is valid, the
+For each command sent one response is given. If the command is valid the
 response format will be:
 
     resp <status> [value]
@@ -133,6 +136,6 @@ following:
 | -206    | ERR_JACK_PORT_DISCONNECTION     |
 | -301    | ERR_MEMORY_ALLOCATION           |
 
-A status of zero or positive means, that the command was executed successfully.
+A status zero or positive means that the command was executed successfully.
 In case of the add command, the status returned is the instance number.
 The value field currently only exists for the param_get command.

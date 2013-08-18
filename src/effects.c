@@ -1215,7 +1215,7 @@ int effects_bypass(int effect_id, int value)
     return ERR_INSTANCE_NON_EXISTS;
 }
 
-int effects_get_controls_symbols(int effect_id, char** symbols)
+int effects_get_parameter_symbols(int effect_id, char** symbols)
 {
     if (!InstanceExist(effect_id))
     {
@@ -1236,4 +1236,76 @@ int effects_get_controls_symbols(int effect_id, char** symbols)
     symbols[i] = NULL;
 
     return SUCCESS;
+}
+
+int effects_get_parameter_info(int effect_id, const char *control_symbol, float **range, const char **scale_points)
+{
+    if (!InstanceExist(effect_id))
+    {
+        return ERR_INSTANCE_NON_EXISTS;
+    }
+
+    uint32_t i;
+    effect_t *effect = &g_effects[effect_id];
+    const char *symbol;
+    float def = 0.0, min = 0.0, max = 0.0;
+
+    for (i = 0; i < effect->control_ports_count; i++)
+    {
+        const LilvPlugin *lilv_plugin = effect->lilv_plugin;
+        const LilvPort *lilv_port = effect->control_ports[i]->lilv_port;
+        const LilvNode *symbol_node = lilv_port_get_symbol(lilv_plugin, lilv_port);
+        LilvNode *lilv_default, *lilv_minimum, *lilv_maximum;
+
+        symbol = lilv_node_as_string(symbol_node);
+
+        if (strcmp(control_symbol, symbol) == 0)
+        {
+            /* Get the parameter range */
+            lilv_port_get_range(lilv_plugin, lilv_port, &lilv_default, &lilv_minimum, &lilv_maximum);
+
+            if (lilv_node_is_float(lilv_minimum) || lilv_node_is_int(lilv_minimum) || lilv_node_is_bool(lilv_minimum))
+                min = lilv_node_as_float(lilv_minimum);
+
+            if (lilv_node_is_float(lilv_maximum) || lilv_node_is_int(lilv_maximum) || lilv_node_is_bool(lilv_maximum))
+                max = lilv_node_as_float(lilv_maximum);
+
+            if (lilv_node_is_float(lilv_default) || lilv_node_is_int(lilv_default) || lilv_node_is_bool(lilv_default))
+                def = lilv_node_as_float(lilv_default);
+
+            (*range[0]) = def;
+            (*range[1]) = min;
+            (*range[2]) = max;
+            (*range[3]) = *(effect->control_ports[i]->buffer);
+
+            /* Get the scale points */
+            LilvScalePoints *points;
+            points = lilv_port_get_scale_points(lilv_plugin, lilv_port);
+            if (points)
+            {
+                uint32_t j = 0;
+                LilvIter *iter;
+                for (iter = lilv_scale_points_begin(points);
+                    !lilv_scale_points_is_end(points, iter);
+                    iter = lilv_scale_points_next(points, iter))
+                {
+                    const LilvScalePoint *point = lilv_scale_points_get(points, iter);
+                    scale_points[j++] = lilv_node_as_string(lilv_scale_point_get_value(point));
+                    scale_points[j++] = lilv_node_as_string(lilv_scale_point_get_label(point));
+                }
+
+                scale_points[j++] = NULL;
+                scale_points[j] = NULL;
+                lilv_scale_points_free(points);
+            }
+            else
+            {
+                scale_points[0] = NULL;
+            }
+
+            return SUCCESS;
+        }
+    }
+
+    return ERR_LV2_INVALID_PARAM_SYMBOL;
 }
