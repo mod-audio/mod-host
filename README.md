@@ -6,7 +6,7 @@ mod-host
 About
 -----
 
-mod-host is an LV2 host for Jack, that can be controlled via a socket or shell.
+mod-host is an LV2 host for jackd, that can be controlled via a socket or shell.
 
 Currently the host supports the following LV2 features:
 
@@ -44,21 +44,27 @@ Dependencies:
     libreadline     >= 6.2
     lilv-utils      (optional)
 
+To turn doc/man.txt into a groff manpage you need txt2man. Run 
+    
+    make man
+
+output doc/mod-host.1
+
 Run
 ---
 
-mod-host does not startup JACK automatically, so you need to start it before
+mod-host does not startup jackd automatically, so you need to start it before
 run mod-host.
 
 If you run mod-host without parameters the process will be forked and can only
 be controlled through the socket.
-The default socket port is 5555, this can be changed passing the parameter
+The default socket port is 5555, this can be changed by passing the parameter
 -p (or --socket-port) to mod-host.
 
 The other way to control mod-host is the interactive mode, in this case the
 commands must be provided on the shell prompt.
-The interactive mode is featured with autocomplete resource, therefore, you can type [TAB]
-twice always that need of one hint.
+The interactive mode is has autocomplete, therefore, you can always type [TAB]
+twice if you need a hint.  
 
 Obs.: When you are in the interactive mode, the socket communication does not work.
 
@@ -109,7 +115,7 @@ The commands supported by mod-host are:
     quit
         bye!
 
-For each effect added one client on JACK will be created. The names of clients
+For each effect added one client on jackd will be created. The names of clients
 follow the standard: effect_\<instance_number\>
 
 For each command sent one response is given. If the command is valid the

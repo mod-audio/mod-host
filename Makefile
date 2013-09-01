@@ -53,3 +53,7 @@ install:
 # clean rule
 clean:
 	$(RM) $(SRC_DIR)/*.o $(PROG)
+
+# manual page rule
+man:
+	txt2man -s 1 -t MOD-HOST doc/man.txt > doc/mod-host.1

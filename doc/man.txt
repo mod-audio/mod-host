@@ -1,0 +1,110 @@
+NAME
+    mod-host - LV2 host for jackd with socket and shell control
+SYNOPSIS
+    mod-host [-vih] [-p <port>]
+DESCRIPTION
+    About   mod-host is an LV2 host for jackd, that can be controlled via a socket or shell. Currently the host supports the following LV2 features:
+        
+            - lv2core
+            - atom
+            - event
+            - buf-size
+            - midi
+            - options
+            - uri-map
+            - urid
+            - worker
+
+    Running     
+                mod-host does not startup jackd automatically, so you need to start it before you run mod-host.
+
+                If you run mod-host without parameters the process will be forked and can only be controlled through the socket. The default socket port is 5555, this can be changed by passing the parameter -p (or --socket-port) to mod-host.
+
+                The other way to control mod-host is the interactive mode, in
+this case the commands must be provided on the shell prompt. The interactive
+mode autocomplete, therefore, you can always type [TAB] twice if you need a hint.  
+
+                Obs.: When you are in the interactive mode, the socket communication does not work.
+
+
+    
+OPTIONS
+    -v, --verbose, --debug         verbose messages
+    -p, --socket-port=<port>       socket port definition
+    -i, --interactive              interactive shell mode
+    -h, --help                     print help and exit
+
+PROTOCOL
+    The commands supported by mod-host are:
+    
+        add <lv2_uri> <instance_number>
+            e.g.: add http://lv2plug.in/plugins/eg-amp 0
+            instance_number must be any value between 0 ~ 9999, inclusively
+        
+        remove <instance_number>
+            e.g.: remove 0
+        
+        connect <origin_port> <destination_port>
+            e.g.: connect system:capture_1 effect_0:in
+        
+        disconnect <origin_port> <destination_port>
+            e.g.: disconnect system:capture_1 effect_0:in
+        
+        param_set <instance_number> <param_symbol> <param_value>
+            e.g.: param_set 0 gain 2.50
+        
+        param_get <instance_number> <param_symbol>
+            e.g.: param_get 0 gain
+        
+        param_monitor <instance_number> <param_symbol> <cond_op> <value>
+            e.g: param_monitor 0 gain > 2.50
+        
+        monitor <addr> <port> <status>
+            e.g: monitor localhost 12345 1
+        
+        bypass <instance_number> <bypass_value>
+            e.g.: bypass 0 1
+            bypass_value = 1 bypass the effect and bypass_value = 0 process the effect
+        
+        load <filename>
+            e.g.: load my_preset
+        
+        save <filename>
+            e.g.: save my_preset
+            this command saves the history of typed commands
+        
+        help
+            show a help message
+        
+        quit
+            bye!
+
+    For each command sent one response is given. If the command is valid the response format will be:
+    
+    resp <status> [value]
+    
+    If status is a negative number, an error occurred. The error will be one of the following:
+    status 	error
+    -1 	ERR_INSTANCE_INVALID
+    -2 	ERR_INSTANCE_ALREADY_EXISTS
+    -3 	ERR_INSTANCE_NON_EXISTS
+    -101 	ERR_LV2_INVALID_URI
+    -102 	ERR_LILV_INSTANTIATION
+    -103 	ERR_LV2_INVALID_PARAM_SYMBOL
+    -201 	ERR_JACK_CLIENT_CREATION
+    -202 	ERR_JACK_CLIENT_ACTIVATION
+    -203 	ERR_JACK_CLIENT_DEACTIVATION
+    -204 	ERR_JACK_PORT_REGISTER
+    -205 	ERR_JACK_PORT_CONNECTION
+    -206 	ERR_JACK_PORT_DISCONNECTION
+    -301 	ERR_MEMORY_ALLOCATION
+    
+    A status zero or positive means that the command was executed successfully. In case of the add command, the status returned is the instance number. The value field currently only exists for the param_get command.
+
+AUTHORS
+    mod-host was written by Bruno Gola <brunogola@gmail.com> and Ricardo Crudo <ricardo.crudo@gmail.com> 
+    
+    mod-host is part of the MOD project see: http://portalmod.com/ for details.
+
+    This manual page was written by Kaspar Emanuel <kaspar.emanual@gmail.com>
+for the Debian project (and may be used by others).
