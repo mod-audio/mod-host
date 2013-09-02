@@ -44,11 +44,12 @@ Dependencies:
     libreadline     >= 6.2
     lilv-utils      (optional)
 
-To turn doc/man.txt into a groff manpage you need txt2man. Run 
-    
-    make man
+To turn doc/man.txt into a groff manpage you need txt2man. To build and install the manpage run:
 
-output doc/mod-host.1
+    make man
+    sudo make install-man
+
+To read the manual type `man mod-host` in your terminal.
 
 Run
 ---
@@ -63,8 +64,8 @@ The default socket port is 5555, this can be changed by passing the parameter
 
 The other way to control mod-host is the interactive mode, in this case the
 commands must be provided on the shell prompt.
-The interactive mode is has autocomplete, therefore, you can always type [TAB]
-twice if you need a hint.  
+The interactive mode has autocomplete, therefore, you can always type `[TAB]`
+twice if you need a hint.
 
 Obs.: When you are in the interactive mode, the socket communication does not work.
 
