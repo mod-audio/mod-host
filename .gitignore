@@ -7,3 +7,4 @@
 *.log
 mod-host
 tests/effectlib_test
+doc/*.1

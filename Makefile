@@ -13,8 +13,10 @@ SRC_DIR = ./src
 # program name
 PROG = mod-host
 
-# default install path
-INSTALL_PATH = /usr/local/bin
+# default install paths
+PREFIX = /usr/local
+INSTALL_PATH = $(PREFIX)/bin
+MANDIR = $(PREFIX)/share/man/man1/
 
 # compiler and linker flags
 ifeq ($(MODE), release)
@@ -57,3 +59,7 @@ clean:
 # manual page rule
 man:
 	txt2man -s 1 -t MOD-HOST doc/man.txt > doc/mod-host.1
+
+# install manual page rule
+install-man: man
+	install doc/*.1 $(MANDIR)
