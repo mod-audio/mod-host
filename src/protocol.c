@@ -126,6 +126,8 @@ void protocol_parse(msg_t *msg)
     int32_t index;
     proto_t proto;
 
+    if (g_verbose) printf("received: %s\n", msg->data);
+
     proto.list = strarr_split(msg->data);
     proto.list_count = strarr_length(proto.list);
     proto.response = NULL;
@@ -196,7 +198,6 @@ void protocol_parse(msg_t *msg)
         if (g_commands[index].callback)
         {
             g_commands[index].callback(&proto);
-            if (g_verbose) printf("received: %s\n", msg->data);
 
             if (proto.response)
             {
