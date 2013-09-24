@@ -86,9 +86,15 @@ param_get <instance_number> <param_symbol>\n\
 param_monitor <instance_number> <param_symbol> <cond_op> <value>\n\
     e.g: param_monitor 0 gain > 2.50\n\
 \n\
+monitor <addr> <port> <status>\n\
+    e.g: monitor localhost 12345 1\n\
+    if status = 1 start monitoring\n\
+    if status = 0 stop monitoring\n\
+\n\
 bypass <instance_number> <bypass_value>\n\
     e.g.: bypass 0 1\n\
-    bypass_value = 1 bypass the effect and bypass_value = 0 process the effect\n\
+    if bypass_value = 1 bypass the effect\n\
+    if bypass_value = 0 process the effect\n\
 \n\
 load <filename>\n\
     e.g.: load my_preset\n\

@@ -55,6 +55,7 @@ static char *g_commands[] = {
     "param_set",
     "param_get",
     "param_monitor",
+    "monitor",
     "load",
     "save",
     "help",
@@ -62,7 +63,7 @@ static char *g_commands[] = {
     NULL
 };
 
-static char *g_operation[] = {
+static char *g_condition[] = {
     ">",
     ">=",
     "<",
@@ -268,7 +269,7 @@ static char **completion(const char *text, int start, int end)
                 }
                 else if (count == 3)
                 {
-                    g_list = g_operation;
+                    g_list = g_condition;
                 }
                 else if (count == 4)
                 {

@@ -98,10 +98,13 @@ The commands supported by mod-host are:
 
     monitor <addr> <port> <status>
         e.g: monitor localhost 12345 1
+        if status = 1 start monitoring
+        if status = 0 stop monitoring
 
     bypass <instance_number> <bypass_value>
         e.g.: bypass 0 1
-        bypass_value = 1 bypass the effect and bypass_value = 0 process the effect
+        if bypass_value = 1 bypass the effect
+        if bypass_value = 0 process the effect
 
     load <filename>
         e.g.: load my_preset
