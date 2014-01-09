@@ -122,7 +122,6 @@ typedef struct MONITOR_T {
     float last_notified_value;
 } monitor_t;
 
-
 typedef struct EFFECT_T {
     int instance;
     jack_client_t *jack_client;
@@ -140,15 +139,19 @@ typedef struct EFFECT_T {
     port_t **output_audio_ports;
     uint32_t output_audio_ports_count;
 
+    port_t **control_ports;
+    uint32_t control_ports_count;
+    port_t **input_control_ports;
+    uint32_t input_control_ports_count;
+    port_t **output_control_ports;
+    uint32_t output_control_ports_count;
+
     port_t **event_ports;
     uint32_t event_ports_count;
     port_t **input_event_ports;
     uint32_t input_event_ports_count;
     port_t **output_event_ports;
     uint32_t output_event_ports_count;
-
-    port_t **control_ports;
-    uint32_t control_ports_count;
 
     monitor_t **monitors;
     uint32_t monitors_count;
@@ -619,7 +622,8 @@ int effects_add(const char *uid, int instance)
     float *audio_buffer, *control_buffer;
     jack_port_t *jack_port;
     uint32_t audio_ports_count, input_audio_ports_count, output_audio_ports_count;
-    uint32_t control_ports_count, event_ports_count, input_event_ports_count, output_event_ports_count;
+    uint32_t control_ports_count, input_control_ports_count, output_control_ports_count;
+    uint32_t event_ports_count, input_event_ports_count, output_event_ports_count;
     effect_t *effect;
     int32_t error;
 
@@ -748,10 +752,12 @@ int effects_add(const char *uid, int instance)
     lilv_midi = lilv_new_uri(g_lv2_data, LILV_URI_MIDI_EVENT);
 
     /* Allocate memory to ports */
-    audio_ports_count  = 0;
-    input_audio_ports_count  = 0;
-    output_audio_ports_count  = 0;
-    control_ports_count  = 0;
+    audio_ports_count = 0;
+    input_audio_ports_count = 0;
+    output_audio_ports_count = 0;
+    control_ports_count = 0;
+    input_control_ports_count = 0;
+    output_control_ports_count = 0;
     event_ports_count = 0;
     input_event_ports_count = 0;
     output_event_ports_count = 0;
@@ -797,13 +803,13 @@ int effects_add(const char *uid, int instance)
 
             /* Allocate memory to audio buffer */
             audio_buffer = (float *) calloc(g_sample_rate, sizeof(float));
-
             if (!audio_buffer)
             {
                 fprintf(stderr, "can't get audio buffer\n");
                 error = ERR_MEMORY_ALLOCATION;
                 goto error;
             }
+
             effect->ports[i]->buffer = audio_buffer;
             effect->ports[i]->buffer_count = g_sample_rate;
             lilv_instance_connect_port(lilv_instance, i, audio_buffer);
@@ -819,7 +825,6 @@ int effects_add(const char *uid, int instance)
             effect->ports[i]->jack_port = jack_port;
 
             audio_ports_count++;
-
             if (lilv_port_is_a(plugin, lilv_port, lilv_input)) input_audio_ports_count++;
             else if (lilv_port_is_a(plugin, lilv_port, lilv_output)) output_audio_ports_count++;
         }
@@ -845,9 +850,11 @@ int effects_add(const char *uid, int instance)
             {
                 (*control_buffer) = lilv_node_as_float(lilv_default);
             }
-
             effect->ports[i]->jack_port = NULL;
+
             control_ports_count++;
+            if (lilv_port_is_a(plugin, lilv_port, lilv_input)) input_control_ports_count++;
+            else if (lilv_port_is_a(plugin, lilv_port, lilv_output)) output_control_ports_count++;
         }
         else if (lilv_port_is_a(plugin, lilv_port, lilv_event) ||
                     lilv_port_is_a(plugin, lilv_port, lilv_atom_port))
@@ -870,14 +877,21 @@ int effects_add(const char *uid, int instance)
     }
 
     /* Allocate memory to indexes */
+    /* Audio ports */
     effect->audio_ports_count = audio_ports_count;
     effect->audio_ports = (port_t **) calloc(audio_ports_count, sizeof(port_t *));
     effect->input_audio_ports_count = input_audio_ports_count;
     effect->input_audio_ports = (port_t **) calloc(input_audio_ports_count, sizeof(port_t *));
     effect->output_audio_ports_count = output_audio_ports_count;
     effect->output_audio_ports = (port_t **) calloc(output_audio_ports_count, sizeof(port_t *));
+    /* Control ports */
     effect->control_ports_count = control_ports_count;
     effect->control_ports = (port_t **) calloc(control_ports_count, sizeof(port_t *));
+    effect->input_control_ports_count = input_control_ports_count;
+    effect->input_control_ports = (port_t **) calloc(input_control_ports_count, sizeof(port_t *));
+    effect->output_control_ports_count = output_control_ports_count;
+    effect->output_control_ports = (port_t **) calloc(output_control_ports_count, sizeof(port_t *));
+    /* Event ports */
     effect->event_ports_count = event_ports_count;
     effect->event_ports = (port_t **) calloc(event_ports_count, sizeof(port_t *));
     effect->input_event_ports_count = input_event_ports_count;
@@ -890,12 +904,15 @@ int effects_add(const char *uid, int instance)
     input_audio_ports_count = 0;
     output_audio_ports_count = 0;
     control_ports_count = 0;
+    input_control_ports_count = 0;
+    output_control_ports_count = 0;
     event_ports_count = 0;
     input_event_ports_count = 0;
     output_event_ports_count = 0;
 
     for (i = 0; i < ports_count; i++)
     {
+        /* Audio ports */
         lilv_port = lilv_plugin_get_port_by_index(plugin, i);
         if (lilv_port_is_a(plugin, lilv_port, lilv_audio))
         {
@@ -913,13 +930,26 @@ int effects_add(const char *uid, int instance)
                 output_audio_ports_count++;
             }
         }
+        /* Control ports */
         else if (lilv_port_is_a(plugin, lilv_port, lilv_control))
         {
             effect->control_ports[control_ports_count] = effect->ports[i];
             control_ports_count++;
+
+            if (lilv_port_is_a(plugin, lilv_port, lilv_input))
+            {
+                effect->input_control_ports[input_control_ports_count] = effect->ports[i];
+                input_control_ports_count++;
+            }
+            else if (lilv_port_is_a(plugin, lilv_port, lilv_output))
+            {
+                effect->output_control_ports[output_control_ports_count] = effect->ports[i];
+                output_control_ports_count++;
+            }
         }
+        /* Event ports */
         else if (lilv_port_is_a(plugin, lilv_port, lilv_event) ||
-                    lilv_port_is_a(plugin, lilv_port, lilv_atom_port))
+                 lilv_port_is_a(plugin, lilv_port, lilv_atom_port))
         {
             effect->event_ports[event_ports_count] = effect->ports[i];
             event_ports_count++;
@@ -1152,7 +1182,9 @@ int effects_monitor_parameter(int effect_id, const char *control_symbol, const c
     int port_id = lilv_port_get_index(g_effects[effect_id].lilv_plugin, port);
 
     g_effects[effect_id].monitors_count++;
-    g_effects[effect_id].monitors = (monitor_t**)realloc(g_effects[effect_id].monitors, sizeof(monitor_t *) * g_effects[effect_id].monitors_count);
+    g_effects[effect_id].monitors =
+        (monitor_t**)realloc(g_effects[effect_id].monitors, sizeof(monitor_t *) * g_effects[effect_id].monitors_count);
+
     int idx = g_effects[effect_id].monitors_count - 1;
     g_effects[effect_id].monitors[idx] = (monitor_t*)malloc(sizeof(monitor_t));
     g_effects[effect_id].monitors[idx]->port_id = port_id;
