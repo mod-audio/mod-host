@@ -28,7 +28,7 @@ else
 endif
 
 # library links
-LIBS = -ljack `pkg-config --libs lilv-0` -largtable2 -lreadline -lpthread
+LIBS = -ljack -lm `pkg-config --libs lilv-0` -largtable2 -lreadline -lpthread
 
 # additional include paths
 INCS = -I/usr/include/lilv-0

@@ -28,6 +28,7 @@
 #include <unistd.h>
 #include <dlfcn.h>
 #include <errno.h>
+#include <math.h>
 
 /* Jack */
 #include <jack/jack.h>
@@ -217,6 +218,7 @@ typedef struct MIDI_CC_T {
 
 #define UNUSED_PARAM(var)           do { (void)(var); } while (0)
 #define INSTANCE_IS_VALID(id)       ((id >= 0) && (id < MAX_INSTANCES))
+#define ROUND(x)                    ((int32_t)(x < 0.0 ? (x - 0.5) : (x + 0.5)))
 
 
 /*
@@ -612,16 +614,35 @@ static void UpdateValueFromMidi(midi_cc_t *midi_cc)
     if (!midi_cc) return;
 
     const float midi_value_min = 0.0, midi_value_max = 127.0;
-    float a, b, x, y;
+    float value;
 
-    // TODO: check type of variable and apply the appropriate calculos
+    if (midi_cc->properties.logarithmic)
+    {
+        /* Calculos from: http://lv2plug.in/ns/ext/port-props/#rangeSteps */
+        float steps = (midi_value_max - midi_value_min) + 1;
+        value = midi_cc->min * pow(midi_cc->max / midi_cc->min, ((float)midi_cc->midi_value / (steps - 1)));
+    }
+    else if (midi_cc->properties.enumeration)
+    {
+        // TODO
+    }
+    else if (midi_cc->properties.toggled || midi_cc->properties.trigger)
+    {
+        value = 0.0;
+        if (midi_cc->midi_value > ((midi_value_max - midi_value_min) / 2)) value = 1.0;
+    }
+    else
+    {
+        float a, b, x;
+        a = (midi_cc->max - midi_cc->min) / (midi_value_max - midi_value_min);
+        b = midi_cc->min - (a * midi_value_min);
+        x = midi_cc->midi_value;
+        value = a*x + b;
 
-    a = (midi_cc->max - midi_cc->min) / (midi_value_max - midi_value_min);
-    b = midi_cc->min - (a * midi_value_min);
-    x = midi_cc->midi_value;
-    y = a*x + b;
+        if (midi_cc->properties.integer) value = ROUND(value);
+    }
 
-    effects_set_parameter(midi_cc->effect_id, midi_cc->symbol, y);
+    effects_set_parameter(midi_cc->effect_id, midi_cc->symbol, value);
 }
 
 
