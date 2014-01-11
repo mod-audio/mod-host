@@ -67,6 +67,23 @@
 #define HELP                "help"
 #define QUIT                "quit"
 
+#define MOD_HOST_COMMANDS   \
+    EFFECT_ADD,             \
+    EFFECT_REMOVE,          \
+    EFFECT_CONNECT,         \
+    EFFECT_DISCONNECT,      \
+    EFFECT_BYPASS,          \
+    EFFECT_PARAM_SET,       \
+    EFFECT_PARAM_GET,       \
+    EFFECT_PARAM_MON,       \
+    MONITOR_ADDR_SET,       \
+    MAP_COMMANDS,           \
+    UNMAP_COMMANDS,         \
+    LOAD_COMMANDS,          \
+    SAVE_COMMANDS,          \
+    HELP,                   \
+    QUIT,
+
 
 /*
 ************************************************************************************************************************

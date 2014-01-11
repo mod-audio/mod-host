@@ -29,6 +29,7 @@
 #include <readline/history.h>
 
 #include "completer.h"
+#include "mod-host.h"
 #include "effects.h"
 #include "utils.h"
 
@@ -46,20 +47,8 @@
 ************************************************************************************************************************
 */
 
-static char *g_commands[] = {
-    "add",
-    "remove",
-    "connect",
-    "disconnect",
-    "bypass",
-    "param_set",
-    "param_get",
-    "param_monitor",
-    "monitor",
-    "load",
-    "save",
-    "help",
-    "quit",
+static const char *g_full_commands[] = {
+    MOD_HOST_COMMANDS
     NULL
 };
 
@@ -96,6 +85,7 @@ static char *g_condition[] = {
 ************************************************************************************************************************
 */
 
+static char **g_commands;
 static char **g_list, **g_plugins_list, **g_ports_list, **g_symbols, **g_instances_list;
 static const char **g_scale_points;
 static float **g_param_range;
@@ -231,7 +221,9 @@ static char **completion(const char *text, int start, int end)
                     g_list = g_ports_list;
                 }
             }
-            else if (strcmp(cmd[0], "param_get") == 0)
+            else if (strcmp(cmd[0], "param_get") == 0 ||
+                     strcmp(cmd[0], "map") == 0 ||
+                     strcmp(cmd[0], "unmap") == 0)
             {
                 if (count == 1)
                 {
@@ -479,7 +471,20 @@ void completer_init(void)
 
     FILE *fp;
     char buffer[1024];
-    unsigned int plugins_count, i = 0;
+    unsigned int plugins_count, i;
+
+    /* Count the commands and allocates memory */
+    for (i = 0; g_full_commands[i]; i++);
+    g_commands = malloc((i + 1) * sizeof(char *));
+
+    /* Recreate the commands list */
+    for (i = 0; g_full_commands[i]; i++)
+    {
+        g_commands[i] = strdup(g_full_commands[i]);
+        char *pstr = strchr(g_commands[i], ' ');
+        if (pstr) *pstr = '\0';
+    }
+    g_commands[i] = NULL;
 
     /* Gets the amount of plugins */
     fp = popen("lv2ls | wc -l", "r");
@@ -494,6 +499,7 @@ void completer_init(void)
     /* Gets the list of plugins */
     g_plugins_list = (char **) calloc(plugins_count + 1, sizeof(char *));
     fp = popen("lv2ls", "r");
+    i = 0;
     if (fp)
     {
         while (fgets(buffer, sizeof(buffer), fp) != NULL)

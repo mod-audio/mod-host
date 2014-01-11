@@ -6,7 +6,7 @@ mod-host
 About
 -----
 
-mod-host is an LV2 host for jackd, that can be controlled via a socket or shell.
+mod-host is a LV2 host for jackd, that can be controlled via a socket or shell.
 
 Currently the host supports the following LV2 features:
 
@@ -75,46 +75,64 @@ Commands (or Protocol)
 The commands supported by mod-host are:
 
     add <lv2_uri> <instance_number>
+        This command adds a lv2 effect to pedalboard (jack session)
         e.g.: add http://lv2plug.in/plugins/eg-amp 0
         instance_number must be any value between 0 ~ 9999, inclusively
 
     remove <instance_number>
+        This command removes a lv2 effect from pedalboard
         e.g.: remove 0
 
     connect <origin_port> <destination_port>
+        This command connects two ports of effects, hardware or MIDI
         e.g.: connect system:capture_1 effect_0:in
 
     disconnect <origin_port> <destination_port>
+        This command disconnects two ports of effects, hardware or MIDI
         e.g.: disconnect system:capture_1 effect_0:in
 
     param_set <instance_number> <param_symbol> <param_value>
+        This command change the value of a parameter
         e.g.: param_set 0 gain 2.50
 
     param_get <instance_number> <param_symbol>
+        This command show the value of a parameter
         e.g.: param_get 0 gain
 
     param_monitor <instance_number> <param_symbol> <cond_op> <value>
+        This command defines a parameter to be monitored
         e.g: param_monitor 0 gain > 2.50
 
     monitor <addr> <port> <status>
+        This command controls the monitoring of parameters
         e.g: monitor localhost 12345 1
         if status = 1 start monitoring
         if status = 0 stop monitoring
 
+    map <instance_number> <param_symbol>
+        This command maps a MIDI controller to control a parameter
+        e.g.: map 0 gain
+
+    unmap <instance_number> <param_symbol>
+        This command unmaps a MIDI controller
+        e.g.: unmap 0 gain
+
     bypass <instance_number> <bypass_value>
+        This command process or bypass an effect
         e.g.: bypass 0 1
         if bypass_value = 1 bypass the effect
         if bypass_value = 0 process the effect
 
     load <filename>
+        This command loads the history of typed commands
         e.g.: load my_preset
 
     save <filename>
+        This command saves the history of typed commands
         e.g.: save my_preset
-        this command saves the history of typed commands
 
     help
-        show a help message
+        This command show a help message
 
     quit
         bye!
@@ -130,22 +148,25 @@ response format will be:
 If status is a negative number, an error occurred. The error will be one of the
 following:
 
-| status  | error                           |
-| --------|---------------------------------|
-| -1      | ERR_INSTANCE_INVALID            |
-| -2      | ERR_INSTANCE_ALREADY_EXISTS     |
-| -3      | ERR_INSTANCE_NON_EXISTS         |
-| -101    | ERR_LV2_INVALID_URI             |
-| -102    | ERR_LILV_INSTANTIATION          |
-| -103    | ERR_LV2_INVALID_PARAM_SYMBOL    |
-| -201    | ERR_JACK_CLIENT_CREATION        |
-| -202    | ERR_JACK_CLIENT_ACTIVATION      |
-| -203    | ERR_JACK_CLIENT_DEACTIVATION    |
-| -204    | ERR_JACK_PORT_REGISTER          |
-| -205    | ERR_JACK_PORT_CONNECTION        |
-| -206    | ERR_JACK_PORT_DISCONNECTION     |
-| -301    | ERR_MEMORY_ALLOCATION           |
+| status  | error                            |
+| --------|----------------------------------|
+| -1      | ERR_INSTANCE_INVALID             |
+| -2      | ERR_INSTANCE_ALREADY_EXISTS      |
+| -3      | ERR_INSTANCE_NON_EXISTS          |
+| -101    | ERR_LV2_INVALID_URI              |
+| -102    | ERR_LILV_INSTANTIATION           |
+| -103    | ERR_LV2_INVALID_PARAM_SYMBOL     |
+| -201    | ERR_JACK_CLIENT_CREATION         |
+| -202    | ERR_JACK_CLIENT_ACTIVATION       |
+| -203    | ERR_JACK_CLIENT_DEACTIVATION     |
+| -204    | ERR_JACK_PORT_REGISTER           |
+| -205    | ERR_JACK_PORT_CONNECTION         |
+| -206    | ERR_JACK_PORT_DISCONNECTION      |
+| -301    | ERR_MIDI_ASSIGNMENT_LIST_IS_FULL |
+| -302    | ERR_MIDI_PARAM_NOT_FOUND         |
+| -901    | ERR_MEMORY_ALLOCATION            |
 
 A status zero or positive means that the command was executed successfully.
 In case of the add command, the status returned is the instance number.
 The value field currently only exists for the param_get command.
+
