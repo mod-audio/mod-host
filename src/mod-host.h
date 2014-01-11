@@ -22,8 +22,8 @@
 ************************************************************************************************************************
 */
 
-#ifndef  MODD_H
-#define  MODD_H
+#ifndef  MOD_HOST_H
+#define  MOD_HOST_H
 
 
 /*
@@ -60,6 +60,8 @@
 #define EFFECT_PARAM_GET    "param_get %i %s"
 #define EFFECT_PARAM_MON    "param_monitor %i %s %s %f"
 #define MONITOR_ADDR_SET    "monitor %s %i %i"
+#define MAP_COMMANDS        "map %i %s"
+#define UNMAP_COMMANDS      "unmap %i %s"
 #define LOAD_COMMANDS       "load %s"
 #define SAVE_COMMANDS       "save %s"
 #define HELP                "help"

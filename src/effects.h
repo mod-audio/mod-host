@@ -57,7 +57,10 @@ enum {
     ERR_JACK_PORT_CONNECTION = -205,
     ERR_JACK_PORT_DISCONNECTION = -206,
 
-    ERR_MEMORY_ALLOCATION = -301,
+    ERR_MIDI_ASSIGNMENT_LIST_IS_FULL = -301,
+    ERR_MIDI_PARAM_NOT_FOUND = -302,
+
+    ERR_MEMORY_ALLOCATION = -901,
 };
 
 
@@ -70,6 +73,7 @@ enum {
 #define MAX_INSTANCES           10000
 #define AUDIO_INPUT_PORTS       2
 #define AUDIO_OUTPUT_PORTS      2
+#define MAX_MIDI_CC_ASSIGN      1000
 
 
 /*
@@ -111,6 +115,8 @@ int effects_monitor_parameter(int effect_id, const char *control_symbol, const c
 int effects_bypass(int effect_id, int value);
 int effects_get_parameter_symbols(int effect_id, char** symbols);
 int effects_get_parameter_info(int effect_id, const char *control_symbol, float **range, const char **scale_points);
+int effects_map_parameter(int effect_id, const char *control_symbol);
+int effects_unmap_parameter(int effect_id, const char *control_symbol);
 
 
 /*

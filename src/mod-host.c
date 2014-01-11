@@ -86,10 +86,16 @@ param_get <instance_number> <param_symbol>\n\
 param_monitor <instance_number> <param_symbol> <cond_op> <value>\n\
     e.g: param_monitor 0 gain > 2.50\n\
 \n\
-monitor <addr> <port> <status>\n\
+monitor <address> <port> <status>\n\
     e.g: monitor localhost 12345 1\n\
     if status = 1 start monitoring\n\
     if status = 0 stop monitoring\n\
+\n\
+map <instance_number> <param_symbol>\n\
+    e.g.: map 0 gain\n\
+\n\
+unmap <instance_number> <param_symbol>\n\
+    e.g.: unmap 0 gain\n\
 \n\
 bypass <instance_number> <bypass_value>\n\
     e.g.: bypass 0 1\n\
@@ -130,6 +136,8 @@ quit\n\
 *           LOCAL GLOBAL VARIABLES
 ************************************************************************************************************************
 */
+
+static int g_verbose, g_interactive;
 
 
 /*
@@ -254,6 +262,32 @@ static void monitor_addr_set_cb(proto_t *proto)
     protocol_response(buffer, proto);
 }
 
+static void effects_map_cb(proto_t *proto)
+{
+    int resp;
+    resp = effects_map_parameter(atoi(proto->list[1]), proto->list[2]);
+
+    char buffer[128];
+    sprintf(buffer, "resp %i", resp);
+
+    if (resp == 0 && (g_verbose || g_interactive))
+    {
+        strcat(buffer, "\nMIDI learning: move the controller to assign it to parameter");
+    }
+
+    protocol_response(buffer, proto);
+}
+
+static void effects_unmap_cb(proto_t *proto)
+{
+    int resp;
+    resp = effects_unmap_parameter(atoi(proto->list[1]), proto->list[2]);
+
+    char buffer[128];
+    sprintf(buffer, "resp %i", resp);
+    protocol_response(buffer, proto);
+}
+
 static void load_cb(proto_t *proto)
 {
     FILE *fp;
@@ -365,7 +399,7 @@ void interactive_mode(void)
 
 int main(int argc, char **argv)
 {
-    int verbose, socket_port, interactive;
+    int socket_port;
 
     /* Command line options */
     struct arg_lit *_verbose = arg_lit0("v", "verbose,debug", "verbose messages");
@@ -395,9 +429,9 @@ int main(int argc, char **argv)
             exit(EXIT_SUCCESS);
         }
 
-        verbose = _verbose->count;
+        g_verbose = _verbose->count;
         socket_port = _socket->ival[0];
-        interactive = _interactive->count;
+        g_interactive = _interactive->count;
     }
     else
     {
@@ -408,7 +442,7 @@ int main(int argc, char **argv)
     arg_freetable(argtable, sizeof(argtable)/sizeof(argtable[0]));
 
     /* If verbose or interactive, don't fork */
-    if (!verbose && !interactive)
+    if (!g_verbose && !g_interactive)
     {
         int pid;
         pid = fork();
@@ -441,6 +475,8 @@ int main(int argc, char **argv)
     protocol_add_command(EFFECT_PARAM_GET, effects_get_param_cb);
     protocol_add_command(EFFECT_PARAM_MON, effects_monitor_param_cb);
     protocol_add_command(MONITOR_ADDR_SET, monitor_addr_set_cb);
+    protocol_add_command(MAP_COMMANDS, effects_map_cb);
+    protocol_add_command(UNMAP_COMMANDS, effects_unmap_cb);
     protocol_add_command(LOAD_COMMANDS, load_cb);
     protocol_add_command(SAVE_COMMANDS, save_cb);
     protocol_add_command(HELP, help_cb);
@@ -456,10 +492,10 @@ int main(int argc, char **argv)
     socket_set_receive_cb(protocol_parse);
 
     /* Interactice mode */
-    if (interactive) interactive_mode();
+    if (g_interactive) interactive_mode();
 
     /* Verbose */
-    protocol_verbose(verbose);
+    protocol_verbose(g_verbose);
 
     while (1) socket_run();
 
