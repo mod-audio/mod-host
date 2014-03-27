@@ -357,7 +357,7 @@ static void update_ports_list(const char *flow)
 {
     FILE *fp;
     char buffer[1024];
-    unsigned int ports_count, i;
+    unsigned int ports_count = 0, i;
 
     /* Gets the amount of ports */
     fp = popen("jack_lsp | wc -l", "r");
@@ -407,7 +407,7 @@ static void update_instances_list(void)
 {
     FILE *fp;
     char buffer[1024];
-    unsigned int instances_count, i;
+    unsigned int instances_count = 0, i;
     static unsigned int last_instances_count = 0;
 
     /* Gets the amount of ports */
@@ -479,7 +479,7 @@ void completer_init(void)
 
     FILE *fp;
     char buffer[1024];
-    unsigned int plugins_count, i = 0;
+    unsigned int plugins_count = 0, i = 0;
 
     /* Gets the amount of plugins */
     fp = popen("lv2ls | wc -l", "r");

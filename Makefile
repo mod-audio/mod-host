@@ -18,11 +18,12 @@ PREFIX = /usr/local
 INSTALL_PATH = $(PREFIX)/bin
 MANDIR = $(PREFIX)/share/man/man1/
 
-# compiler and linker flags
-ifeq ($(MODE), release)
-   CFLAGS = -O2 -Wall -Wextra -c
-   LDFLAGS = -s
-else
+# default compiler and linker flags
+CFLAGS = -O3 -Wall -Wextra -c
+LDFLAGS = -s
+
+# debug mode compiler and linker flags
+ifeq ($(DEBUG), 1)
    CFLAGS = -O0 -g -Wall -Wextra -c -DDEBUG
    LDFLAGS =
 endif
