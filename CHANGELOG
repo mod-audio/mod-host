@@ -1,3 +1,11 @@
+0.10
+====
+
+  - new: man pages files
+  - new: control set parameter optimization
+  - new: documentation and autocomplete to monitor command
+  - fix: command print in verbose mode
+
 0.9
 ===
 
