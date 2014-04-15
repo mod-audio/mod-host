@@ -1116,18 +1116,25 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
     LilvNode *lilv_default, *lilv_minimum, *lilv_maximum;
     float min = 0.0, max = 0.0;
 
+    static int last_effect_id = -1;
     static const char *last_symbol = 0;
     static float *last_buffer = 0, last_min, last_max;
 
     if (InstanceExist(effect_id))
     {
         // check whether is setting the same parameter
-        if (last_symbol && strcmp(last_symbol, control_symbol) == 0)
+        if (last_effect_id == effect_id)
         {
-            if (value > last_max) value = last_max;
-            else if (value < last_min) value = last_min;
-            *last_buffer = value;
-            return SUCCESS;
+            if (last_symbol && strcmp(last_symbol, control_symbol) == 0)
+            {
+                if (value > last_max) value = last_max;
+                else if (value < last_min) value = last_min;
+
+                last_effect_id = effect_id;
+                *last_buffer = value;
+
+                return SUCCESS;
+            }
         }
 
         // try to find the symbol and set the new value
