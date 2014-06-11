@@ -1,3 +1,7 @@
+0.10.2
+======
+  - fix: calculates bounds when the port has the sampleRate property
+
 0.10.1
 ======
 
