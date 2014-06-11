@@ -211,6 +211,7 @@ static size_t g_midi_buffer_size;
 /* LV2 and Lilv */
 static LilvWorld *g_lv2_data;
 static const LilvPlugins *g_plugins;
+static LilvNode *g_sample_rate_node;
 
 /* Global features */
 static Symap* g_symap;
@@ -515,9 +516,6 @@ int effects_init(void)
         return ERR_JACK_CLIENT_CREATION;
     }
 
-    /* Get sample rate */
-    g_sample_rate = jack_get_sample_rate(g_jack_global_client);
-
     /* Get buffers size */
     g_block_length = jack_get_buffer_size(g_jack_global_client);
     g_midi_buffer_size = jack_port_type_get_buffer_size(g_jack_global_client, JACK_DEFAULT_MIDI_TYPE);
@@ -526,6 +524,10 @@ int effects_init(void)
     g_lv2_data = lilv_world_new();
     lilv_world_load_all(g_lv2_data);
     g_plugins = lilv_world_get_all_plugins(g_lv2_data);
+
+    /* Get sample rate */
+    g_sample_rate = jack_get_sample_rate(g_jack_global_client);
+    g_sample_rate_node = lilv_new_uri(g_lv2_data, LV2_CORE__sampleRate);
 
     /* URI and URID Feature initialization */
     urid_sem_init();
@@ -610,6 +612,7 @@ int effects_finish(void)
     effects_remove(REMOVE_ALL);
     jack_client_close(g_jack_global_client);
     symap_free(g_symap);
+    lilv_node_free(g_sample_rate_node);
     lilv_world_free(g_lv2_data);
 
     return SUCCESS;
@@ -1155,6 +1158,9 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
                 if (lilv_node_is_float(lilv_maximum) || lilv_node_is_int(lilv_maximum) || lilv_node_is_bool(lilv_maximum))
                     max = lilv_node_as_float(lilv_maximum);
 
+                if (lilv_port_has_property(lilv_plugin, lilv_port, g_sample_rate_node))
+                    value /= g_sample_rate;
+
                 if (value > max) value = max;
                 else if (value < min) value = min;
                 *(g_effects[effect_id].input_control_ports[i]->buffer) = value;
@@ -1207,6 +1213,10 @@ int effects_get_parameter(int effect_id, const char *control_symbol, float *valu
                 (*value) = *(g_effects[effect_id].control_ports[i]->buffer);
                 if ((*value) > max) (*value) = max;
                 else if ((*value) < min) (*value) = min;
+
+                if (lilv_port_has_property(lilv_plugin, lilv_port, g_sample_rate_node))
+                    (*value) *= g_sample_rate;
+
                 return SUCCESS;
             }
         }
@@ -1328,6 +1338,12 @@ int effects_get_parameter_info(int effect_id, const char *control_symbol, float 
 
             if (lilv_node_is_float(lilv_default) || lilv_node_is_int(lilv_default) || lilv_node_is_bool(lilv_default))
                 def = lilv_node_as_float(lilv_default);
+
+            if (lilv_port_has_property(lilv_plugin, lilv_port, g_sample_rate_node))
+            {
+                min *= g_sample_rate;
+                max *= g_sample_rate;
+            }
 
             (*range[0]) = def;
             (*range[1]) = min;
