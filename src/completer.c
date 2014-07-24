@@ -49,6 +49,7 @@
 static char *g_commands[] = {
     "add",
     "remove",
+    "preset",
     "connect",
     "disconnect",
     "bypass",
@@ -201,7 +202,7 @@ static char **completion(const char *text, int start, int end)
         cmd = strarr_split(line);
         uint32_t count = spaces_count(rl_line_buffer);
 
-        uint8_t get_instances = 0, get_symbols = 0, get_param_info = 0;
+        uint8_t get_instances = 0, get_symbols = 0, get_param_info = 0, get_presets = 0;
 
         if (count > 0)
         {
@@ -229,6 +230,17 @@ static char **completion(const char *text, int start, int end)
                 {
                     update_ports_list("input");
                     g_list = g_ports_list;
+                }
+            }
+            else if (strcmp(cmd[0], "preset") == 0)
+            {
+                if (count == 1)
+                {
+                    get_instances = 1;
+                }
+                else if (count == 2)
+                {
+                    get_presets = 1;
                 }
             }
             else if (strcmp(cmd[0], "param_get") == 0)
@@ -281,6 +293,11 @@ static char **completion(const char *text, int start, int end)
             {
                 update_instances_list();
                 g_list = g_instances_list;
+            }
+            if (get_presets)
+            {
+                effects_get_presets_labels(atoi(cmd[1]), g_symbols);
+                g_list = g_symbols;
             }
             if (get_symbols)
             {
@@ -456,7 +473,6 @@ static void update_instances_list(void)
                     break;
                 }
             }
-
             g_instances_list[i] = (char *) calloc(1, 5);
             strcpy(g_instances_list[i], &buffer[start]);
             i++;

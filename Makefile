@@ -19,7 +19,7 @@ INSTALL_PATH = $(PREFIX)/bin
 MANDIR = $(PREFIX)/share/man/man1/
 
 # default compiler and linker flags
-CFLAGS = -O3 -Wall -Wextra -c
+CFLAGS = -O3 -Wall -Wextra -c -std=gnu99
 LDFLAGS = -s
 
 # debug mode compiler and linker flags

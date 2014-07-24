@@ -103,6 +103,7 @@ int effects_init(void);
 int effects_finish(void);
 int effects_add(const char *uid, int instance);
 int effects_remove(int effect_id);
+int effects_preset(int effect_id, const char *label);
 int effects_connect(const char *portA, const char *portB);
 int effects_disconnect(const char *portA, const char *portB);
 int effects_set_parameter(int effect_id, const char *control_symbol, float value);
@@ -110,6 +111,7 @@ int effects_get_parameter(int effect_id, const char *control_symbol, float *valu
 int effects_monitor_parameter(int effect_id, const char *control_symbol, const char *op, float value);
 int effects_bypass(int effect_id, int value);
 int effects_get_parameter_symbols(int effect_id, char** symbols);
+int effects_get_presets_labels(int effect_id, char **labels);
 int effects_get_parameter_info(int effect_id, const char *control_symbol, float **range, const char **scale_points);
 
 

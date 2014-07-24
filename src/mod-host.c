@@ -77,6 +77,9 @@ connect <origin_port> <destination_port>\n\
 disconnect <origin_port> <destination_port>\n\
     e.g.: disconnect system:capture_1 effect_0:in\n\
 \n\
+preset <instance_number> <preset_name>\n\
+    e.g.: preset 0 \"Invert CC Value\"\n\
+\n\
 param_set <instance_number> <param_symbol> <param_value>\n\
     e.g.: param_set 0 gain 2.50\n\
 \n\
@@ -166,6 +169,16 @@ static void effects_remove_cb(proto_t *proto)
 {
     int resp;
     resp = effects_remove(atoi(proto->list[1]));
+
+    char buffer[128];
+    sprintf(buffer, "resp %i", resp);
+    protocol_response(buffer, proto);
+}
+
+static void effects_preset_cb(proto_t *proto)
+{
+    int resp;
+    resp = effects_preset(atoi(proto->list[1]), proto->list[2]);
 
     char buffer[128];
     sprintf(buffer, "resp %i", resp);
@@ -434,6 +447,7 @@ int main(int argc, char **argv)
     /* Setup the protocol */
     protocol_add_command(EFFECT_ADD, effects_add_cb);
     protocol_add_command(EFFECT_REMOVE, effects_remove_cb);
+    protocol_add_command(EFFECT_PRESET, effects_preset_cb);
     protocol_add_command(EFFECT_CONNECT, effects_connect_cb);
     protocol_add_command(EFFECT_DISCONNECT, effects_disconnect_cb);
     protocol_add_command(EFFECT_BYPASS, effects_bypass_cb);
