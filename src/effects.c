@@ -1246,7 +1246,10 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
                     max = lilv_node_as_float(lilv_maximum);
 
                 if (lilv_port_has_property(lilv_plugin, lilv_port, g_sample_rate_node))
-                    value /= g_sample_rate;
+                {
+                    min *= g_sample_rate;
+                    max *= g_sample_rate;
+                }
 
                 if (value > max) value = max;
                 else if (value < min) value = min;
@@ -1298,11 +1301,15 @@ int effects_get_parameter(int effect_id, const char *control_symbol, float *valu
                     max = lilv_node_as_float(lilv_maximum);
 
                 (*value) = *(g_effects[effect_id].control_ports[i]->buffer);
-                if ((*value) > max) (*value) = max;
-                else if ((*value) < min) (*value) = min;
 
                 if (lilv_port_has_property(lilv_plugin, lilv_port, g_sample_rate_node))
-                    (*value) *= g_sample_rate;
+                {
+                    min *= g_sample_rate;
+                    max *= g_sample_rate;
+                }
+
+                if ((*value) > max) (*value) = max;
+                else if ((*value) < min) (*value) = min;
 
                 return SUCCESS;
             }
