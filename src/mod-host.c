@@ -106,6 +106,10 @@ save <filename>\n\
     e.g.: save my_preset\n\
     this command saves the history of typed commands\n\
 \n\
+cpu_load\n\
+    e.g: cpu_load\n\
+    shows the current jack cpu load\n\
+\n\
 help\n\
     show this message\n\
 \n\
@@ -264,6 +268,15 @@ static void monitor_addr_set_cb(proto_t *proto)
 
     char buffer[128];
     sprintf(buffer, "resp %i", resp);
+    protocol_response(buffer, proto);
+}
+
+static void cpu_load_cb(proto_t *proto)
+{
+    float value = effects_jack_cpu_load();
+    char buffer[128];
+    sprintf(buffer, "resp 0 %.04f", value);
+
     protocol_response(buffer, proto);
 }
 
@@ -455,6 +468,7 @@ int main(int argc, char **argv)
     protocol_add_command(EFFECT_PARAM_GET, effects_get_param_cb);
     protocol_add_command(EFFECT_PARAM_MON, effects_monitor_param_cb);
     protocol_add_command(MONITOR_ADDR_SET, monitor_addr_set_cb);
+    protocol_add_command(CPU_LOAD, cpu_load_cb);
     protocol_add_command(LOAD_COMMANDS, load_cb);
     protocol_add_command(SAVE_COMMANDS, save_cb);
     protocol_add_command(HELP, help_cb);

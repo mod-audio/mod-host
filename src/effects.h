@@ -113,7 +113,7 @@ int effects_bypass(int effect_id, int value);
 int effects_get_parameter_symbols(int effect_id, char** symbols);
 int effects_get_presets_labels(int effect_id, char **labels);
 int effects_get_parameter_info(int effect_id, const char *control_symbol, float **range, const char **scale_points);
-
+float effects_jack_cpu_load(void);
 
 /*
 ************************************************************************************************************************

@@ -1496,3 +1496,8 @@ int effects_get_parameter_info(int effect_id, const char *control_symbol, float 
 
     return ERR_LV2_INVALID_PARAM_SYMBOL;
 }
+
+float effects_jack_cpu_load(void)
+{
+    return jack_cpu_load(g_jack_global_client);
+}
