@@ -486,7 +486,7 @@ void completer_init(void)
 
     FILE *fp;
     char buffer[1024];
-    unsigned int plugins_count, i;
+    unsigned int plugins_count = 0, i;
 
     /* Count the commands and allocates memory */
     for (i = 0; g_full_commands[i]; i++);

@@ -681,7 +681,7 @@ static void UpdateValueFromMidi(midi_cc_t *midi_cc)
     if (!midi_cc) return;
 
     const float midi_value_min = 0.0, midi_value_max = 127.0;
-    float value;
+    float value = 0.0;
 
     if (midi_cc->properties.logarithmic)
     {
