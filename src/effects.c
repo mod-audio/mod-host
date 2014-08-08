@@ -498,7 +498,6 @@ static void SetParameterFromState(const char* symbol, void* user_data,
                                   const void* value, uint32_t size,
                                   uint32_t type)
 {
-    printf("setting: %s\n", symbol);
     UNUSED_PARAM(size);
     UNUSED_PARAM(type);
     effect_t *effect = (effect_t*)user_data;
@@ -1164,6 +1163,19 @@ int effects_remove(int effect_id)
             if (effect->input_audio_ports) free(effect->input_audio_ports);
             if (effect->output_audio_ports) free(effect->output_audio_ports);
             if (effect->control_ports) free(effect->control_ports);
+
+            if (effect->presets)
+            {
+                for (i = 0; i < effect->presets_count; i++)
+                {
+                    if (effect->presets[i])
+                    {
+                        free(effect->presets[i]);
+                    }
+                }
+                free(effect->presets);
+            }
+
 
             InstanceDelete(j);
         }
