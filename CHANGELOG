@@ -1,3 +1,33 @@
+0.10.5
+======
+
+  - new: lv2 presets support
+
+0.10.4
+======
+  - new: cpu_load information
+
+0.10.3
+======
+  - fix: sampleRate property implementation
+
+0.10.2
+======
+  - fix: calculates bounds when the port has the sampleRate property
+
+0.10.1
+======
+
+  - fix: checking last modified parameter
+
+0.10
+====
+
+  - new: man pages files
+  - new: control set parameter optimization
+  - new: documentation and autocomplete to monitor command
+  - fix: command print in verbose mode
+
 0.9
 ===
 

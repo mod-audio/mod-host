@@ -65,64 +65,71 @@ const char HELP_MESSAGE[] = {
 "\n\
 Valid commands:\n\n\
 add <lv2_uri> <instance_number>\n\
-    This command adds a lv2 effect to pedalboard (jack session)\n\
+    adds a lv2 effect to pedalboard (jack session)\n\
     e.g.: add http://lv2plug.in/plugins/eg-amp 0\n\
     instance_number must be any value between 0 ~ 9999, inclusively\n\
 \n\
 remove <instance_number>\n\
-    This command removes a lv2 effect from pedalboard\n\
+    removes a lv2 effect from pedalboard\n\
     e.g.: remove 0\n\
 \n\
 connect <origin_port> <destination_port>\n\
-    This command connects two ports of effects, hardware or MIDI\n\
+    connects two ports of effects, hardware or MIDI\n\
     e.g.: connect system:capture_1 effect_0:in\n\
 \n\
 disconnect <origin_port> <destination_port>\n\
-    This command disconnects two ports of effects, hardware or MIDI\n\
+    disconnects two ports of effects, hardware or MIDI\n\
     e.g.: disconnect system:capture_1 effect_0:in\n\
 \n\
+preset <instance_number> <preset_name>\n\
+    e.g.: preset 0 \"Invert CC Value\"\n\
+\n\
 param_set <instance_number> <param_symbol> <param_value>\n\
-    This command change the value of a parameter\n\
+    change the value of a parameter\n\
     e.g.: param_set 0 gain 2.50\n\
 \n\
 param_get <instance_number> <param_symbol>\n\
-    This command show the value of a parameter\n\
+    show the value of a parameter\n\
     e.g.: param_get 0 gain\n\
 \n\
 param_monitor <instance_number> <param_symbol> <cond_op> <value>\n\
-    This command defines a parameter to be monitored\n\
+    defines a parameter to be monitored\n\
     e.g: param_monitor 0 gain > 2.50\n\
 \n\
 monitor <addr> <port> <status>\n\
-    This command controls the monitoring of parameters\n\
+    controls the monitoring of parameters\n\
     e.g: monitor localhost 12345 1\n\
     if status = 1 start monitoring\n\
     if status = 0 stop monitoring\n\
 \n\
 map <instance_number> <param_symbol>\n\
-    This command maps a MIDI controller to control a parameter\n\
+    maps a MIDI controller to control a parameter\n\
     e.g.: map 0 gain\n\
 \n\
 unmap <instance_number> <param_symbol>\n\
-    This command unmaps a MIDI controller\n\
+    unmaps a MIDI controller\n\
     e.g.: unmap 0 gain\n\
 \n\
 bypass <instance_number> <bypass_value>\n\
-    This command process or bypass an effect\n\
+    process or bypass an effect\n\
     e.g.: bypass 0 1\n\
     if bypass_value = 1 bypass the effect\n\
     if bypass_value = 0 process the effect\n\
 \n\
 load <filename>\n\
-    This command loads the history of typed commands\n\
+    loads the history of typed commands\n\
     e.g.: load my_preset\n\
 \n\
 save <filename>\n\
-    This command saves the history of typed commands\n\
+    saves the history of typed commands\n\
     e.g.: save my_preset\n\
 \n\
+cpu_load\n\
+    shows the current jack cpu load\n\
+    e.g: cpu_load\n\
+\n\
 help\n\
-    This command show a help message\n\
+    show a help message\n\
 \n\
 quit\n\
     bye!\n"
@@ -186,6 +193,16 @@ static void effects_remove_cb(proto_t *proto)
 {
     int resp;
     resp = effects_remove(atoi(proto->list[1]));
+
+    char buffer[128];
+    sprintf(buffer, "resp %i", resp);
+    protocol_response(buffer, proto);
+}
+
+static void effects_preset_cb(proto_t *proto)
+{
+    int resp;
+    resp = effects_preset(atoi(proto->list[1]), proto->list[2]);
 
     char buffer[128];
     sprintf(buffer, "resp %i", resp);
@@ -297,6 +314,15 @@ static void effects_unmap_cb(proto_t *proto)
 
     char buffer[128];
     sprintf(buffer, "resp %i", resp);
+    protocol_response(buffer, proto);
+}
+
+static void cpu_load_cb(proto_t *proto)
+{
+    float value = effects_jack_cpu_load();
+    char buffer[128];
+    sprintf(buffer, "resp 0 %.04f", value);
+
     protocol_response(buffer, proto);
 }
 
@@ -480,6 +506,7 @@ int main(int argc, char **argv)
     /* Setup the protocol */
     protocol_add_command(EFFECT_ADD, effects_add_cb);
     protocol_add_command(EFFECT_REMOVE, effects_remove_cb);
+    protocol_add_command(EFFECT_PRESET, effects_preset_cb);
     protocol_add_command(EFFECT_CONNECT, effects_connect_cb);
     protocol_add_command(EFFECT_DISCONNECT, effects_disconnect_cb);
     protocol_add_command(EFFECT_BYPASS, effects_bypass_cb);
@@ -489,6 +516,7 @@ int main(int argc, char **argv)
     protocol_add_command(MONITOR_ADDR_SET, monitor_addr_set_cb);
     protocol_add_command(MAP_COMMANDS, effects_map_cb);
     protocol_add_command(UNMAP_COMMANDS, effects_unmap_cb);
+    protocol_add_command(CPU_LOAD, cpu_load_cb);
     protocol_add_command(LOAD_COMMANDS, load_cb);
     protocol_add_command(SAVE_COMMANDS, save_cb);
     protocol_add_command(HELP, help_cb);

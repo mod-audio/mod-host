@@ -44,6 +44,7 @@
 #include <lv2/lv2plug.in/ns/ext/worker/worker.h>
 #include <lv2/lv2plug.in/ns/ext/patch/patch.h>
 #include <lv2/lv2plug.in/ns/ext/event/event.h>
+#include <lv2/lv2plug.in/ns/ext/presets/presets.h>
 #include <lv2/lv2plug.in/ns/ext/options/options.h>
 #include <lv2/lv2plug.in/ns/ext/buf-size/buf-size.h>
 #include <lv2/lv2plug.in/ns/ext/parameters/parameters.h>
@@ -120,6 +121,11 @@ typedef struct PORT_T {
     bool old_ev_api;
 } port_t;
 
+typedef struct PRESET_T {
+    const LilvNode* label;
+    const LilvNode* preset;
+} preset_t;
+
 typedef struct MONITOR_T {
     int port_id;
     int op;
@@ -157,6 +163,9 @@ typedef struct EFFECT_T {
     uint32_t input_event_ports_count;
     port_t **output_event_ports;
     uint32_t output_event_ports_count;
+
+    preset_t **presets;
+    uint32_t presets_count;
 
     monitor_t **monitors;
     uint32_t monitors_count;
@@ -240,6 +249,7 @@ static LilvWorld *g_lv2_data;
 static const LilvPlugins *g_plugins;
 static LilvNode *g_enumeration_lilv_node, *g_integer_lilv_node, *g_toggled_lilv_node;
 static LilvNode *g_logarithmic_lilv_node, *g_trigger_lilv_node;
+static LilvNode *g_sample_rate_node;
 
 /* Global features */
 static Symap* g_symap;
@@ -595,7 +605,64 @@ static void GetFeatures(effect_t *effect)
     effect->features = features;
 }
 
-static void FreeFeatures(effect_t *effect)
+static void SetParameterFromState(const char* symbol, void* user_data,
+                                  const void* value, uint32_t size,
+                                  uint32_t type)
+{
+    UNUSED_PARAM(size);
+    UNUSED_PARAM(type);
+    effect_t *effect = (effect_t*)user_data;
+    effects_set_parameter(effect->instance, symbol, *((float*)value));
+}
+
+int LoadPresets(effect_t *effect)
+{
+    LilvNode *preset_uri = lilv_new_uri(g_lv2_data, LV2_PRESETS__Preset);
+	LilvNodes* presets = lilv_plugin_get_related(effect->lilv_plugin, preset_uri);
+    uint32_t presets_count = lilv_nodes_size(presets);
+    effect->presets_count = presets_count;
+    // allocate for presets
+    effect->presets = (preset_t **) calloc(presets_count, sizeof(preset_t *));
+    uint32_t j = 0;
+    for (j = 0; j < presets_count; j++) effect->presets[j] = NULL;
+    j = 0;
+	LILV_FOREACH(nodes, i, presets) {
+		const LilvNode* preset = lilv_nodes_get(presets, i);
+		lilv_world_load_resource(g_lv2_data, preset);
+        LilvNode *rdfs_label = lilv_new_uri(g_lv2_data, LILV_NS_RDFS "label");
+		LilvNodes* labels = lilv_world_find_nodes(
+			g_lv2_data, preset, rdfs_label, NULL);
+		if (labels) {
+			const LilvNode* label = lilv_nodes_get_first(labels);
+            effect->presets[j] = (preset_t *) malloc(sizeof(preset_t));
+            effect->presets[j]->label = lilv_node_duplicate(label);
+            effect->presets[j]->preset = lilv_node_duplicate(preset);
+			lilv_nodes_free(labels);
+		} else {
+			fprintf(stderr, "Preset <%s> has no rdfs:label\n",
+			        lilv_node_as_string(lilv_nodes_get(presets, i)));
+		}
+        j++;
+	}
+	lilv_nodes_free(presets);
+
+	return 0;
+}
+
+int FindPreset(effect_t *effect, const char *label, const LilvNode **preset)
+{
+    UNUSED_PARAM(preset);
+    uint32_t i;
+    for(i=0; i<effect->presets_count; i++) {
+        if(strcmp(label, lilv_node_as_string(effect->presets[i]->label)) == 0) {
+            *preset = (effect->presets[i]->preset);
+            return SUCCESS;
+        }
+    }
+    return -400;
+}
+
+void FreeFeatures(effect_t *effect)
 {
     worker_finish(&effect->worker);
 
@@ -691,6 +758,10 @@ int effects_init(void)
     g_lv2_data = lilv_world_new();
     lilv_world_load_all(g_lv2_data);
     g_plugins = lilv_world_get_all_plugins(g_lv2_data);
+
+    /* Get sample rate */
+    g_sample_rate = jack_get_sample_rate(g_jack_global_client);
+    g_sample_rate_node = lilv_new_uri(g_lv2_data, LV2_CORE__sampleRate);
 
     /* URI and URID Feature initialization */
     urid_sem_init();
@@ -794,6 +865,7 @@ int effects_finish(void)
     effects_remove(REMOVE_ALL);
     jack_client_close(g_jack_global_client);
     symap_free(g_symap);
+    lilv_node_free(g_sample_rate_node);
 
     lilv_node_free(g_enumeration_lilv_node);
     lilv_node_free(g_integer_lilv_node);
@@ -846,6 +918,7 @@ int effects_add(const char *uid, int instance)
     effect->input_audio_ports = NULL;
     effect->output_audio_ports = NULL;
     effect->control_ports = NULL;
+    effect->presets = NULL;
 
     /* Init the pointers */
     lilv_instance = NULL;
@@ -951,6 +1024,8 @@ int effects_add(const char *uid, int instance)
     event_ports_count = 0;
     input_event_ports_count = 0;
     output_event_ports_count = 0;
+    effect->presets_count = 0;
+    effect->presets = NULL;
     effect->monitors_count = 0;
     effect->monitors = NULL;
     effect->ports_count = ports_count;
@@ -1185,6 +1260,7 @@ int effects_add(const char *uid, int instance)
         goto error;
     }
 
+    LoadPresets(effect);
     return instance;
 
     error:
@@ -1200,6 +1276,22 @@ int effects_add(const char *uid, int instance)
         effects_remove(instance);
 
     return error;
+}
+
+int effects_preset(int effect_id, const char *label) {
+    effect_t *effect;
+    if (InstanceExist(effect_id))
+    {
+        const LilvNode* preset;
+        effect = &g_effects[effect_id];
+        if (FindPreset(effect, label, &preset) == SUCCESS)
+        {
+            LilvState* state = lilv_state_new_from_world(g_lv2_data, &g_urid_map, preset);
+            lilv_state_restore(state, effect->lilv_instance, SetParameterFromState, effect, 0, NULL);
+            lilv_state_free(state);
+        }
+    }
+    return SUCCESS;
 }
 
 int effects_remove(int effect_id)
@@ -1265,6 +1357,19 @@ int effects_remove(int effect_id)
             if (effect->output_audio_ports) free(effect->output_audio_ports);
             if (effect->control_ports) free(effect->control_ports);
 
+            if (effect->presets)
+            {
+                for (i = 0; i < effect->presets_count; i++)
+                {
+                    if (effect->presets[i])
+                    {
+                        free(effect->presets[i]);
+                    }
+                }
+                free(effect->presets);
+            }
+
+
             InstanceDelete(j);
         }
     }
@@ -1291,8 +1396,6 @@ int effects_disconnect(const char *portA, const char *portB)
 
     ret = jack_disconnect(g_jack_global_client, portA, portB);
     if (ret != 0) ret = jack_disconnect(g_jack_global_client, portB, portA);
-    if (ret == EEXIST) ret = 0;
-
     if (ret != 0) return ERR_JACK_PORT_DISCONNECTION;
 
     return ret;
@@ -1308,12 +1411,32 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
     LilvNode *lilv_default, *lilv_minimum, *lilv_maximum;
     float min = 0.0, max = 0.0;
 
+    static int last_effect_id = -1;
+    static const char *last_symbol = 0;
+    static float *last_buffer = 0, last_min, last_max;
+
     if (InstanceExist(effect_id))
     {
-        for (i = 0; i < g_effects[effect_id].control_ports_count; i++)
+        // check whether is setting the same parameter
+        if (last_effect_id == effect_id)
+        {
+            if (last_symbol && strcmp(last_symbol, control_symbol) == 0)
+            {
+                if (value > last_max) value = last_max;
+                else if (value < last_min) value = last_min;
+
+                last_effect_id = effect_id;
+                *last_buffer = value;
+
+                return SUCCESS;
+            }
+        }
+
+        // try to find the symbol and set the new value
+        for (i = 0; i < g_effects[effect_id].input_control_ports_count; i++)
         {
             lilv_plugin = g_effects[effect_id].lilv_plugin;
-            lilv_port = g_effects[effect_id].control_ports[i]->lilv_port;
+            lilv_port = g_effects[effect_id].input_control_ports[i]->lilv_port;
             symbol_node = lilv_port_get_symbol(lilv_plugin, lilv_port);
             symbol = lilv_node_as_string(symbol_node);
 
@@ -1327,9 +1450,21 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
                 if (lilv_node_is_float(lilv_maximum) || lilv_node_is_int(lilv_maximum) || lilv_node_is_bool(lilv_maximum))
                     max = lilv_node_as_float(lilv_maximum);
 
+                if (lilv_port_has_property(lilv_plugin, lilv_port, g_sample_rate_node))
+                {
+                    min *= g_sample_rate;
+                    max *= g_sample_rate;
+                }
+
                 if (value > max) value = max;
                 else if (value < min) value = min;
-                *(g_effects[effect_id].control_ports[i]->buffer) = value;
+                *(g_effects[effect_id].input_control_ports[i]->buffer) = value;
+
+                // stores the data of the current control
+                last_symbol = control_symbol;
+                last_buffer = g_effects[effect_id].input_control_ports[i]->buffer;
+                last_min = min;
+                last_max = max;
 
                 return SUCCESS;
             }
@@ -1371,8 +1506,16 @@ int effects_get_parameter(int effect_id, const char *control_symbol, float *valu
                     max = lilv_node_as_float(lilv_maximum);
 
                 (*value) = *(g_effects[effect_id].control_ports[i]->buffer);
+
+                if (lilv_port_has_property(lilv_plugin, lilv_port, g_sample_rate_node))
+                {
+                    min *= g_sample_rate;
+                    max *= g_sample_rate;
+                }
+
                 if ((*value) > max) (*value) = max;
                 else if ((*value) < min) (*value) = min;
+
                 return SUCCESS;
             }
         }
@@ -1460,6 +1603,27 @@ int effects_get_parameter_symbols(int effect_id, char** symbols)
     return SUCCESS;
 }
 
+int effects_get_presets_labels(int effect_id, char **labels)
+{
+    if (!InstanceExist(effect_id))
+    {
+        labels = NULL;
+        return ERR_INSTANCE_NON_EXISTS;
+    }
+
+    uint32_t i;
+    effect_t *effect = &g_effects[effect_id];
+
+    for (i = 0; i < effect->presets_count; i++)
+    {
+        labels[i] = (char *) lilv_node_as_string(effect->presets[i]->label);
+    }
+
+    labels[i] = NULL;
+
+    return SUCCESS;
+}
+
 int effects_get_parameter_info(int effect_id, const char *control_symbol, float **range, const char **scale_points)
 {
     if (!InstanceExist(effect_id))
@@ -1494,6 +1658,12 @@ int effects_get_parameter_info(int effect_id, const char *control_symbol, float 
 
             if (lilv_node_is_float(lilv_default) || lilv_node_is_int(lilv_default) || lilv_node_is_bool(lilv_default))
                 def = lilv_node_as_float(lilv_default);
+
+            if (lilv_port_has_property(lilv_plugin, lilv_port, g_sample_rate_node))
+            {
+                min *= g_sample_rate;
+                max *= g_sample_rate;
+            }
 
             (*range[0]) = def;
             (*range[1]) = min;
@@ -1614,4 +1784,9 @@ int effects_unmap_parameter(int effect_id, const char *control_symbol)
     }
 
     return ERR_MIDI_PARAM_NOT_FOUND;
+}
+
+float effects_jack_cpu_load(void)
+{
+    return jack_cpu_load(g_jack_global_client);
 }

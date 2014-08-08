@@ -53,6 +53,7 @@
 /* Protocol commands definition */
 #define EFFECT_ADD          "add %s %i"
 #define EFFECT_REMOVE       "remove %i"
+#define EFFECT_PRESET       "preset %i %s"
 #define EFFECT_CONNECT      "connect %s %s"
 #define EFFECT_DISCONNECT   "disconnect %s %s"
 #define EFFECT_BYPASS       "bypass %i %i"
@@ -62,6 +63,7 @@
 #define MONITOR_ADDR_SET    "monitor %s %i %i"
 #define MAP_COMMANDS        "map %i %s"
 #define UNMAP_COMMANDS      "unmap %i %s"
+#define CPU_LOAD            "cpu_load"
 #define LOAD_COMMANDS       "load %s"
 #define SAVE_COMMANDS       "save %s"
 #define HELP                "help"
