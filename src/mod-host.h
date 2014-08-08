@@ -72,6 +72,7 @@
 #define MOD_HOST_COMMANDS   \
     EFFECT_ADD,             \
     EFFECT_REMOVE,          \
+    EFFECT_PRESET,          \
     EFFECT_CONNECT,         \
     EFFECT_DISCONNECT,      \
     EFFECT_BYPASS,          \
