@@ -55,7 +55,7 @@ Run
 ---
 
 mod-host does not startup jackd automatically, so you need to start it before
-run mod-host.
+running mod-host.
 
 If you run mod-host without parameters the process will be forked and can only
 be controlled through the socket.
