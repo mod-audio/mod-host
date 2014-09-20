@@ -32,7 +32,7 @@ endif
 LIBS = -ljack `pkg-config --libs lilv-0` -largtable2 -lreadline -lpthread
 
 # additional include paths
-INCS = -I/usr/include/lilv-0
+INCS = -I/usr/include/lilv-0 -I/usr/local/include/lilv-0
 
 # remove command
 RM = rm -f
