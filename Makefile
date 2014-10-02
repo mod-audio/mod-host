@@ -15,8 +15,9 @@ PROG = mod-host
 
 # default install paths
 PREFIX = /usr/local
-INSTALL_PATH = $(PREFIX)/bin
-MANDIR = $(PREFIX)/share/man/man1/
+BINDIR = $(PREFIX)/bin
+SHAREDIR = $(PREFIX)/share
+MANDIR = $(SHAREDIR)/man/man1/
 
 # default compiler and linker flags
 CFLAGS = -O3 -Wall -Wextra -c -std=gnu99
@@ -28,11 +29,11 @@ ifeq ($(DEBUG), 1)
    LDFLAGS =
 endif
 
-# library links
-LIBS = -ljack `pkg-config --libs lilv-0` -largtable2 -lreadline -lpthread
+# libraries
+LIBS = `pkg-config --libs jack` `pkg-config --libs lilv-0` -lreadline -lpthread
 
-# additional include paths
-INCS = -I/usr/include/lilv-0
+# include paths
+INCS = `pkg-config --cflags lilv-0`
 
 # remove command
 RM = rm -f
@@ -51,7 +52,7 @@ $(PROG): $(OBJ)
 
 # install rule
 install:
-	install $(PROG) $(INSTALL_PATH)
+	install $(PROG) $(BINDIR)
 
 # clean rule
 clean:
