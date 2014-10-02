@@ -34,7 +34,7 @@
 #include <fcntl.h>
 #include <string.h>
 #include <unistd.h>
-#include <argtable2.h>
+#include <getopt.h>
 #include <readline/readline.h>
 #include <readline/history.h>
 
@@ -100,10 +100,10 @@ bypass <instance_number> <bypass_value>\n\
     if bypass_value = 0 process the effect\n\
 \n\
 load <filename>\n\
-    e.g.: load my_preset\n\
+    e.g.: load my_setup\n\
 \n\
 save <filename>\n\
-    e.g.: save my_preset\n\
+    e.g.: save my_setup\n\
     this command saves the history of typed commands\n\
 \n\
 cpu_load\n\
@@ -391,47 +391,47 @@ void interactive_mode(void)
 
 int main(int argc, char **argv)
 {
-    int verbose, socket_port, interactive;
-
     /* Command line options */
-    struct arg_lit *_verbose = arg_lit0("v", "verbose,debug", "verbose messages");
-    struct arg_int *_socket = arg_int0("p", "socket-port", "<port>", "socket port definition");
-    struct arg_lit *_interactive = arg_lit0("i", "interactive", "interactive mode");
-    struct arg_lit *_help = arg_lit0("h", "help", "print this help and exit");
-    struct arg_end *_end = arg_end(20);
-    void *argtable[] = {_verbose, _socket, _interactive, _help, _end};
+    static struct option long_options[] = {
+        {"verbose", no_argument, 0, 'v'},
+        {"socket-port", required_argument, 0, 'p'},
+        {"interactive", no_argument, 0, 'i'},
+        {"help", no_argument, 0, 'h'},
+        {0, 0, 0, 0}
+    };
 
-    if (arg_nullcheck(argtable))
+    int opt, opt_index = 0;
+
+    /* parse command line options */
+    int verbose = 0, socket_port = SOCKET_DEFAULT_PORT, interactive = 0;
+    while ((opt = getopt_long(argc, argv, "vp:ih", long_options, &opt_index)) != -1)
     {
-        fprintf(stderr, "argtable error: insufficient memory\n");
-        exit(EXIT_FAILURE);
-    }
-
-    /* Default value of command line arguments */
-    _socket->ival[0] = SOCKET_DEFAULT_PORT;
-
-    /* Run the argument parser */
-    if (arg_parse(argc, argv, argtable) == 0)
-    {
-        if (_help->count > 0)
+        switch (opt)
         {
-            fprintf(stdout, "Usage: %s", argv[0]);
-            arg_print_syntax(stdout, argtable, "\n");
-            arg_print_glossary(stdout, argtable, "  %-30s %s\n");
-            exit(EXIT_SUCCESS);
+            case 'v':
+                verbose = 1;
+                break;
+
+            case 'p':
+                socket_port = atoi(optarg);
+                break;
+
+            case 'i':
+                interactive = 1;
+                break;
+
+            case 'h':
+                printf(
+                    "Usage: %s [-vih] [-p <port>]\n"
+                    "  -v, --verbose                  verbose messages\n"
+                    "  -p, --socket-port=<port>       socket port definition\n"
+                    "  -i, --interactive              interactive mode\n"
+                    "  -h, --help                     print this help and exit\n",
+                argv[0]);
+
+                exit(EXIT_SUCCESS);
         }
-
-        verbose = _verbose->count;
-        socket_port = _socket->ival[0];
-        interactive = _interactive->count;
     }
-    else
-    {
-        arg_print_errors(stderr, _end, argv[0]);
-        exit(EXIT_FAILURE);
-    }
-
-    arg_freetable(argtable, sizeof(argtable)/sizeof(argtable[0]));
 
     /* If verbose or interactive, don't fork */
     if (!verbose && !interactive)
