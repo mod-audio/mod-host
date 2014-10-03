@@ -49,23 +49,40 @@ To turn doc/man.txt into a groff manpage you need txt2man. To build and install 
 
 To read the manual type `man mod-host` in your terminal.
 
+
 Running
 -------
 
 mod-host does not startup JACK automatically, so you need to start it before
 running mod-host.
 
-If you run mod-host without parameters the process will be forked and can only
+If you run mod-host without options the process will be forked and it can only
 be controlled through the socket.
-The default socket port is 5555, this can be changed by passing the parameter
+The default socket port is 5555, this can be changed by passing the option
 -p (or --socket-port) to mod-host.
 
 The other way to control mod-host is the interactive mode, in this case the
 commands must be provided on the shell prompt.
 The interactive mode has autocomplete, therefore, you can always type `[TAB]`
-twice if you need a hint.
+twice any time you want a hint.
 
 Note: When you are in the interactive mode, the socket communication won't work.
+
+
+Options
+-------
+    -v, --verbose
+        verbose messages
+
+    -p, --socket-port=<port>
+        socket port definition
+
+    -i, --interactive
+        interactive shell mode
+
+    -h, --help
+        print help and exit
+
 
 Commands (or Protocol)
 ----------------------

@@ -43,8 +43,9 @@ SRC = $(wildcard $(SRC_DIR)/*.$(EXT))
 OBJ = $(SRC:.$(EXT)=.o)
 
 # linking rule
-$(PROG): $(OBJ)
+$(PROG): help_msg $(OBJ)
 	$(LD) $(LDFLAGS) $(OBJ) -o $(PROG) $(LIBS)
+	@rm src/help_msg.h
 
 # meta-rule to generate the object files
 %.o: %.$(EXT)
@@ -56,7 +57,7 @@ install:
 
 # clean rule
 clean:
-	$(RM) $(SRC_DIR)/*.o $(PROG)
+	$(RM) $(SRC_DIR)/*.o $(PROG) help_msg
 
 # manual page rule
 man:
@@ -65,3 +66,11 @@ man:
 # install manual page rule
 install-man: man
 	install doc/*.1 $(MANDIR)
+
+# generate the source file with the help message
+A=`grep -n 'The commands supported' README.md | cut -d':' -f1`
+B=`grep -n 'bye!' README.md | cut -d':' -f1`
+help_msg:
+	@sed -n -e "$A,$B p" -e "$B q" README.md > help_msg
+	@utils/txt2cvar.py help_msg > src/help_msg.h
+	@rm help_msg

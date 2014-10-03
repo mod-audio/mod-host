@@ -44,6 +44,7 @@
 #include "protocol.h"
 #include "completer.h"
 #include "monitor.h"
+#include "help_msg.h"
 
 
 /*
@@ -61,61 +62,8 @@
 ************************************************************************************************************************
 */
 
-const char HELP_MESSAGE[] = {
-"\n\
-Valid commands:\n\n\
-add <lv2_uri> <instance_number>\n\
-    e.g.: add http://lv2plug.in/plugins/eg-amp 0\n\
-    instance_number must be any value between 0 ~ 9999, inclusively\n\
-\n\
-remove <instance_number>\n\
-    e.g.: remove 0\n\
-\n\
-connect <origin_port> <destination_port>\n\
-    e.g.: connect system:capture_1 effect_0:in\n\
-\n\
-disconnect <origin_port> <destination_port>\n\
-    e.g.: disconnect system:capture_1 effect_0:in\n\
-\n\
-preset <instance_number> <preset_name>\n\
-    e.g.: preset 0 \"Invert CC Value\"\n\
-\n\
-param_set <instance_number> <param_symbol> <param_value>\n\
-    e.g.: param_set 0 gain 2.50\n\
-\n\
-param_get <instance_number> <param_symbol>\n\
-    e.g.: param_get 0 gain\n\
-\n\
-param_monitor <instance_number> <param_symbol> <cond_op> <value>\n\
-    e.g: param_monitor 0 gain > 2.50\n\
-\n\
-monitor <addr> <port> <status>\n\
-    e.g: monitor localhost 12345 1\n\
-    if status = 1 start monitoring\n\
-    if status = 0 stop monitoring\n\
-\n\
-bypass <instance_number> <bypass_value>\n\
-    e.g.: bypass 0 1\n\
-    if bypass_value = 1 bypass the effect\n\
-    if bypass_value = 0 process the effect\n\
-\n\
-load <filename>\n\
-    e.g.: load my_setup\n\
-\n\
-save <filename>\n\
-    e.g.: save my_setup\n\
-    this command saves the history of typed commands\n\
-\n\
-cpu_load\n\
-    e.g: cpu_load\n\
-    shows the current jack cpu load\n\
-\n\
-help\n\
-    show this message\n\
-\n\
-quit\n\
-    bye!\n"
-};
+/* The text of help message is extracted from README file */
+extern const char help_msg[];
 
 
 /*
@@ -333,7 +281,10 @@ static void save_cb(proto_t *proto)
 static void help_cb(proto_t *proto)
 {
     proto->response = 0;
-    fprintf(stdout, HELP_MESSAGE);
+
+    unsigned int i;
+    for (i = 0; i < sizeof(help_msg); i++)
+        printf("%c", help_msg[i]);
     fflush(stdout);
 }
 
