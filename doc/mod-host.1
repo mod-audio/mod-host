@@ -1,0 +1,178 @@
+.TH mod\-host
+.SH About
+.PP
+mod\-host is a LV2 host for JACK, controllable via socket or command line
+.PP
+Currently the host supports the following LV2 features:
+.RS
+.IP \(bu 2
+lv2core
+.IP \(bu 2
+atom
+.IP \(bu 2
+event
+.IP \(bu 2
+buf\-size
+.IP \(bu 2
+midi
+.IP \(bu 2
+options
+.IP \(bu 2
+uri\-map
+.IP \(bu 2
+urid
+.IP \(bu 2
+worker
+.IP \(bu 2
+presets
+.RE
+.PP
+mod\-host is part of the MOD project
+\[la]http://portalmod.com\[ra]\&.
+.SH Building
+.PP
+mod\-host uses a simple Makefile to build the source code.
+The steps to build and install are:
+.PP
+.RS
+.nf
+make
+make install
+.fi
+.RE
+.PP
+You can change the base installation path passing PREFIX as argument of make.
+.PP
+Dependencies:
+.PP
+.RS
+.nf
+libjack\-jackd2  >= 1.9.8
+liblilv         >= 0.14.2
+libreadline     >= 6.2
+lilv\-utils      (optional)
+.fi
+.RE
+.SH Running
+.PP
+mod\-host does not startup JACK automatically, so you need to start it before
+running mod\-host.
+.PP
+If you run mod\-host without options the process will be forked and it can only
+be controlled through the socket.
+The default socket port is 5555, this can be changed by passing the option
+\-p (or \-\-socket\-port) to mod\-host.
+.PP
+The other way to control mod\-host is the interactive mode, in this case the
+commands must be provided on the shell prompt.
+The interactive mode has autocomplete, therefore, you can always type \fB\fC[TAB]\fR
+twice any time you want a hint.
+.PP
+Note: When you are in the interactive mode, the socket communication won't work.
+.SH Options
+.PP
+.RS
+.nf
+\-v, \-\-verbose
+    verbose messages
+\-p, \-\-socket\-port=<port>
+    socket port definition
+\-i, \-\-interactive
+    interactive shell mode
+\-h, \-\-help
+    print help and exit
+.fi
+.RE
+.SH Commands (or Protocol)
+.PP
+The commands supported by mod\-host are:
+.PP
+.RS
+.nf
+add <lv2_uri> <instance_number>
+    e.g.: add http://lv2plug.in/plugins/eg\-amp 0
+    instance_number must be any value between 0 ~ 9999, inclusively
+remove <instance_number>
+    e.g.: remove 0
+connect <origin_port> <destination_port>
+    e.g.: connect system:capture_1 effect_0:in
+disconnect <origin_port> <destination_port>
+    e.g.: disconnect system:capture_1 effect_0:in
+preset <instance_number> <preset_name>
+    e.g.: preset 0 "Invert CC Value"
+param_set <instance_number> <param_symbol> <param_value>
+    e.g.: param_set 0 gain 2.50
+param_get <instance_number> <param_symbol>
+    e.g.: param_get 0 gain
+param_monitor <instance_number> <param_symbol> <cond_op> <value>
+    e.g: param_monitor 0 gain > 2.50
+monitor <addr> <port> <status>
+    e.g: monitor localhost 12345 1
+    if status = 1 start monitoring
+    if status = 0 stop monitoring
+bypass <instance_number> <bypass_value>
+    e.g.: bypass 0 1
+    if bypass_value = 1 bypass the effect
+    if bypass_value = 0 process the effect
+load <filename>
+    e.g.: load my_setup
+save <filename>
+    e.g.: save my_setup
+    this command saves the history of typed commands
+help
+    show a help message
+quit
+    bye!
+.fi
+.RE
+.PP
+For each effect added one client on JACK will be created. The names of clients
+follow the standard: effect\fI<instance\fPnumber>
+.PP
+For each command sent one response is given. If the command is valid the
+response format will be:
+.PP
+.RS
+.nf
+resp <status> [value]
+.fi
+.RE
+.PP
+If status is a negative number, an error occurred. The error will be one of the
+following:
+.TS
+allbox;
+cb cb
+l l
+l l
+l l
+l l
+l l
+l l
+l l
+l l
+l l
+l l
+l l
+l l
+l l
+.
+status	error
+\-1	ERR_INSTANCE_INVALID
+\-2	ERR_INSTANCE_ALREADY_EXISTS
+\-3	ERR_INSTANCE_NON_EXISTS
+\-101	ERR_LV2_INVALID_URI
+\-102	ERR_LILV_INSTANTIATION
+\-103	ERR_LV2_INVALID_PARAM_SYMBOL
+\-201	ERR_JACK_CLIENT_CREATION
+\-202	ERR_JACK_CLIENT_ACTIVATION
+\-203	ERR_JACK_CLIENT_DEACTIVATION
+\-204	ERR_JACK_PORT_REGISTER
+\-205	ERR_JACK_PORT_CONNECTION
+\-206	ERR_JACK_PORT_DISCONNECTION
+\-301	ERR_MEMORY_ALLOCATION
+.TE
+.PP
+A status zero or positive means that the command was executed successfully.
+In case of the add command, the status returned is the instance number.
+The value field currently only exists for the param_get command.

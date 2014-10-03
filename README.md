@@ -1,5 +1,3 @@
-![alt text](https://dl.dropboxusercontent.com/u/98438890/mod-logo.png "MOD")
-
 mod-host
 ========
 
@@ -41,13 +39,6 @@ Dependencies:
     liblilv         >= 0.14.2
     libreadline     >= 6.2
     lilv-utils      (optional)
-
-To turn doc/man.txt into a groff manpage you need txt2man. To build and install the manpage run:
-
-    make man
-    sudo make install-man
-
-To read the manual type `man mod-host` in your terminal.
 
 
 Running
@@ -148,21 +139,21 @@ response format will be:
 If status is a negative number, an error occurred. The error will be one of the
 following:
 
-| status  | error                           |
-| --------|---------------------------------|
-| -1      | ERR_INSTANCE_INVALID            |
-| -2      | ERR_INSTANCE_ALREADY_EXISTS     |
-| -3      | ERR_INSTANCE_NON_EXISTS         |
-| -101    | ERR_LV2_INVALID_URI             |
-| -102    | ERR_LILV_INSTANTIATION          |
-| -103    | ERR_LV2_INVALID_PARAM_SYMBOL    |
-| -201    | ERR_JACK_CLIENT_CREATION        |
-| -202    | ERR_JACK_CLIENT_ACTIVATION      |
-| -203    | ERR_JACK_CLIENT_DEACTIVATION    |
-| -204    | ERR_JACK_PORT_REGISTER          |
-| -205    | ERR_JACK_PORT_CONNECTION        |
-| -206    | ERR_JACK_PORT_DISCONNECTION     |
-| -301    | ERR_MEMORY_ALLOCATION           |
+| status  | error                            |
+| --------|----------------------------------|
+| -1      | ERR\_INSTANCE\_INVALID           |
+| -2      | ERR\_INSTANCE\_ALREADY\_EXISTS   |
+| -3      | ERR\_INSTANCE\_NON\_EXISTS       |
+| -101    | ERR\_LV2\_INVALID\_URI           |
+| -102    | ERR\_LILV\_INSTANTIATION         |
+| -103    | ERR\_LV2\_INVALID\_PARAM\_SYMBOL |
+| -201    | ERR\_JACK\_CLIENT\_CREATION      |
+| -202    | ERR\_JACK\_CLIENT\_ACTIVATION    |
+| -203    | ERR\_JACK\_CLIENT\_DEACTIVATION  |
+| -204    | ERR\_JACK\_PORT\_REGISTER        |
+| -205    | ERR\_JACK\_PORT\_CONNECTION      |
+| -206    | ERR\_JACK\_PORT\_DISCONNECTION   |
+| -301    | ERR\_MEMORY\_ALLOCATION          |
 
 A status zero or positive means that the command was executed successfully.
 In case of the add command, the status returned is the instance number.

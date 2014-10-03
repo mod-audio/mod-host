@@ -52,7 +52,7 @@ $(PROG): help_msg $(OBJ)
 	$(CC) $(CFLAGS) $(INCS) -o $@ $<
 
 # install rule
-install:
+install: install_man
 	install $(PROG) $(BINDIR)
 
 # clean rule
@@ -60,11 +60,13 @@ clean:
 	$(RM) $(SRC_DIR)/*.o $(PROG) help_msg
 
 # manual page rule
+# Uses md2man to convert the README to groff man page
+# https://github.com/sunaku/md2man
 man:
-	txt2man -s 1 -t MOD-HOST doc/man.txt > doc/mod-host.1
+	md2man-roff README.md > doc/mod-host.1
 
 # install manual page rule
-install-man: man
+install_man: man
 	install doc/*.1 $(MANDIR)
 
 # generate the source file with the help message
