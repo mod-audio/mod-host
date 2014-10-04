@@ -71,6 +71,9 @@ Options
     -i, --interactive
         interactive shell mode
 
+    -V, --version
+        print program version and exit
+
     -h, --help
         print help and exit
 

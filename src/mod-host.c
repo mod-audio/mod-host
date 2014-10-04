@@ -44,7 +44,7 @@
 #include "protocol.h"
 #include "completer.h"
 #include "monitor.h"
-#include "help_msg.h"
+#include "info.h"
 
 
 /*
@@ -64,6 +64,8 @@
 
 /* The text of help message is extracted from README file */
 extern const char help_msg[];
+/* The version is extracted from git history */
+extern const char version[];
 
 
 /*
@@ -347,6 +349,7 @@ int main(int argc, char **argv)
         {"verbose", no_argument, 0, 'v'},
         {"socket-port", required_argument, 0, 'p'},
         {"interactive", no_argument, 0, 'i'},
+        {"version", no_argument, 0, 'V'},
         {"help", no_argument, 0, 'h'},
         {0, 0, 0, 0}
     };
@@ -355,7 +358,7 @@ int main(int argc, char **argv)
 
     /* parse command line options */
     int verbose = 0, socket_port = SOCKET_DEFAULT_PORT, interactive = 0;
-    while ((opt = getopt_long(argc, argv, "vp:ih", long_options, &opt_index)) != -1)
+    while ((opt = getopt_long(argc, argv, "vp:iVh", long_options, &opt_index)) != -1)
     {
         switch (opt)
         {
@@ -371,12 +374,22 @@ int main(int argc, char **argv)
                 interactive = 1;
                 break;
 
+            case 'V':
+                printf(
+                    "%s version: %s\n"
+                    "source code: https://github.com/portalmod/mod-host\n",
+                argv[0], version);
+
+                exit(EXIT_SUCCESS);
+                break;
+
             case 'h':
                 printf(
                     "Usage: %s [-vih] [-p <port>]\n"
                     "  -v, --verbose                  verbose messages\n"
                     "  -p, --socket-port=<port>       socket port definition\n"
                     "  -i, --interactive              interactive mode\n"
+                    "  -V, --version                  print program version and exit\n"
                     "  -h, --help                     print this help and exit\n",
                 argv[0]);
 

@@ -43,9 +43,9 @@ SRC = $(wildcard $(SRC_DIR)/*.$(EXT))
 OBJ = $(SRC:.$(EXT)=.o)
 
 # linking rule
-$(PROG): help_msg $(OBJ)
+$(PROG): get_info $(OBJ)
 	$(LD) $(LDFLAGS) $(OBJ) -o $(PROG) $(LIBS)
-	@rm src/help_msg.h
+	@rm src/info.h
 
 # meta-rule to generate the object files
 %.o: %.$(EXT)
@@ -57,7 +57,7 @@ install: install_man
 
 # clean rule
 clean:
-	$(RM) $(SRC_DIR)/*.o $(PROG) help_msg
+	$(RM) $(SRC_DIR)/*.o $(PROG) src/info.h
 
 # manual page rule
 # Uses md2man to convert the README to groff man page
@@ -66,13 +66,14 @@ man:
 	md2man-roff README.md > doc/mod-host.1
 
 # install manual page rule
-install_man: man
+install_man:
 	install doc/*.1 $(MANDIR)
 
 # generate the source file with the help message
 A=`grep -n 'The commands supported' README.md | cut -d':' -f1`
 B=`grep -n 'bye!' README.md | cut -d':' -f1`
-help_msg:
+get_info:
 	@sed -n -e "$A,$B p" -e "$B q" README.md > help_msg
-	@utils/txt2cvar.py help_msg > src/help_msg.h
+	@utils/txt2cvar.py help_msg > src/info.h
 	@rm help_msg
+	@echo "const char version[] = {\""`git describe --tags`\""};" >> src/info.h
