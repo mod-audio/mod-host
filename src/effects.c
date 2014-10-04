@@ -272,7 +272,7 @@ static void InstanceDelete(int effect_id)
 {
     if (INSTANCE_IS_VALID(effect_id))
     {
-        g_effects[effect_id].lilv_instance = NULL;
+        g_effects[effect_id].jack_client = NULL;
     }
 }
 
@@ -280,7 +280,7 @@ static int InstanceExist(int effect_id)
 {
     if (INSTANCE_IS_VALID(effect_id))
     {
-        return (int)(g_effects[effect_id].lilv_instance != NULL);
+        return (int)(g_effects[effect_id].jack_client != NULL);
     }
 
     return 0;
@@ -555,14 +555,16 @@ void FreeFeatures(effect_t *effect)
 {
     worker_finish(&effect->worker);
 
-    if (effect->features[WORKER_FEATURE]->data)
-        free(effect->features[WORKER_FEATURE]->data);
-
-    if (effect->features[WORKER_FEATURE])
-        free((void*)effect->features[WORKER_FEATURE]);
-
     if (effect->features)
+    {
+        if (effect->features[WORKER_FEATURE]->data)
+            free(effect->features[WORKER_FEATURE]->data);
+
+        if (effect->features[WORKER_FEATURE])
+            free((void*)effect->features[WORKER_FEATURE]);
+
         free(effect->features);
+    }
 }
 
 
