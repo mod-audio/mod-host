@@ -215,6 +215,7 @@ static effect_t g_effects[MAX_INSTANCES];
 /* Jack */
 static jack_client_t *g_jack_global_client;
 static jack_nframes_t g_sample_rate, g_block_length;
+static const char **g_capture_ports, **g_playback_ports;
 static size_t g_midi_buffer_size;
 
 /* LV2 and Lilv */
@@ -584,6 +585,10 @@ int effects_init(void)
         return ERR_JACK_CLIENT_CREATION;
     }
 
+    /* Get the system ports */
+    g_capture_ports = jack_get_ports(g_jack_global_client, "system", NULL, JackPortIsOutput);
+    g_playback_ports = jack_get_ports(g_jack_global_client, "system", NULL, JackPortIsInput);
+
     /* Get buffers size */
     g_block_length = jack_get_buffer_size(g_jack_global_client);
     g_midi_buffer_size = jack_port_type_get_buffer_size(g_jack_global_client, JACK_DEFAULT_MIDI_TYPE);
@@ -678,6 +683,8 @@ int effects_init(void)
 int effects_finish(void)
 {
     effects_remove(REMOVE_ALL);
+    if (g_capture_ports) jack_free(g_capture_ports);
+    if (g_playback_ports) jack_free(g_playback_ports);
     jack_client_close(g_jack_global_client);
     symap_free(g_symap);
     lilv_node_free(g_sample_rate_node);
@@ -1111,18 +1118,21 @@ int effects_remove(int effect_id)
 
     if (effect_id == REMOVE_ALL)
     {
-        uint32_t j;
-        char portA[64], portB[64];
-
         /* Disconnect the system connections */
-        for (i = 1; i <= AUDIO_INPUT_PORTS; i++)
+        for (i = 0; g_capture_ports[i]; i++)
         {
-            sprintf(portA, "system:capture_%i", i);
+            const char **capture_connections =
+                jack_port_get_connections(jack_port_by_name(g_jack_global_client, g_capture_ports[i]));
 
-            for (j = 1; j <= AUDIO_OUTPUT_PORTS; j++)
+            if (capture_connections)
             {
-                sprintf(portB, "system:playback_%i", j);
-                effects_disconnect(portA, portB);
+                for (j = 0; capture_connections[j]; j++)
+                {
+                    if (strstr(capture_connections[j], "system"))
+                        jack_disconnect(g_jack_global_client, g_capture_ports[i], capture_connections[j]);
+                }
+
+                jack_free(capture_connections);
             }
         }
 

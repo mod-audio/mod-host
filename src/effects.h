@@ -68,8 +68,6 @@ enum {
 */
 
 #define MAX_INSTANCES           10000
-#define AUDIO_INPUT_PORTS       2
-#define AUDIO_OUTPUT_PORTS      2
 
 
 /*
