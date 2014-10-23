@@ -5,5 +5,9 @@
 *.swp
 *.tar.xz
 *.log
+*.orig
 mod-host
+mod-host.install
+mod-host.service
 tests/effectlib_test
+PKGBUILD
