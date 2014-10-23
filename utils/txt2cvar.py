@@ -1,9 +1,10 @@
 #! /usr/bin/env python
 
+from __future__ import print_function
 import sys, os
 
 if len(sys.argv) < 2:
-    print 'Usage:', sys.argv[0], '<file_path> [var_name]'
+    print('Usage:', sys.argv[0], '<file_path> [var_name]')
     exit(1)
 
 f = open(sys.argv[1])
@@ -23,4 +24,4 @@ for l in lines:
             output += '\n'
 
 output += '0x00\n};'
-print output
+print(output)
