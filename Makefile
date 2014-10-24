@@ -59,6 +59,20 @@ install: install_man
 clean:
 	$(RM) $(SRC_DIR)/*.o $(PROG) src/info.h
 
+# test rules
+.ONESHELL:
+init_tests: $(PROG)
+	jackd -ddummy &
+	echo $$! > .jackd.pid
+	./$(PROG) 
+
+test: init_tests
+	nosetests
+	
+end_tests: init_tests
+	kill `cat .jackd.pid`
+	kill `cat /tmp/mod-host.pid`
+
 # manual page rule
 # Uses md2man to convert the README to groff man page
 # https://github.com/sunaku/md2man
