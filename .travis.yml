@@ -6,7 +6,7 @@ notifications:
       irc: "chat.freenode.net#portalmod"
 before_script:
     - sudo apt-get update -qq
-    - sudo apt-get install -y lv2core lv2-dev liblilv-dev lilv-utils jackd2 libjack-jackd2-dev
+    - sudo apt-get install -y lv2core lv2-extensions-goo liblilv-dev lilv-utils jackd2 libjack-jackd2-dev
     - make init_tests
 script:
     nosetests
