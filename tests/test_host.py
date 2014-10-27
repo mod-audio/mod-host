@@ -5,7 +5,6 @@ import time
 
 def setup_function(function):
     reset()
-    time.sleep(.3)
     connect_socket()
 
 def teardown_function(function):
@@ -23,4 +22,14 @@ def test_load_gain_change_param():
     r = s("param_get 0 gain")
     assert int(r[0]) == 0
     assert float(r[1]) == 5.0
+    r = s("remove 0")
+    assert int(r[0]) == 0
 
+def test_preset():
+    r = s("add http://lv2plug.in/plugins/eg-amp 0")
+    assert int(r[0]) == 0
+    r = s('preset 0 "Gain 3"')
+    assert int(r[0]) == 0
+    r = s("param_get 0 gain")
+    assert int(r[0]) == 0
+    assert float(r[1]) == 3.0
