@@ -64,14 +64,15 @@ clean:
 init_tests: $(PROG)
 	jackd -ddummy &
 	echo $$! > .jackd.pid
+	sleep .5
 	./$(PROG) 
 
 test:
 	nosetests
 	
 end_tests:
-	kill `cat .jackd.pid`
 	kill `cat /tmp/mod-host.pid`
+	kill `cat .jackd.pid`
 
 # manual page rule
 # Uses md2man to convert the README to groff man page
