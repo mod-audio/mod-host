@@ -2,8 +2,8 @@ language:
     - c
 compiler:
     - gcc
-#notifications:
-#      irc: "chat.freenode.net#portalmod"
+notifications:
+      irc: "chat.freenode.net#portalmod"
 before_script:
     - sudo apt-get update -qq
     - sudo apt-get install -y python-nose libjack-jackd2-dev libjack-jackd2-0 jackd2 python-pip
