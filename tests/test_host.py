@@ -1,6 +1,17 @@
 #!/usr/bin/python2
 
-from hosttest import s, load_egamp
+from hosttest import *
+import time
+
+def setup_function(function):
+    reset()
+    time.sleep(.3)
+    connect_socket()
+
+def teardown_function(function):
+    kill_host()
+    kill_jack()
+    reset_socket()
 
 def test_load_gain_change_param():
     load_egamp()

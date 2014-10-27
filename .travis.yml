@@ -9,8 +9,6 @@ before_script:
     - sudo apt-get install -y python-nose libjack-jackd2-dev libjack-jackd2-0 jackd2 python-pip
     - sudo pip install pytest
     - bash .create_lv2_env.sh
-    - make init_tests
+    - make
 script:
     - py.test tests/test_host.py
-after_script:
-    - make end_tests
