@@ -5,9 +5,9 @@ compiler:
 notifications:
       irc: "chat.freenode.net#portalmod"
 before_script:
-    - bash .create_lv2_env.sh
     - sudo apt-get update -qq
-    - sudo apt-get install -y python-nose
+    - sudo apt-get install -y python-nose libjack-jackd2-dev libjack-jackda2-0 jackd2
+    - bash .create_lv2_env.sh
     - make init_tests
 script:
     - nosetests
