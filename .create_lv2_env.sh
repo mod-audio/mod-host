@@ -33,5 +33,5 @@ sudo dpkg -i libsratom-dev_0.4.4~dfsg0-1_amd64.deb
 wget http://mirrors.kernel.org/ubuntu/pool/universe/l/lilv/liblilv-dev_0.16.0~dfsg0-1_amd64.deb
 sudo dpkg -i liblilv-dev_0.16.0~dfsg0-1_amd64.deb
 
-wget http://mirrors.kernel.org/ubuntu/pool/universe/l/lv2/lv2-examples_1.4.0~dfsg0-1_i386.deb
-sudo dpkg -i lv2-examples_1.4.0~dfsg0-1_i386.deb
+wget http://mirrors.kernel.org/ubuntu/pool/universe/l/lv2/lv2-examples_1.8.0~dfsg0-1_amd64.deb
+sudo dpkg -i lv2-examples_1.8.0~dfsg0-1_amd64.deb
