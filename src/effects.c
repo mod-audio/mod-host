@@ -117,6 +117,11 @@ typedef struct PORT_T {
     bool old_ev_api;
 } port_t;
 
+typedef struct PROPERTY_T {
+    const LilvNode* label;
+    const LilvNode* property;
+} property_t;
+
 typedef struct PRESET_T {
     const LilvNode* label;
     const LilvNode* preset;
@@ -138,6 +143,9 @@ typedef struct EFFECT_T {
 
     port_t **ports;
     uint32_t ports_count;
+
+    property_t **properties;
+    uint32_t properties_count;
 
     port_t **audio_ports;
     uint32_t audio_ports_count;
@@ -760,6 +768,7 @@ int effects_add(const char *uid, int instance)
     effect->instance = instance;
     effect->jack_client = NULL;
     effect->lilv_instance = NULL;
+    effect->properties = NULL;
     effect->ports = NULL;
     effect->audio_ports = NULL;
     effect->input_audio_ports = NULL;
@@ -1080,6 +1089,34 @@ int effects_add(const char *uid, int instance)
     }
 
     AllocatePortBuffers(effect);
+
+    // Index writable properties
+    LilvNode *rdfs_label = lilv_new_uri(g_lv2_data, LILV_NS_RDFS "label");
+    LilvNode *patch_writable = lilv_new_uri(g_lv2_data, LV2_PATCH__writable);
+    LilvNodes* properties = lilv_world_find_nodes(
+        g_lv2_data,
+        lilv_plugin_get_uri(effect->lilv_plugin),
+        patch_writable,
+        NULL);
+    effect->properties_count = lilv_nodes_size(properties);
+    effect->properties = (property_t **) calloc(effect->properties_count, sizeof(property_t *));
+    uint32_t j = 0;
+    for (j = 0; j < effect->properties_count; j++) effect->properties[j] = NULL;
+    j = 0;
+
+    LILV_FOREACH(nodes, p, properties) {
+        const LilvNode* property = lilv_nodes_get(properties, p);
+        LilvNode*       label    = lilv_nodes_get_first(
+            lilv_world_find_nodes(
+                g_lv2_data, property, rdfs_label, NULL));
+        effect->properties[j] = (property_t *) malloc(sizeof(property_t));
+        effect->properties[j]->label = lilv_node_duplicate(label);
+        effect->properties[j]->property = lilv_node_duplicate(property);
+        j++;
+    }
+    lilv_node_free(patch_writable);
+    lilv_node_free(rdfs_label);
+    lilv_nodes_free(properties);
 
     /* Default value of bypass */
     effect->bypass = 0;
