@@ -52,6 +52,8 @@ host = None
 def run_jack():
     global jack
     if jack is None:
+        jack_is_running = os.system("ps auxw | grep jackd | grep -v grep")
+        assert jack_is_running != 0, "jackd is already running, please stop it before running the tests"
         jack = subprocess.Popen(["jackd", "-ddummy"], env=env)
         assert jack.poll() == None
 
@@ -98,7 +100,10 @@ def reset():
 
 def s(msg):
     sock.send(msg + "\0")
-    return sock.recv(1024).replace("\0", "").split()[1:]
+    r = sock.recv(1024).strip().replace("\0", "").split()[1:]
+    assert host.poll() is None, "mod-host died with msg '%s', exit code: %d" % (msg, host.poll())
+    assert jack.poll() is None, "jackd died with msg '%s', exit code: %d" % (msg, jack.poll())
+    return r
 
 def load_egamp(instance=0):
     return s("add http://lv2plug.in/plugins/eg-amp %d" % instance)

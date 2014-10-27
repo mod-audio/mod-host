@@ -43,6 +43,7 @@
 #include <lv2/lv2plug.in/ns/ext/worker/worker.h>
 #include <lv2/lv2plug.in/ns/ext/patch/patch.h>
 #include <lv2/lv2plug.in/ns/ext/event/event.h>
+#include <lv2/lv2plug.in/ns/ext/state/state.h>
 #include <lv2/lv2plug.in/ns/ext/presets/presets.h>
 #include <lv2/lv2plug.in/ns/ext/options/options.h>
 #include <lv2/lv2plug.in/ns/ext/buf-size/buf-size.h>
@@ -495,6 +496,25 @@ static void GetFeatures(effect_t *effect)
     effect->features = features;
 }
 
+port_t *FindEffectPortBySymbol(effect_t *effect, const char *control_symbol)
+{
+    // TODO: index symbols to make it faster
+
+    uint32_t i;
+    const LilvNode *symbol_node;
+    const char *symbol;
+
+    for (i = 0; i < effect->input_control_ports_count; i++)
+    {
+        symbol_node = lilv_port_get_symbol(effect->lilv_plugin, effect->input_control_ports[i]->lilv_port);
+        symbol = lilv_node_as_string(symbol_node);
+
+        if (strcmp(control_symbol, symbol) == 0)
+            return effect->input_control_ports[i];
+    }
+    return NULL;
+}
+
 static void SetParameterFromState(const char* symbol, void* user_data,
                                   const void* value, uint32_t size,
                                   uint32_t type)
@@ -503,6 +523,18 @@ static void SetParameterFromState(const char* symbol, void* user_data,
     UNUSED_PARAM(type);
     effect_t *effect = (effect_t*)user_data;
     effects_set_parameter(effect->instance, symbol, *((float*)value));
+}
+
+static const void* GetPortValueForState(const char* symbol, void* user_data,
+                                  uint32_t* size, uint32_t* type)
+{
+    effect_t *effect = (effect_t*)user_data;
+    port_t *port = FindEffectPortBySymbol(effect, symbol);
+    if (port) {
+        *size = sizeof(float);
+        *type = g_urids.atom_Float;
+    }
+    return port->buffer;
 }
 
 int LoadPresets(effect_t *effect)
@@ -541,7 +573,6 @@ int LoadPresets(effect_t *effect)
 
 int FindPreset(effect_t *effect, const char *label, const LilvNode **preset)
 {
-    UNUSED_PARAM(preset);
     uint32_t i;
     for(i=0; i<effect->presets_count; i++) {
         if(strcmp(label, lilv_node_as_string(effect->presets[i]->label)) == 0) {
@@ -1094,6 +1125,27 @@ int effects_add(const char *uid, int instance)
     return error;
 }
 
+int effects_preset_save(int effect_id, const char *dir, const char *fname, const char *label) {
+    LilvState* const state = lilv_state_new_from_instance(
+        g_effects[effect_id].lilv_plugin, g_effects[effect_id].lilv_instance,
+        &g_urid_map,
+        dir,
+        dir,
+        dir,
+        dir,
+        GetPortValueForState, &(g_effects[effect_id]),
+        LV2_STATE_IS_POD|LV2_STATE_IS_PORTABLE, NULL);
+
+    if (label) {
+        lilv_state_set_label(state, label);
+    }
+
+    int ret = lilv_state_save(
+        g_lv2_data, &g_urid_map, &g_urid_unmap, state, NULL, dir, fname);
+    lilv_state_free(state);
+    return ret;
+}
+
 int effects_preset(int effect_id, const char *label) {
     effect_t *effect;
     if (InstanceExist(effect_id))
@@ -1222,11 +1274,9 @@ int effects_disconnect(const char *portA, const char *portB)
 
 int effects_set_parameter(int effect_id, const char *control_symbol, float value)
 {
-    uint32_t i;
-    const char *symbol;
+    const port_t *port;
     const LilvPlugin *lilv_plugin;
     const LilvPort *lilv_port;
-    const LilvNode *symbol_node;
     LilvNode *lilv_default, *lilv_minimum, *lilv_maximum;
     float min = 0.0, max = 0.0;
 
@@ -1251,42 +1301,35 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
             }
         }
 
-        // try to find the symbol and set the new value
-        for (i = 0; i < g_effects[effect_id].input_control_ports_count; i++)
-        {
+        port = FindEffectPortBySymbol(&(g_effects[effect_id]), control_symbol);
+        if (port) {
+            lilv_port = port->lilv_port;
             lilv_plugin = g_effects[effect_id].lilv_plugin;
-            lilv_port = g_effects[effect_id].input_control_ports[i]->lilv_port;
-            symbol_node = lilv_port_get_symbol(lilv_plugin, lilv_port);
-            symbol = lilv_node_as_string(symbol_node);
+            lilv_port_get_range(lilv_plugin, lilv_port, &lilv_default, &lilv_minimum, &lilv_maximum);
 
-            if (strcmp(control_symbol, symbol) == 0)
+            if (lilv_node_is_float(lilv_minimum) || lilv_node_is_int(lilv_minimum) || lilv_node_is_bool(lilv_minimum))
+                min = lilv_node_as_float(lilv_minimum);
+
+            if (lilv_node_is_float(lilv_maximum) || lilv_node_is_int(lilv_maximum) || lilv_node_is_bool(lilv_maximum))
+                max = lilv_node_as_float(lilv_maximum);
+
+            if (lilv_port_has_property(lilv_plugin, lilv_port, g_sample_rate_node))
             {
-                lilv_port_get_range(lilv_plugin, lilv_port, &lilv_default, &lilv_minimum, &lilv_maximum);
-
-                if (lilv_node_is_float(lilv_minimum) || lilv_node_is_int(lilv_minimum) || lilv_node_is_bool(lilv_minimum))
-                    min = lilv_node_as_float(lilv_minimum);
-
-                if (lilv_node_is_float(lilv_maximum) || lilv_node_is_int(lilv_maximum) || lilv_node_is_bool(lilv_maximum))
-                    max = lilv_node_as_float(lilv_maximum);
-
-                if (lilv_port_has_property(lilv_plugin, lilv_port, g_sample_rate_node))
-                {
-                    min *= g_sample_rate;
-                    max *= g_sample_rate;
-                }
-
-                if (value > max) value = max;
-                else if (value < min) value = min;
-                *(g_effects[effect_id].input_control_ports[i]->buffer) = value;
-
-                // stores the data of the current control
-                last_symbol = control_symbol;
-                last_buffer = g_effects[effect_id].input_control_ports[i]->buffer;
-                last_min = min;
-                last_max = max;
-
-                return SUCCESS;
+                min *= g_sample_rate;
+                max *= g_sample_rate;
             }
+
+            if (value > max) value = max;
+            else if (value < min) value = min;
+            *(port->buffer) = value;
+
+            // stores the data of the current control
+            last_symbol = control_symbol;
+            last_buffer = port->buffer;
+            last_min = min;
+            last_max = max;
+
+            return SUCCESS;
         }
 
         return ERR_LV2_INVALID_PARAM_SYMBOL;
@@ -1297,46 +1340,35 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
 
 int effects_get_parameter(int effect_id, const char *control_symbol, float *value)
 {
-    uint32_t i;
-    const char *symbol;
-    const LilvPlugin *lilv_plugin;
-    const LilvPort *lilv_port;
-    const LilvNode *symbol_node;
+    const port_t *port;
     LilvNode *lilv_default, *lilv_minimum, *lilv_maximum;
     float min = 0.0, max = 0.0;
 
     if (InstanceExist(effect_id))
     {
-        for (i = 0; i < g_effects[effect_id].control_ports_count; i++)
+        port = FindEffectPortBySymbol(&(g_effects[effect_id]), control_symbol);
+        if (port)
         {
-            lilv_plugin = g_effects[effect_id].lilv_plugin;
-            lilv_port = g_effects[effect_id].control_ports[i]->lilv_port;
-            symbol_node = lilv_port_get_symbol(lilv_plugin, lilv_port);
-            symbol = lilv_node_as_string(symbol_node);
+           lilv_port_get_range(g_effects[effect_id].lilv_plugin, port->lilv_port, &lilv_default, &lilv_minimum, &lilv_maximum);
 
-            if (strcmp(control_symbol, symbol) == 0)
-            {
-                lilv_port_get_range(lilv_plugin, lilv_port, &lilv_default, &lilv_minimum, &lilv_maximum);
+           if (lilv_node_is_float(lilv_minimum) || lilv_node_is_int(lilv_minimum) || lilv_node_is_bool(lilv_minimum))
+               min = lilv_node_as_float(lilv_minimum);
 
-                if (lilv_node_is_float(lilv_minimum) || lilv_node_is_int(lilv_minimum) || lilv_node_is_bool(lilv_minimum))
-                    min = lilv_node_as_float(lilv_minimum);
+           if (lilv_node_is_float(lilv_maximum) || lilv_node_is_int(lilv_maximum) || lilv_node_is_bool(lilv_maximum))
+               max = lilv_node_as_float(lilv_maximum);
 
-                if (lilv_node_is_float(lilv_maximum) || lilv_node_is_int(lilv_maximum) || lilv_node_is_bool(lilv_maximum))
-                    max = lilv_node_as_float(lilv_maximum);
+           (*value) = *(port->buffer);
 
-                (*value) = *(g_effects[effect_id].control_ports[i]->buffer);
+           if (lilv_port_has_property(g_effects[effect_id].lilv_plugin, port->lilv_port, g_sample_rate_node))
+           {
+               min *= g_sample_rate;
+               max *= g_sample_rate;
+           }
 
-                if (lilv_port_has_property(lilv_plugin, lilv_port, g_sample_rate_node))
-                {
-                    min *= g_sample_rate;
-                    max *= g_sample_rate;
-                }
+           if ((*value) > max) (*value) = max;
+           else if ((*value) < min) (*value) = min;
 
-                if ((*value) > max) (*value) = max;
-                else if ((*value) < min) (*value) = min;
-
-                return SUCCESS;
-            }
+           return SUCCESS;
         }
 
         return ERR_LV2_INVALID_PARAM_SYMBOL;

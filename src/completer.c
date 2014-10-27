@@ -50,6 +50,7 @@ static char *g_commands[] = {
     "add",
     "remove",
     "preset",
+    "save_preset",
     "connect",
     "disconnect",
     "bypass",
@@ -286,6 +287,13 @@ static char **completion(const char *text, int start, int end)
                 else if (count == 4)
                 {
                     get_param_info = 1;
+                }
+            }
+            else if (strcmp(cmd[0], "save_preset") == 0)
+            {
+                if (count == 1)
+                {
+                    get_instances = 1;
                 }
             }
 

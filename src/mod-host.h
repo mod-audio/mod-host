@@ -54,6 +54,7 @@
 #define EFFECT_ADD          "add %s %i"
 #define EFFECT_REMOVE       "remove %i"
 #define EFFECT_PRESET       "preset %i %s"
+#define EFFECT_PRESET_SAVE  "save_preset %i %s %s %s"
 #define EFFECT_CONNECT      "connect %s %s"
 #define EFFECT_DISCONNECT   "disconnect %s %s"
 #define EFFECT_BYPASS       "bypass %i %i"

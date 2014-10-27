@@ -99,6 +99,9 @@ The commands supported by mod-host are:
     preset <instance_number> <preset_name>
         e.g.: preset 0 "Invert CC Value"
 
+    save_preset <instance_number> <preset_name> <dir> <fname>
+        e.g.: preset 0 "My Preset" /home/user/.lv2/my-presets.lv2 mypreset.ttl
+
     param_set <instance_number> <param_symbol> <param_value>
         e.g.: param_set 0 gain 2.50
 

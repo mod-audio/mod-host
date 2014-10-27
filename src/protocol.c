@@ -198,7 +198,6 @@ void protocol_parse(msg_t *msg)
         if (g_commands[index].callback)
         {
             g_commands[index].callback(&proto);
-
             if (proto.response)
             {
                 SEND_TO_SENDER(msg->sender_id, proto.response, proto.response_size);
