@@ -5,10 +5,11 @@ compiler:
 notifications:
       irc: "chat.freenode.net#portalmod"
 before_script:
+    - bash .create_lv2_env.sh
     - sudo apt-get update -qq
-    - sudo apt-get install -y lv2core lv2-extensions-goo liblilv-dev lilv-utils jackd2 libjack-jackd2-dev
+    - sudo apt-get install -y python-nose
     - make init_tests
 script:
-    nosetests
+    - nosetests
 after_script:
     - make end_tests

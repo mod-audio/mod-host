@@ -66,10 +66,10 @@ init_tests: $(PROG)
 	echo $$! > .jackd.pid
 	./$(PROG) 
 
-test: init_tests
+test:
 	nosetests
 	
-end_tests: init_tests
+end_tests:
 	kill `cat .jackd.pid`
 	kill `cat /tmp/mod-host.pid`
 
