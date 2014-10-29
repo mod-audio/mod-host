@@ -183,6 +183,9 @@ static void effects_set_param_cb(proto_t *proto)
 {
     int resp;
     resp = effects_set_parameter(atoi(proto->list[1]), proto->list[2], atof(proto->list[3]));
+    if (resp != SUCCESS) {
+        resp = effects_set_property(atoi(proto->list[1]), proto->list[2], proto->list[3]);
+    }
 
     char buffer[128];
     sprintf(buffer, "resp %i", resp);

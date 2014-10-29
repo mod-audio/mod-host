@@ -58,7 +58,7 @@
 #define EFFECT_CONNECT      "connect %s %s"
 #define EFFECT_DISCONNECT   "disconnect %s %s"
 #define EFFECT_BYPASS       "bypass %i %i"
-#define EFFECT_PARAM_SET    "param_set %i %s %f"
+#define EFFECT_PARAM_SET    "param_set %i %s %s"
 #define EFFECT_PARAM_GET    "param_get %i %s"
 #define EFFECT_PARAM_MON    "param_monitor %i %s %s %f"
 #define MONITOR_ADDR_SET    "monitor %s %i %i"

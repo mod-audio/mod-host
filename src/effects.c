@@ -36,6 +36,7 @@
 /* LV2 and Lilv */
 #include <lilv/lilv.h>
 #include <lv2/lv2plug.in/ns/ext/atom/atom.h>
+#include <lv2/lv2plug.in/ns/ext/atom/forge.h>
 #include <lv2/lv2plug.in/ns/ext/midi/midi.h>
 #include <lv2/lv2plug.in/ns/ext/urid/urid.h>
 #include <lv2/lv2plug.in/ns/ext/uri-map/uri-map.h>
@@ -122,6 +123,12 @@ typedef struct PROPERTY_T {
     const LilvNode* property;
 } property_t;
 
+typedef struct PROPERTY_EVENT_T {
+    uint32_t size;
+    uint8_t  body[];
+
+} property_event_t;
+
 typedef struct PRESET_T {
     const LilvNode* label;
     const LilvNode* preset;
@@ -168,6 +175,8 @@ typedef struct EFFECT_T {
     port_t **output_event_ports;
     uint32_t output_event_ports_count;
 
+    uint32_t control_in; // index of control/event input port
+
     preset_t **presets;
     uint32_t presets_count;
 
@@ -175,6 +184,8 @@ typedef struct EFFECT_T {
     uint32_t monitors_count;
 
     worker_t worker;
+
+    jack_ringbuffer_t *events_buffer;
 
     int bypass;
 } effect_t;
@@ -235,6 +246,7 @@ static LilvNode *g_sample_rate_node;
 /* Global features */
 static Symap* g_symap;
 static urids_t g_urids;
+static LV2_Atom_Forge g_lv2_atom_forge;
 static LV2_URI_Map_Feature g_uri_map;
 static LV2_URID_Map g_urid_map;
 static LV2_URID_Unmap g_urid_unmap;
@@ -357,6 +369,25 @@ static int ProcessAudio(jack_nframes_t nframes, void *arg)
     for (i = 0; i < effect->output_event_ports_count; i++)
     {
         lv2_evbuf_reset(effect->output_event_ports[i]->evbuf, false);
+    }
+
+    /* control in events */
+    if (effect->events_buffer) {
+        const size_t space = jack_ringbuffer_read_space(effect->events_buffer);
+        LV2_Atom atom;
+        size_t j;
+        for(j=0; j < space; j += sizeof(atom) + atom.size) {
+            jack_ringbuffer_read(effect->events_buffer, (char*)&atom, sizeof(atom));
+            char fatom[sizeof(atom)+atom.size];
+            memcpy(&fatom, (char*)&atom, sizeof(atom));
+            char *body = &fatom[sizeof(atom)];
+            jack_ringbuffer_read(effect->events_buffer, body, atom.size);
+            const port_t *port = effect->ports[effect->control_in];
+            LV2_Evbuf_Iterator e = lv2_evbuf_end(port->evbuf);
+            const LV2_Atom* const ratom = (const LV2_Atom*)fatom;
+            lv2_evbuf_write(&e, nframes, 0, ratom->type, ratom->size,
+                                LV2_ATOM_BODY_CONST(ratom));
+        }
     }
 
     /* Bypass */
@@ -502,6 +533,20 @@ static void GetFeatures(effect_t *effect)
     features[FEATURE_TERMINATOR]        = NULL;
 
     effect->features = features;
+}
+
+property_t *FindEffectPropertyByLabel(effect_t *effect, const char *label)
+{
+    // TODO: index properties to make it faster
+
+    uint32_t i;
+
+    for (i = 0; i < effect->properties_count; i++)
+    {
+        if (strcmp(label, lilv_node_as_string(effect->properties[i]->label)) == 0)
+            return effect->properties[i];
+    }
+    return NULL;
 }
 
 port_t *FindEffectPortBySymbol(effect_t *effect, const char *control_symbol)
@@ -656,6 +701,7 @@ int effects_init(void)
     g_urids.atom_Float           = urid_to_id(g_symap, LV2_ATOM__Float);
     g_urids.atom_Int             = urid_to_id(g_symap, LV2_ATOM__Int);
     g_urids.atom_eventTransfer   = urid_to_id(g_symap, LV2_ATOM__eventTransfer);
+
     g_urids.bufsz_maxBlockLength = urid_to_id(g_symap, LV2_BUF_SIZE__maxBlockLength);
     g_urids.bufsz_minBlockLength = urid_to_id(g_symap, LV2_BUF_SIZE__minBlockLength);
     g_urids.bufsz_sequenceSize   = urid_to_id(g_symap, LV2_BUF_SIZE__sequenceSize);
@@ -709,6 +755,8 @@ int effects_init(void)
     g_options[4].type = 0;
     g_options[4].value = NULL;
 
+    lv2_atom_forge_init(&g_lv2_atom_forge, &g_urid_map);
+
     /* Init lilv_instance as NULL for all plugins */
     int i;
     for (i = 0; i < MAX_INSTANCES; i++)
@@ -753,7 +801,7 @@ int effects_add(const char *uid, int instance)
     const LilvPlugin *plugin;
     LilvInstance *lilv_instance;
     LilvNode *plugin_uri;
-    LilvNode *lilv_input, *lilv_output, *lilv_control, *lilv_audio, *lilv_event, *lilv_midi;
+    LilvNode *lilv_input, *lilv_control_in, *lilv_output, *lilv_control, *lilv_audio, *lilv_event, *lilv_midi;
     LilvNode *lilv_default, *lilv_minimum, *lilv_maximum, *lilv_atom_port, *lilv_worker_interface;
     const LilvPort *lilv_port;
     const LilvNode *symbol_node;
@@ -775,10 +823,12 @@ int effects_add(const char *uid, int instance)
     effect->output_audio_ports = NULL;
     effect->control_ports = NULL;
     effect->presets = NULL;
+    effect->events_buffer = NULL;
 
     /* Init the pointers */
     lilv_instance = NULL;
     lilv_input = NULL;
+    lilv_control_in = NULL;
     lilv_output = NULL;
     lilv_control = NULL;
     lilv_audio = NULL;
@@ -865,6 +915,7 @@ int effects_add(const char *uid, int instance)
     lilv_audio = lilv_new_uri(g_lv2_data, LILV_URI_AUDIO_PORT);
     lilv_control = lilv_new_uri(g_lv2_data, LILV_URI_CONTROL_PORT);
     lilv_input = lilv_new_uri(g_lv2_data, LILV_URI_INPUT_PORT);
+    lilv_control_in = lilv_new_uri(g_lv2_data, LV2_CORE__control);
     lilv_output = lilv_new_uri(g_lv2_data, LILV_URI_OUTPUT_PORT);
     lilv_event = lilv_new_uri(g_lv2_data, LILV_URI_EVENT_PORT);
     lilv_atom_port = lilv_new_uri(g_lv2_data, LV2_ATOM__AtomPort);
@@ -997,6 +1048,13 @@ int effects_add(const char *uid, int instance)
         }
     }
 
+	const LilvPort* control_input = lilv_plugin_get_port_by_designation(
+		plugin, lilv_input, lilv_control_in);
+	if (control_input) {
+		effect->control_in = lilv_port_get_index(plugin, control_input);
+	}
+
+
     /* Allocate memory to indexes */
     /* Audio ports */
     effect->audio_ports_count = audio_ports_count;
@@ -1124,6 +1182,7 @@ int effects_add(const char *uid, int instance)
     lilv_node_free(lilv_audio);
     lilv_node_free(lilv_control);
     lilv_node_free(lilv_input);
+    lilv_node_free(lilv_control_in);
     lilv_node_free(lilv_output);
     lilv_node_free(lilv_event);
     lilv_node_free(lilv_midi);
@@ -1135,6 +1194,12 @@ int effects_add(const char *uid, int instance)
     jack_set_buffer_size_callback(jack_client, &BufferSize, effect);
 
     lilv_instance_activate(lilv_instance);
+
+    /* create ring buffer for events from socket/commandline */
+    if(control_input) {
+        effect->events_buffer = jack_ringbuffer_create(g_midi_buffer_size * 16); // 16 taken from jalv source code
+        jack_ringbuffer_mlock(effect->events_buffer);
+    }
 
     /* Try activate the Jack client */
     if (jack_activate(jack_client) != 0)
@@ -1151,6 +1216,7 @@ int effects_add(const char *uid, int instance)
         lilv_node_free(lilv_audio);
         lilv_node_free(lilv_control);
         lilv_node_free(lilv_input);
+        lilv_node_free(lilv_control_in);
         lilv_node_free(lilv_output);
         lilv_node_free(lilv_event);
         lilv_node_free(lilv_midi);
@@ -1372,6 +1438,35 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
         return ERR_LV2_INVALID_PARAM_SYMBOL;
     }
 
+    return ERR_INSTANCE_NON_EXISTS;
+}
+
+int effects_set_property(int effect_id, const char *label, const char *value)
+{
+    if (InstanceExist(effect_id))
+    {
+        property_t *prop = FindEffectPropertyByLabel(&(g_effects[effect_id]), label);
+        if (prop)
+        {
+            const char *property = lilv_node_as_uri(prop->property);
+
+            LV2_Atom_Forge forge = g_lv2_atom_forge;
+            LV2_Atom_Forge_Frame frame;
+            uint8_t buf[1024];
+            lv2_atom_forge_set_buffer(&forge, buf, sizeof(buf));
+
+            lv2_atom_forge_object(&forge, &frame, 0, g_urids.patch_Set);
+            lv2_atom_forge_key(&forge, g_urids.patch_property);
+            lv2_atom_forge_urid(&forge, g_urid_map.map(g_urid_map.handle, property));
+            lv2_atom_forge_key(&forge, g_urids.patch_value);
+            lv2_atom_forge_path(&forge, value, strlen(value));
+
+            const LV2_Atom* atom = lv2_atom_forge_deref(&forge, frame.ref);
+            jack_ringbuffer_write(g_effects[effect_id].events_buffer, (const char *)atom, lv2_atom_total_size(atom));
+            return SUCCESS;
+        }
+        return ERR_LV2_INVALID_PARAM_SYMBOL;
+    }
     return ERR_INSTANCE_NON_EXISTS;
 }
 

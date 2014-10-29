@@ -106,6 +106,7 @@ int effects_preset_save(int effect_id, const char *dir, const char *fname, const
 int effects_connect(const char *portA, const char *portB);
 int effects_disconnect(const char *portA, const char *portB);
 int effects_set_parameter(int effect_id, const char *control_symbol, float value);
+int effects_set_property(int effect_id, const char *label, const char *value);
 int effects_get_parameter(int effect_id, const char *control_symbol, float *value);
 int effects_monitor_parameter(int effect_id, const char *control_symbol, const char *op, float value);
 int effects_bypass(int effect_id, int value);
