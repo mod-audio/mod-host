@@ -49,6 +49,8 @@
 #include <lv2/lv2plug.in/ns/ext/options/options.h>
 #include <lv2/lv2plug.in/ns/ext/buf-size/buf-size.h>
 #include <lv2/lv2plug.in/ns/ext/parameters/parameters.h>
+#include <sratom/sratom.h>
+#include <serd/serd.h>
 
 /* Local */
 #include "effects.h"
@@ -203,6 +205,8 @@ typedef struct URIDS_T {
     LV2_URID patch_Set;
     LV2_URID patch_property;
     LV2_URID patch_value;
+    LV2_URID pset_Preset;
+    LV2_URID pset_preset;
     LV2_URID time_Position;
     LV2_URID time_bar;
     LV2_URID time_barBeat;
@@ -211,6 +215,17 @@ typedef struct URIDS_T {
     LV2_URID time_beatsPerMinute;
     LV2_URID time_frame;
     LV2_URID time_speed;
+
+    LV2_URID mod_Session;
+    LV2_URID mod_Connection;
+    LV2_URID mod_Instance;
+
+    LV2_URID mod_connection;
+    LV2_URID mod_instance;
+    LV2_URID mod_inPortSymbol;
+    LV2_URID mod_inInstance;
+    LV2_URID mod_outPortSymbol;
+    LV2_URID mod_outInstance;
 } urids_t;
 
 
@@ -245,6 +260,7 @@ static LilvNode *g_sample_rate_node;
 
 /* Global features */
 static Symap* g_symap;
+static Sratom* g_sratom;
 static urids_t g_urids;
 static LV2_Atom_Forge g_lv2_atom_forge;
 static LV2_URI_Map_Feature g_uri_map;
@@ -707,6 +723,8 @@ int effects_init(void)
     g_urids.bufsz_sequenceSize   = urid_to_id(g_symap, LV2_BUF_SIZE__sequenceSize);
     g_urids.midi_MidiEvent       = urid_to_id(g_symap, LV2_MIDI__MidiEvent);
     g_urids.param_sampleRate     = urid_to_id(g_symap, LV2_PARAMETERS__sampleRate);
+    g_urids.pset_Preset          = urid_to_id(g_symap, LV2_PRESETS__Preset);
+    g_urids.pset_preset          = urid_to_id(g_symap, LV2_PRESETS__preset);
     g_urids.patch_Set            = urid_to_id(g_symap, LV2_PATCH__Set);
     g_urids.patch_property       = urid_to_id(g_symap, LV2_PATCH__property);
     g_urids.patch_value          = urid_to_id(g_symap, LV2_PATCH__value);
@@ -718,6 +736,17 @@ int effects_init(void)
     g_urids.time_beatsPerMinute  = urid_to_id(g_symap, LV2_TIME__beatsPerMinute);
     g_urids.time_frame           = urid_to_id(g_symap, LV2_TIME__frame);
     g_urids.time_speed           = urid_to_id(g_symap, LV2_TIME__speed);
+
+    g_urids.mod_Session          = urid_to_id(g_symap, MOD__Session);
+    g_urids.mod_Connection       = urid_to_id(g_symap, MOD__Connection);
+    g_urids.mod_Instance         = urid_to_id(g_symap, MOD__Instance);
+
+    g_urids.mod_connection       = urid_to_id(g_symap, MOD__connection);
+    g_urids.mod_instance         = urid_to_id(g_symap, MOD__instance);
+    g_urids.mod_inInstance       = urid_to_id(g_symap, MOD__inInstance);
+    g_urids.mod_inPortSymbol     = urid_to_id(g_symap, MOD__inPortSymbol);
+    g_urids.mod_outInstance      = urid_to_id(g_symap, MOD__outInstance);
+    g_urids.mod_outPortSymbol    = urid_to_id(g_symap, MOD__outPortSymbol);
 
     /* Options Feature initialization */
     g_options[0].context = LV2_OPTIONS_INSTANCE;
@@ -755,7 +784,9 @@ int effects_init(void)
     g_options[4].type = 0;
     g_options[4].value = NULL;
 
+
     lv2_atom_forge_init(&g_lv2_atom_forge, &g_urid_map);
+    g_sratom = sratom_new(&g_urid_map);
 
     /* Init lilv_instance as NULL for all plugins */
     int i;
@@ -841,10 +872,10 @@ int effects_add(const char *uid, int instance)
     lilv_worker_interface = NULL;
 
     /* Create a client to Jack */
-    sprintf(effect_name, "effect_%i", instance);
-    jack_client = jack_client_open(effect_name, JackNoStartServer, &jack_status);
+    sprintf(effect_name, "mod-host-plugin_%i", instance);
+    jack_client = jack_client_open(effect_name, JackNoStartServer | JackUseExactName, &jack_status);
 
-    if (!jack_client)
+    if (!jack_client || (jack_status & JackNameNotUnique))
     {
         fprintf(stderr, "can't get jack client\n");
         error = ERR_JACK_CLIENT_CREATION;
@@ -1226,6 +1257,97 @@ int effects_add(const char *uid, int instance)
         effects_remove(instance);
 
     return error;
+}
+
+int effects_session_save(const char *dir, const char *fname, const char *label)
+{
+    UNUSED_PARAM(label);
+    UNUSED_PARAM(dir);
+    UNUSED_PARAM(fname);
+    LV2_Atom_Forge forge = g_lv2_atom_forge;
+    LV2_Atom_Forge_Frame session_frame;
+    uint8_t buf[2048];
+
+    lv2_atom_forge_set_buffer(&forge, buf, sizeof(buf));
+    lv2_atom_forge_object(&forge, &session_frame, 0, g_urids.mod_Session);
+
+    uint32_t i, j, k;
+    for (i=0; i<MAX_INSTANCES; i++) {
+        effect_t *effect = &(g_effects[i]);
+        // checks if the effect's lilv instance and jack client are ok
+        if (!effect || !effect->lilv_instance || !effect->jack_client)
+            continue;
+
+        LilvState* const state = lilv_state_new_from_instance(
+            effect->lilv_plugin, effect->lilv_instance,
+            &g_urid_map,
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            GetPortValueForState, effect,
+            LV2_STATE_IS_POD|LV2_STATE_IS_PORTABLE, NULL);
+        char uri_aux[512];
+        sprintf(uri_aux, "preset_%s_%d", label, i);
+        char *pset_uri = strdup(uri_aux);
+        char *st = lilv_state_to_string(g_lv2_data, &g_urid_map, &g_urid_unmap, state, uri_aux, NULL);
+        printf("%s\n", st);
+        //sratom_from_turtle(g_sratom, NULL, NULL, NULL, st);
+        sprintf(uri_aux, "%s#%d", MOD__instance, i);
+        lv2_atom_forge_key(&forge, urid_to_id(g_symap, uri_aux));
+        LV2_Atom_Forge_Frame instance_frame;
+        lv2_atom_forge_object(&forge, &instance_frame, 0, g_urids.mod_Instance);
+        lv2_atom_forge_key(&forge, g_urids.pset_preset);
+        lv2_atom_forge_uri(&forge, pset_uri, strlen(pset_uri));
+        lv2_atom_forge_pop(&forge, &instance_frame);
+
+
+        for (j=0; j<effect->ports_count; j++) {
+            if (effect->ports[j]->jack_port && effect->ports[j]->flow == FLOW_OUTPUT) {
+                const LilvNode *symbol_node = lilv_port_get_symbol(effect->lilv_plugin, effect->ports[j]->lilv_port);
+                char *port = (char *) lilv_node_as_string(symbol_node);
+                const char **ports = jack_port_get_all_connections(effect->jack_client, effect->ports[j]->jack_port);
+                if (ports) {
+                    for (k=0; ports[k] != NULL; k++) {
+                        char *port_name = strdup(ports[k]);
+                        if (strstr(port_name, "mod-host-plugin_") != NULL) {
+                            uint32_t instance = atoi(&(port_name[strlen("mod-host-plugin_")]));
+                            // gets port symbol
+                            char *tok = strtok(port_name, ":");
+                            tok = strtok(NULL, ":");
+
+                            lv2_atom_forge_key(&forge, g_urids.mod_connection);
+                            LV2_Atom_Forge_Frame conn_frame;
+                            lv2_atom_forge_object(&forge, &conn_frame, 0, g_urids.mod_Connection);
+                            lv2_atom_forge_key(&forge, g_urids.mod_outInstance);
+                            sprintf(uri_aux, "%s#%d", MOD__instance, i);
+                            lv2_atom_forge_uri(&forge, uri_aux, strlen(uri_aux));
+                            lv2_atom_forge_key(&forge, g_urids.mod_outPortSymbol);
+                            lv2_atom_forge_string(&forge, port, strlen(port));
+                            lv2_atom_forge_key(&forge, g_urids.mod_inInstance);
+                            sprintf(uri_aux, "%s#%d", MOD__instance, instance);
+                            lv2_atom_forge_uri(&forge, uri_aux, strlen(uri_aux));
+                            lv2_atom_forge_key(&forge, g_urids.mod_inPortSymbol);
+                            lv2_atom_forge_string(&forge, tok, strlen(tok));
+                            lv2_atom_forge_pop(&forge, &conn_frame);
+                        }
+                    }
+                    jack_free(ports);
+                }
+            }
+        }
+    }
+    lv2_atom_forge_pop(&forge, &session_frame);
+    SerdNode s = serd_node_from_string(SERD_URI, (uint8_t*)"http://portalmod.com/ns/mod/session#1");
+    SerdNode p = serd_node_from_string(SERD_URI, (uint8_t*)"http://portalmod.com/ns/mod/session");
+    const LV2_Atom* atom = lv2_atom_forge_deref(&forge, session_frame.ref);
+    sratom_set_pretty_numbers(g_sratom, true);
+    char*     str  = sratom_to_turtle(
+                            g_sratom, &g_urid_unmap, "mod:", &s, &p,
+                            atom->type, atom->size, LV2_ATOM_BODY_CONST(atom));
+    printf("%s\n", str);
+    free(str);
+    return SUCCESS;
 }
 
 int effects_preset_save(int effect_id, const char *dir, const char *fname, const char *label) {

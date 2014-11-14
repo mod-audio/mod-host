@@ -102,6 +102,9 @@ The commands supported by mod-host are:
     save_preset <instance_number> <preset_name> <dir> <fname>
         e.g.: preset 0 "My Preset" /home/user/.lv2/my-presets.lv2 mypreset.ttl
 
+    save_preset <preset_name> <dir> <fname>
+        e.g.: preset "My Session" /home/user/.lv2/my-sessions.lv2 mysession.ttl
+
     param_set <instance_number> <param_symbol> <param_value>
         e.g.: param_set 0 gain 2.50
 

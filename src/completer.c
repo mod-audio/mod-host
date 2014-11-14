@@ -51,6 +51,7 @@ static char *g_commands[] = {
     "remove",
     "preset",
     "save_preset",
+    "save_session",
     "connect",
     "disconnect",
     "bypass",

@@ -69,6 +69,18 @@ enum {
 
 #define MAX_INSTANCES           10000
 
+#define MOD_URI                 "http://portalmod.com/ns/mod"
+#define MOD_URI_PREFIX          MOD_URI "/"
+
+#define MOD__Session            MOD_URI_PREFIX "Session"
+#define MOD__Connection         MOD_URI_PREFIX "Connection"
+#define MOD__Instance           MOD_URI_PREFIX "Instance"
+#define MOD__instance           MOD_URI_PREFIX "instance"
+#define MOD__connection         MOD_URI_PREFIX "connection"
+#define MOD__inInstance         MOD_URI_PREFIX "inInstance"
+#define MOD__inPortSymbol       MOD_URI_PREFIX "inPortSymbol"
+#define MOD__outInstance        MOD_URI_PREFIX "outInstance"
+#define MOD__outPortSymbol      MOD_URI_PREFIX "outPortSymbol"
 
 /*
 ************************************************************************************************************************
@@ -103,6 +115,7 @@ int effects_add(const char *uid, int instance);
 int effects_remove(int effect_id);
 int effects_preset(int effect_id, const char *label);
 int effects_preset_save(int effect_id, const char *dir, const char *fname, const char *label);
+int effects_session_save(const char *dir, const char *fname, const char *label);
 int effects_connect(const char *portA, const char *portB);
 int effects_disconnect(const char *portA, const char *portB);
 int effects_set_parameter(int effect_id, const char *control_symbol, float value);

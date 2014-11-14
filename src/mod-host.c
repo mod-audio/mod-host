@@ -139,6 +139,16 @@ static void effects_preset_save_cb(proto_t *proto)
     protocol_response(buffer, proto);
 }
 
+static void effects_session_save_cb(proto_t *proto)
+{
+    int resp;
+    resp = effects_session_save(proto->list[2], proto->list[3], proto->list[1]);
+
+    char buffer[128];
+    sprintf(buffer, "resp %i", resp);
+    protocol_response(buffer, proto);
+}
+
 static void effects_preset_cb(proto_t *proto)
 {
     int resp;
@@ -439,6 +449,7 @@ int main(int argc, char **argv)
     protocol_add_command(EFFECT_REMOVE, effects_remove_cb);
     protocol_add_command(EFFECT_PRESET, effects_preset_cb);
     protocol_add_command(EFFECT_PRESET_SAVE, effects_preset_save_cb);
+    protocol_add_command(EFFECT_SESSION_SAVE, effects_session_save_cb);
     protocol_add_command(EFFECT_CONNECT, effects_connect_cb);
     protocol_add_command(EFFECT_DISCONNECT, effects_disconnect_cb);
     protocol_add_command(EFFECT_BYPASS, effects_bypass_cb);
