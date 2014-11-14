@@ -1278,21 +1278,11 @@ int effects_session_save(const char *dir, const char *fname, const char *label)
         if (!effect || !effect->lilv_instance || !effect->jack_client)
             continue;
 
-        LilvState* const state = lilv_state_new_from_instance(
-            effect->lilv_plugin, effect->lilv_instance,
-            &g_urid_map,
-            NULL,
-            NULL,
-            NULL,
-            NULL,
-            GetPortValueForState, effect,
-            LV2_STATE_IS_POD|LV2_STATE_IS_PORTABLE, NULL);
         char uri_aux[512];
         sprintf(uri_aux, "preset_%s_%d", label, i);
         char *pset_uri = strdup(uri_aux);
-        char *st = lilv_state_to_string(g_lv2_data, &g_urid_map, &g_urid_unmap, state, uri_aux, NULL);
-        printf("%s\n", st);
-        //sratom_from_turtle(g_sratom, NULL, NULL, NULL, st);
+        effects_preset_save(i, dir, "presets.ttl", NULL, pset_uri);
+
         sprintf(uri_aux, "%s#%d", MOD__instance, i);
         lv2_atom_forge_key(&forge, urid_to_id(g_symap, uri_aux));
         LV2_Atom_Forge_Frame instance_frame;
@@ -1345,12 +1335,15 @@ int effects_session_save(const char *dir, const char *fname, const char *label)
     char*     str  = sratom_to_turtle(
                             g_sratom, &g_urid_unmap, "mod:", &s, &p,
                             atom->type, atom->size, LV2_ATOM_BODY_CONST(atom));
-    printf("%s\n", str);
+    FILE *fd = fopen("/tmp/test.lv2/test.ttl", "w");
+    fprintf(fd, str);
+    fclose(fd);
+
     free(str);
     return SUCCESS;
 }
 
-int effects_preset_save(int effect_id, const char *dir, const char *fname, const char *label) {
+int effects_preset_save(int effect_id, const char *dir, const char *fname, const char *label, const char *uri) {
     LilvState* const state = lilv_state_new_from_instance(
         g_effects[effect_id].lilv_plugin, g_effects[effect_id].lilv_instance,
         &g_urid_map,
@@ -1366,7 +1359,7 @@ int effects_preset_save(int effect_id, const char *dir, const char *fname, const
     }
 
     int ret = lilv_state_save(
-        g_lv2_data, &g_urid_map, &g_urid_unmap, state, NULL, dir, fname);
+        g_lv2_data, &g_urid_map, &g_urid_unmap, state, uri, dir, fname);
     lilv_state_free(state);
     return ret;
 }

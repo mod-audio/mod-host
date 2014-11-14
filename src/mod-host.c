@@ -132,7 +132,7 @@ static void effects_remove_cb(proto_t *proto)
 static void effects_preset_save_cb(proto_t *proto)
 {
     int resp;
-    resp = effects_preset_save(atoi(proto->list[1]), proto->list[3], proto->list[4], proto->list[2]);
+    resp = effects_preset_save(atoi(proto->list[1]), proto->list[3], proto->list[4], proto->list[2], NULL);
 
     char buffer[128];
     sprintf(buffer, "resp %i", resp);
