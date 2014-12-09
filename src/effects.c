@@ -32,6 +32,7 @@
 /* Jack */
 #include <jack/jack.h>
 #include <jack/midiport.h>
+#include <jack/metadata.h>
 
 /* LV2 and Lilv */
 #include <lilv/lilv.h>
@@ -995,6 +996,10 @@ int effects_add(const char *uid, int instance)
                 goto error;
             }
             effect->ports[i]->jack_port = jack_port;
+            jack_uuid_t port_uuid = jack_port_uuid(jack_port);
+            LilvNode* name = lilv_port_get_name(plugin, lilv_port);
+            jack_set_property(jack_client, port_uuid, JACK_METADATA_PRETTY_NAME, lilv_node_as_string(name), NULL);
+            lilv_node_free(name);
 
             audio_ports_count++;
             if (lilv_port_is_a(plugin, lilv_port, lilv_input)) input_audio_ports_count++;
