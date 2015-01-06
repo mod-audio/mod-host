@@ -359,6 +359,7 @@ int main(int argc, char **argv)
 {
     /* Command line options */
     static struct option long_options[] = {
+        {"nofork", no_argument, 0, 'n'},
         {"verbose", no_argument, 0, 'v'},
         {"socket-port", required_argument, 0, 'p'},
         {"interactive", no_argument, 0, 'i'},
@@ -370,13 +371,18 @@ int main(int argc, char **argv)
     int opt, opt_index = 0;
 
     /* parse command line options */
-    int verbose = 0, socket_port = SOCKET_DEFAULT_PORT, interactive = 0;
-    while ((opt = getopt_long(argc, argv, "vp:iVh", long_options, &opt_index)) != -1)
+    int nofork = 0, verbose = 0, socket_port = SOCKET_DEFAULT_PORT, interactive = 0;
+    while ((opt = getopt_long(argc, argv, "nvp:iVh", long_options, &opt_index)) != -1)
     {
         switch (opt)
         {
+            case 'n':
+                nofork = 1;
+                break;
+
             case 'v':
                 verbose = 1;
+                nofork = 1;
                 break;
 
             case 'p':
@@ -385,6 +391,7 @@ int main(int argc, char **argv)
 
             case 'i':
                 interactive = 1;
+                nofork = 1;
                 break;
 
             case 'V':
@@ -410,8 +417,7 @@ int main(int argc, char **argv)
         }
     }
 
-    /* If verbose or interactive, don't fork */
-    if (!verbose && !interactive)
+    if (! nofork)
     {
         int pid;
         pid = fork();
