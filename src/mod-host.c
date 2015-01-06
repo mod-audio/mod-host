@@ -256,7 +256,7 @@ static void load_cb(proto_t *proto)
 
         while (fgets(line, sizeof(line), fp))
         {
-            printf(line);
+            printf("%s", line);
 
             /* removes the \n at end of line */
             line[strlen(line)-1] = 0;
