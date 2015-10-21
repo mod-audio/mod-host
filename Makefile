@@ -1,9 +1,6 @@
 # compiler
 CC ?= gcc
 
-# linker
-LD ?= gcc
-
 # language file extension
 EXT = c
 
@@ -44,7 +41,7 @@ OBJ = $(SRC:.$(EXT)=.o)
 
 # linking rule
 $(PROG): get_info $(OBJ)
-	$(LD) $(LDFLAGS) $(OBJ) -o $(PROG) $(LIBS)
+	$(CC) $(LDFLAGS) $(OBJ) -o $(PROG) $(LIBS)
 	@rm src/info.h
 
 # meta-rule to generate the object files
