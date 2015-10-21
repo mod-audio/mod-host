@@ -50,7 +50,7 @@ $(PROG): get_info $(OBJ)
 
 # install rule
 install: install_man
-	install $(PROG) $(BINDIR)
+	install $(PROG) $(DESTDIR)$(BINDIR)
 
 # clean rule
 clean:
@@ -67,7 +67,7 @@ man:
 
 # install manual page rule
 install_man:
-	install doc/*.1 $(MANDIR)
+	install doc/*.1 $(DESTDIR)$(MANDIR)
 
 # generate the source file with the help message
 A=`grep -n 'The commands supported' README.md | cut -d':' -f1`
