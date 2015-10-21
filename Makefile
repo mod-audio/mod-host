@@ -30,10 +30,10 @@ ifeq ($(DEBUG), 1)
 endif
 
 # libraries
-LIBS = `pkg-config --libs jack` `pkg-config --libs lilv-0` -lreadline -lpthread
+LIBS = $(shell pkg-config --libs jack lilv-0) -lreadline -lpthread
 
 # include paths
-INCS = `pkg-config --cflags lilv-0`
+INCS = $(shell pkg-config --cflags jack lilv-0)
 
 # remove command
 RM = rm -f
