@@ -41,12 +41,12 @@ OBJ = $(SRC:.$(EXT)=.o)
 
 # linking rule
 $(PROG): get_info $(OBJ)
-	$(CC) $(LDFLAGS) $(OBJ) -o $(PROG) $(LIBS)
+	$(CC) $(OBJ) $(LDFLAGS) $(LIBS) -o $(PROG)
 	@rm src/info.h
 
 # meta-rule to generate the object files
 %.o: %.$(EXT)
-	$(CC) $(CFLAGS) $(INCS) -o $@ $<
+	$(CC) $(INCS) $(CFLAGS) -o $@ $<
 
 # install rule
 install: install_man
