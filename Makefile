@@ -1,8 +1,8 @@
 # compiler
-CC = gcc
+CC ?= gcc
 
 # linker
-LD = gcc
+LD ?= gcc
 
 # language file extension
 EXT = c
@@ -20,8 +20,8 @@ SHAREDIR = $(PREFIX)/share
 MANDIR = $(SHAREDIR)/man/man1/
 
 # default compiler and linker flags
-CFLAGS = -O3 -Wall -Wextra -c -std=gnu99
-LDFLAGS = -s
+CFLAGS += -O3 -Wall -Wextra -c -std=gnu99
+LDFLAGS += -s
 
 # debug mode compiler and linker flags
 ifeq ($(DEBUG), 1)
