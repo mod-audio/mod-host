@@ -50,6 +50,10 @@
 #include <lv2/lv2plug.in/ns/ext/buf-size/buf-size.h>
 #include <lv2/lv2plug.in/ns/ext/parameters/parameters.h>
 
+#ifndef LV2_BUF_SIZE__nominalBlockLength
+#define LV2_BUF_SIZE__nominalBlockLength  LV2_BUF_SIZE_PREFIX "nominalBlockLength"
+#endif
+
 /* Local */
 #include "effects.h"
 #include "monitor.h"
@@ -195,6 +199,7 @@ typedef struct URIDS_T {
     LV2_URID atom_eventTransfer;
     LV2_URID bufsz_maxBlockLength;
     LV2_URID bufsz_minBlockLength;
+    LV2_URID bufsz_nomimalBlockLength;
     LV2_URID bufsz_sequenceSize;
     LV2_URID log_Trace;
     LV2_URID midi_MidiEvent;
@@ -249,7 +254,7 @@ static LV2_Atom_Forge g_lv2_atom_forge;
 static LV2_URI_Map_Feature g_uri_map;
 static LV2_URID_Map g_urid_map;
 static LV2_URID_Unmap g_urid_unmap;
-static LV2_Options_Option g_options[5];
+static LV2_Options_Option g_options[6];
 
 static LV2_Feature g_uri_map_feature = {LV2_URI_MAP_URI, &g_uri_map};
 static LV2_Feature g_urid_map_feature = {LV2_URID__map, &g_urid_map};
@@ -689,8 +694,9 @@ int effects_init(void)
     g_urids.atom_Int             = urid_to_id(g_symap, LV2_ATOM__Int);
     g_urids.atom_eventTransfer   = urid_to_id(g_symap, LV2_ATOM__eventTransfer);
 
-    g_urids.bufsz_maxBlockLength = urid_to_id(g_symap, LV2_BUF_SIZE__maxBlockLength);
-    g_urids.bufsz_minBlockLength = urid_to_id(g_symap, LV2_BUF_SIZE__minBlockLength);
+    g_urids.bufsz_maxBlockLength     = urid_to_id(g_symap, LV2_BUF_SIZE__maxBlockLength);
+    g_urids.bufsz_minBlockLength     = urid_to_id(g_symap, LV2_BUF_SIZE__minBlockLength);
+    g_urids.bufsz_nomimalBlockLength = urid_to_id(g_symap, LV2_BUF_SIZE__nominalBlockLength);
     g_urids.bufsz_sequenceSize   = urid_to_id(g_symap, LV2_BUF_SIZE__sequenceSize);
     g_urids.midi_MidiEvent       = urid_to_id(g_symap, LV2_MIDI__MidiEvent);
     g_urids.param_sampleRate     = urid_to_id(g_symap, LV2_PARAMETERS__sampleRate);
@@ -730,17 +736,24 @@ int effects_init(void)
 
     g_options[3].context = LV2_OPTIONS_INSTANCE;
     g_options[3].subject = 0;
-    g_options[3].key = g_urids.bufsz_sequenceSize;
+    g_options[3].key = g_urids.bufsz_nomimalBlockLength;
     g_options[3].size = sizeof(int32_t);
     g_options[3].type = g_urids.atom_Int;
-    g_options[3].value = &g_midi_buffer_size;
+    g_options[3].value = &g_block_length;
 
     g_options[4].context = LV2_OPTIONS_INSTANCE;
     g_options[4].subject = 0;
-    g_options[4].key = 0;
-    g_options[4].size = 0;
-    g_options[4].type = 0;
-    g_options[4].value = NULL;
+    g_options[4].key = g_urids.bufsz_sequenceSize;
+    g_options[4].size = sizeof(int32_t);
+    g_options[4].type = g_urids.atom_Int;
+    g_options[4].value = &g_midi_buffer_size;
+
+    g_options[5].context = LV2_OPTIONS_INSTANCE;
+    g_options[5].subject = 0;
+    g_options[5].key = 0;
+    g_options[5].size = 0;
+    g_options[5].type = 0;
+    g_options[5].value = NULL;
 
     lv2_atom_forge_init(&g_lv2_atom_forge, &g_urid_map);
 

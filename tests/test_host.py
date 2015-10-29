@@ -27,7 +27,7 @@ def test_load_gain_change_param():
 
 def test_preset_load():
     load_egamp()
-    r = s('preset 0 "Gain 3"')
+    r = s('preset 0 urn:test:Gain3')
     assert int(r[0]) == 0
     r = s("param_get 0 gain")
     assert int(r[0]) == 0

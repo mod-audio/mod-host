@@ -15,7 +15,7 @@ egamp_preset_manifest = """
 @prefix state: <http://lv2plug.in/ns/ext/state#> .
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 
-<gain_3.ttl>
+<urn:test:Gain3>
     a pset:Preset ;
     rdfs:seeAlso <gain_3.ttl> ;
     lv2:appliesTo <http://lv2plug.in/plugins/eg-amp> .
@@ -28,7 +28,7 @@ egamp_preset = """@prefix atom: <http://lv2plug.in/ns/ext/atom#> .
 @prefix state: <http://lv2plug.in/ns/ext/state#> .
 @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 
-<>
+<urn:test:Gain3>
     a pset:Preset ;
     lv2:appliesTo <http://lv2plug.in/plugins/eg-amp> ;
     rdfs:label "Gain 3" ;
