@@ -304,7 +304,7 @@ static char **completion(const char *text, int start, int end)
             }
             if (get_presets)
             {
-                effects_get_presets_labels(atoi(cmd[1]), g_symbols);
+                effects_get_presets_uris(atoi(cmd[1]), g_symbols);
                 g_list = g_symbols;
             }
             if (get_symbols)

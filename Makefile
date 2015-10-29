@@ -22,7 +22,7 @@ LDFLAGS += -s
 
 # debug mode compiler and linker flags
 ifeq ($(DEBUG), 1)
-   CFLAGS = -O0 -g -Wall -Wextra -c -DDEBUG
+   CFLAGS = -O0 -g -Wall -Wextra -c -DDEBUG -std=gnu99
    LDFLAGS =
 endif
 

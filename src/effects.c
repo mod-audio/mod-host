@@ -130,8 +130,7 @@ typedef struct PROPERTY_EVENT_T {
 } property_event_t;
 
 typedef struct PRESET_T {
-    const LilvNode* label;
-    const LilvNode* preset;
+    const LilvNode* uri;
 } preset_t;
 
 typedef struct MONITOR_T {
@@ -593,7 +592,7 @@ static const void* GetPortValueForState(const char* symbol, void* user_data,
 int LoadPresets(effect_t *effect)
 {
     LilvNode *preset_uri = lilv_new_uri(g_lv2_data, LV2_PRESETS__Preset);
-	LilvNodes* presets = lilv_plugin_get_related(effect->lilv_plugin, preset_uri);
+    LilvNodes* presets = lilv_plugin_get_related(effect->lilv_plugin, preset_uri);
     uint32_t presets_count = lilv_nodes_size(presets);
     effect->presets_count = presets_count;
     // allocate for presets
@@ -601,35 +600,23 @@ int LoadPresets(effect_t *effect)
     uint32_t j = 0;
     for (j = 0; j < presets_count; j++) effect->presets[j] = NULL;
     j = 0;
-	LILV_FOREACH(nodes, i, presets) {
-		const LilvNode* preset = lilv_nodes_get(presets, i);
-		lilv_world_load_resource(g_lv2_data, preset);
-        LilvNode *rdfs_label = lilv_new_uri(g_lv2_data, LILV_NS_RDFS "label");
-		LilvNodes* labels = lilv_world_find_nodes(
-			g_lv2_data, preset, rdfs_label, NULL);
-		if (labels) {
-			const LilvNode* label = lilv_nodes_get_first(labels);
-            effect->presets[j] = (preset_t *) malloc(sizeof(preset_t));
-            effect->presets[j]->label = lilv_node_duplicate(label);
-            effect->presets[j]->preset = lilv_node_duplicate(preset);
-			lilv_nodes_free(labels);
-		} else {
-			fprintf(stderr, "Preset <%s> has no rdfs:label\n",
-			        lilv_node_as_string(lilv_nodes_get(presets, i)));
-		}
+    LILV_FOREACH(nodes, i, presets) {
+        const LilvNode* preset = lilv_nodes_get(presets, i);
+        effect->presets[j] = (preset_t *) malloc(sizeof(preset_t));
+        effect->presets[j]->uri = lilv_node_duplicate(preset);
         j++;
-	}
-	lilv_nodes_free(presets);
+    }
+    lilv_nodes_free(presets);
 
-	return 0;
+    return 0;
 }
 
-int FindPreset(effect_t *effect, const char *label, const LilvNode **preset)
+int FindPreset(effect_t *effect, const char *uri, const LilvNode **preset)
 {
     uint32_t i;
     for(i=0; i<effect->presets_count; i++) {
-        if(strcmp(label, lilv_node_as_string(effect->presets[i]->label)) == 0) {
-            *preset = (effect->presets[i]->preset);
+        if(strcmp(uri, lilv_node_as_uri(effect->presets[i]->uri)) == 0) {
+            *preset = (effect->presets[i]->uri);
             return SUCCESS;
         }
     }
@@ -1249,20 +1236,26 @@ int effects_preset_save(int effect_id, const char *dir, const char *fname, const
     return ret;
 }
 
-int effects_preset(int effect_id, const char *label) {
+int effects_preset(int effect_id, const char *uri) {
     effect_t *effect;
     if (InstanceExist(effect_id))
     {
         const LilvNode* preset;
         effect = &g_effects[effect_id];
-        if (FindPreset(effect, label, &preset) == SUCCESS)
+        if (FindPreset(effect, uri, &preset) == SUCCESS)
         {
+            lilv_world_load_resource(g_lv2_data, preset);
             LilvState* state = lilv_state_new_from_world(g_lv2_data, &g_urid_map, preset);
+            if (! state) {
+                return ERR_LILV_INSTANTIATION;
+            }
             lilv_state_restore(state, effect->lilv_instance, SetParameterFromState, effect, 0, NULL);
             lilv_state_free(state);
+            return SUCCESS;
         }
+        return ERR_LV2_INVALID_PRESET_URI;
     }
-    return SUCCESS;
+    return ERR_INSTANCE_NON_EXISTS;
 }
 
 int effects_remove(int effect_id)
@@ -1586,11 +1579,11 @@ int effects_get_parameter_symbols(int effect_id, char** symbols)
     return SUCCESS;
 }
 
-int effects_get_presets_labels(int effect_id, char **labels)
+int effects_get_presets_uris(int effect_id, char **uris)
 {
     if (!InstanceExist(effect_id))
     {
-        labels = NULL;
+        uris = NULL;
         return ERR_INSTANCE_NON_EXISTS;
     }
 
@@ -1599,10 +1592,10 @@ int effects_get_presets_labels(int effect_id, char **labels)
 
     for (i = 0; i < effect->presets_count; i++)
     {
-        labels[i] = (char *) lilv_node_as_string(effect->presets[i]->label);
+        uris[i] = (char *) lilv_node_as_uri(effect->presets[i]->uri);
     }
 
-    labels[i] = NULL;
+    uris[i] = NULL;
 
     return SUCCESS;
 }
