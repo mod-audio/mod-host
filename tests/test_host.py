@@ -53,7 +53,7 @@ def test_preset_save():
     assert int(r[0]) == 0
     assert float(r[1]) == 0.0
 
-    r = s('preset 0 Gain5')
+    r = s('preset 0 file:///tmp/lv2path/presets.lv2/gain_5.ttl')
     assert int(r[0]) == 0
 
     r = s('param_get 0 gain')
