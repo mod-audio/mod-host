@@ -54,6 +54,12 @@
 #define LV2_BUF_SIZE__nominalBlockLength  LV2_BUF_SIZE_PREFIX "nominalBlockLength"
 #endif
 
+#define LILV_URI_CV_PORT "http://lv2plug.in/ns/lv2core#CVPort"
+
+// custom jack flag used for cv
+// needed because we prefer jack2 which doesn't have metadata yet
+#define JackPortIsControlVoltage 0x100
+
 /* Local */
 #include "effects.h"
 #include "monitor.h"
@@ -88,6 +94,7 @@ enum PortType {
     TYPE_UNKNOWN,
     TYPE_CONTROL,
     TYPE_AUDIO,
+    TYPE_CV,
     TYPE_EVENT
 };
 
@@ -170,6 +177,13 @@ typedef struct EFFECT_T {
     uint32_t input_control_ports_count;
     port_t **output_control_ports;
     uint32_t output_control_ports_count;
+
+    port_t **cv_ports;
+    uint32_t cv_ports_count;
+    port_t **input_cv_ports;
+    uint32_t input_cv_ports_count;
+    port_t **output_cv_ports;
+    uint32_t output_cv_ports_count;
 
     port_t **event_ports;
     uint32_t event_ports_count;
@@ -344,7 +358,8 @@ static int BufferSize(jack_nframes_t nframes, void* data)
 static int ProcessAudio(jack_nframes_t nframes, void *arg)
 {
     effect_t *effect;
-    float *buffer_in, *buffer_out;
+    const float *buffer_in;
+    float *buffer_out;
     unsigned int i;
 
     if (arg == NULL) return SUCCESS;
@@ -354,26 +369,28 @@ static int ProcessAudio(jack_nframes_t nframes, void *arg)
     for (i = 0; i < effect->input_event_ports_count; i++)
     {
         lv2_evbuf_reset(effect->input_event_ports[i]->evbuf, true);
-        LV2_Evbuf_Iterator iter = lv2_evbuf_begin(effect->input_event_ports[i]->evbuf);
 
-        /* Write Jack MIDI input */
-        void* buf = jack_port_get_buffer(effect->input_event_ports[i]->jack_port, nframes);
-        uint32_t j;
-        for (j = 0; j < jack_midi_get_event_count(buf); ++j)
+        if (!effect->bypass)
         {
-            jack_midi_event_t ev;
-            jack_midi_event_get(&ev, buf, j);
-            if (!lv2_evbuf_write(&iter, ev.time, 0, g_urids.midi_MidiEvent, ev.size, ev.buffer))
+            LV2_Evbuf_Iterator iter = lv2_evbuf_begin(effect->input_event_ports[i]->evbuf);
+
+            /* Write Jack MIDI input */
+            void* buf = jack_port_get_buffer(effect->input_event_ports[i]->jack_port, nframes);
+            uint32_t j;
+            for (j = 0; j < jack_midi_get_event_count(buf); ++j)
             {
-                fprintf(stderr, "lv2 evbuf write failed\n");
+                jack_midi_event_t ev;
+                jack_midi_event_get(&ev, buf, j);
+                if (!lv2_evbuf_write(&iter, ev.time, 0, g_urids.midi_MidiEvent, ev.size, ev.buffer))
+                {
+                    fprintf(stderr, "lv2 evbuf write failed\n");
+                }
             }
         }
     }
 
     for (i = 0; i < effect->output_event_ports_count; i++)
-    {
         lv2_evbuf_reset(effect->output_event_ports[i]->evbuf, false);
-    }
 
     /* control in events */
     if (effect->events_buffer) {
@@ -397,9 +414,10 @@ static int ProcessAudio(jack_nframes_t nframes, void *arg)
     /* Bypass */
     if (effect->bypass)
     {
-        /* g_plugins with audio inputs */
+        /* Plugins with audio inputs */
         if (effect->input_audio_ports_count > 0)
         {
+            /* prepare jack buffers (bypass copy) */
             for (i = 0; i < effect->output_audio_ports_count; i++)
             {
                 if (i < effect->input_audio_ports_count)
@@ -413,22 +431,44 @@ static int ProcessAudio(jack_nframes_t nframes, void *arg)
                 }
                 buffer_out = jack_port_get_buffer(effect->output_audio_ports[i]->jack_port, nframes);
                 memcpy(buffer_out, buffer_in, (sizeof(float) * nframes));
-
-                /* Run the plugin with zero buffer to avoid 'pause behavior' in delay plugins */
-                lilv_instance_run(effect->lilv_instance, nframes);
-
-                memset(effect->output_audio_ports[i]->buffer, 0, (sizeof(float) * nframes));
             }
+
+            /* silence any remaining audio inputs */
+            for (; i < effect->input_audio_ports_count; i++)
+                memset(effect->input_audio_ports[i]->buffer, 0, (sizeof(float) * nframes));
+
+            /* reset cv inputs */
+            for (i = 0; i < effect->input_cv_ports_count; i++)
+                memset(effect->input_cv_ports[i]->buffer, 0, (sizeof(float) * nframes));
+
+            /* Run the plugin with zero buffer to avoid 'pause behavior' in delay plugins */
+            lilv_instance_run(effect->lilv_instance, nframes);
+
+            /* no need to silence plugin audio or cv, they are unused during bypass */
         }
-        /* Generator plugins */
+        /* Plugins without audio inputs */
         else
         {
+            /* prepare jack buffers (silent) */
             for (i = 0; i < effect->output_audio_ports_count; i++)
             {
                 buffer_out = jack_port_get_buffer(effect->output_audio_ports[i]->jack_port, nframes);
                 memset(buffer_out, 0, (sizeof(float) * nframes));
-                lilv_instance_run(effect->lilv_instance, nframes);
             }
+            for (i = 0; i < effect->output_cv_ports_count; i++)
+            {
+                buffer_out = jack_port_get_buffer(effect->output_cv_ports[i]->jack_port, nframes);
+                memset(buffer_out, 0, (sizeof(float) * nframes));
+            }
+
+            /* reset cv inputs */
+            for (i = 0; i < effect->input_cv_ports_count; i++)
+                memset(effect->input_cv_ports[i]->buffer, 0, (sizeof(float) * nframes));
+
+            /* Run the plugin with default cv buffers and without midi events */
+            lilv_instance_run(effect->lilv_instance, nframes);
+
+            /* no need to silence plugin audio or cv, they are unused during bypass */
         }
     }
     /* Effect process */
@@ -439,6 +479,13 @@ static int ProcessAudio(jack_nframes_t nframes, void *arg)
         {
             buffer_in = jack_port_get_buffer(effect->input_audio_ports[i]->jack_port, nframes);
             memcpy(effect->input_audio_ports[i]->buffer, buffer_in, (sizeof(float) * nframes));
+        }
+
+        /* Copy the input buffers cv */
+        for (i = 0; i < effect->input_cv_ports_count; i++)
+        {
+            buffer_in = jack_port_get_buffer(effect->input_cv_ports[i]->jack_port, nframes);
+            memcpy(effect->input_cv_ports[i]->buffer, buffer_in, (sizeof(float) * nframes));
         }
 
         /* Run the effect */
@@ -459,6 +506,13 @@ static int ProcessAudio(jack_nframes_t nframes, void *arg)
         {
             buffer_out = jack_port_get_buffer(effect->output_audio_ports[i]->jack_port, nframes);
             memcpy(buffer_out, effect->output_audio_ports[i]->buffer, (sizeof(float) * nframes));
+        }
+
+        /* Copy the output buffers cv */
+        for (i = 0; i < effect->output_cv_ports_count; i++)
+        {
+            buffer_out = jack_port_get_buffer(effect->output_cv_ports[i]->jack_port, nframes);
+            memcpy(buffer_out, effect->output_cv_ports[i]->buffer, (sizeof(float) * nframes));
         }
 
         for (i = 0; i < effect->monitors_count; i++) {
@@ -484,15 +538,22 @@ static int ProcessAudio(jack_nframes_t nframes, void *arg)
             void* buf = jack_port_get_buffer(port->jack_port, nframes);
             jack_midi_clear_buffer(buf);
 
-            LV2_Evbuf_Iterator i;
-            for (i = lv2_evbuf_begin(port->evbuf); lv2_evbuf_is_valid(i); i = lv2_evbuf_next(i))
+            if (effect->bypass)
             {
-                uint32_t frames, subframes, type, size;
-                uint8_t* body;
-                lv2_evbuf_get(i, &frames, &subframes, &type, &size, &body);
-                if (type == g_urids.midi_MidiEvent)
+                // TODO: bypass MIDI events if there is no audio or cv
+            }
+            else
+            {
+                LV2_Evbuf_Iterator i;
+                for (i = lv2_evbuf_begin(port->evbuf); lv2_evbuf_is_valid(i); i = lv2_evbuf_next(i))
                 {
-                    jack_midi_event_write(buf, frames, body, size);
+                    uint32_t frames, subframes, type, size;
+                    uint8_t* body;
+                    lv2_evbuf_get(i, &frames, &subframes, &type, &size, &body);
+                    if (type == g_urids.midi_MidiEvent)
+                    {
+                        jack_midi_event_write(buf, frames, body, size);
+                    }
                 }
             }
         }
@@ -784,10 +845,11 @@ int effects_add(const char *uid, int instance)
 {
     unsigned int i, ports_count;
     char effect_name[32], port_name[256];
-    float *audio_buffer, *control_buffer;
+    float *audio_buffer, *cv_buffer, *control_buffer;
     jack_port_t *jack_port;
     uint32_t audio_ports_count, input_audio_ports_count, output_audio_ports_count;
     uint32_t control_ports_count, input_control_ports_count, output_control_ports_count;
+    uint32_t cv_ports_count, input_cv_ports_count, output_cv_ports_count;
     uint32_t event_ports_count, input_event_ports_count, output_event_ports_count;
     effect_t *effect;
     int32_t error;
@@ -801,7 +863,7 @@ int effects_add(const char *uid, int instance)
     const LilvPlugin *plugin;
     LilvInstance *lilv_instance;
     LilvNode *plugin_uri;
-    LilvNode *lilv_input, *lilv_control_in, *lilv_output, *lilv_control, *lilv_audio, *lilv_event, *lilv_midi;
+    LilvNode *lilv_input, *lilv_control_in, *lilv_output, *lilv_control, *lilv_audio, *lilv_cv, *lilv_event, *lilv_midi;
     LilvNode *lilv_default, *lilv_minimum, *lilv_maximum, *lilv_atom_port, *lilv_worker_interface;
     const LilvPort *lilv_port;
     const LilvNode *symbol_node;
@@ -832,6 +894,7 @@ int effects_add(const char *uid, int instance)
     lilv_output = NULL;
     lilv_control = NULL;
     lilv_audio = NULL;
+    lilv_cv = NULL;
     lilv_midi = NULL;
     lilv_default = NULL;
     lilv_minimum = NULL;
@@ -914,6 +977,7 @@ int effects_add(const char *uid, int instance)
     ports_count = lilv_plugin_get_num_ports(plugin);
     lilv_audio = lilv_new_uri(g_lv2_data, LILV_URI_AUDIO_PORT);
     lilv_control = lilv_new_uri(g_lv2_data, LILV_URI_CONTROL_PORT);
+    lilv_cv = lilv_new_uri(g_lv2_data, LILV_URI_CV_PORT);
     lilv_input = lilv_new_uri(g_lv2_data, LILV_URI_INPUT_PORT);
     lilv_control_in = lilv_new_uri(g_lv2_data, LV2_CORE__control);
     lilv_output = lilv_new_uri(g_lv2_data, LILV_URI_OUTPUT_PORT);
@@ -928,6 +992,9 @@ int effects_add(const char *uid, int instance)
     control_ports_count = 0;
     input_control_ports_count = 0;
     output_control_ports_count = 0;
+    cv_ports_count = 0;
+    input_cv_ports_count = 0;
+    output_cv_ports_count = 0;
     event_ports_count = 0;
     input_event_ports_count = 0;
     output_event_ports_count = 0;
@@ -1028,6 +1095,37 @@ int effects_add(const char *uid, int instance)
             if (lilv_port_is_a(plugin, lilv_port, lilv_input)) input_control_ports_count++;
             else if (lilv_port_is_a(plugin, lilv_port, lilv_output)) output_control_ports_count++;
         }
+        else if (lilv_port_is_a(plugin, lilv_port, lilv_cv))
+        {
+            effect->ports[i]->type = TYPE_CV;
+
+            /* Allocate memory to cv buffer */
+            cv_buffer = (float *) calloc(g_sample_rate, sizeof(float));
+            if (!cv_buffer)
+            {
+                fprintf(stderr, "can't get cv buffer\n");
+                error = ERR_MEMORY_ALLOCATION;
+                goto error;
+            }
+
+            effect->ports[i]->buffer = cv_buffer;
+            effect->ports[i]->buffer_count = g_sample_rate;
+            lilv_instance_connect_port(lilv_instance, i, cv_buffer);
+
+            /* Jack port creation */
+            jack_port = jack_port_register(jack_client, port_name, JACK_DEFAULT_AUDIO_TYPE, jack_flags|JackPortIsControlVoltage, 0);
+            if (jack_port == NULL)
+            {
+                fprintf(stderr, "can't get jack port\n");
+                error = ERR_JACK_PORT_REGISTER;
+                goto error;
+            }
+            effect->ports[i]->jack_port = jack_port;
+
+            cv_ports_count++;
+            if (lilv_port_is_a(plugin, lilv_port, lilv_input)) input_cv_ports_count++;
+            else if (lilv_port_is_a(plugin, lilv_port, lilv_output)) output_cv_ports_count++;
+        }
         else if (lilv_port_is_a(plugin, lilv_port, lilv_event) ||
                     lilv_port_is_a(plugin, lilv_port, lilv_atom_port))
         {
@@ -1070,6 +1168,13 @@ int effects_add(const char *uid, int instance)
     effect->input_control_ports = (port_t **) calloc(input_control_ports_count, sizeof(port_t *));
     effect->output_control_ports_count = output_control_ports_count;
     effect->output_control_ports = (port_t **) calloc(output_control_ports_count, sizeof(port_t *));
+    /* CV ports */
+    effect->cv_ports_count = cv_ports_count;
+    effect->cv_ports = (port_t **) calloc(cv_ports_count, sizeof(port_t *));
+    effect->input_cv_ports_count = input_cv_ports_count;
+    effect->input_cv_ports = (port_t **) calloc(input_cv_ports_count, sizeof(port_t *));
+    effect->output_cv_ports_count = output_cv_ports_count;
+    effect->output_cv_ports = (port_t **) calloc(output_cv_ports_count, sizeof(port_t *));
     /* Event ports */
     effect->event_ports_count = event_ports_count;
     effect->event_ports = (port_t **) calloc(event_ports_count, sizeof(port_t *));
@@ -1085,6 +1190,9 @@ int effects_add(const char *uid, int instance)
     control_ports_count = 0;
     input_control_ports_count = 0;
     output_control_ports_count = 0;
+    cv_ports_count = 0;
+    input_cv_ports_count = 0;
+    output_cv_ports_count = 0;
     event_ports_count = 0;
     input_event_ports_count = 0;
     output_event_ports_count = 0;
@@ -1124,6 +1232,23 @@ int effects_add(const char *uid, int instance)
             {
                 effect->output_control_ports[output_control_ports_count] = effect->ports[i];
                 output_control_ports_count++;
+            }
+        }
+        /* CV ports */
+        else if (lilv_port_is_a(plugin, lilv_port, lilv_cv))
+        {
+            effect->cv_ports[cv_ports_count] = effect->ports[i];
+            cv_ports_count++;
+
+            if (lilv_port_is_a(plugin, lilv_port, lilv_input))
+            {
+                effect->input_cv_ports[input_cv_ports_count] = effect->ports[i];
+                input_cv_ports_count++;
+            }
+            else if (lilv_port_is_a(plugin, lilv_port, lilv_output))
+            {
+                effect->output_cv_ports[output_cv_ports_count] = effect->ports[i];
+                output_cv_ports_count++;
             }
         }
         /* Event ports */
@@ -1181,6 +1306,7 @@ int effects_add(const char *uid, int instance)
 
     lilv_node_free(lilv_audio);
     lilv_node_free(lilv_control);
+    lilv_node_free(lilv_cv);
     lilv_node_free(lilv_input);
     lilv_node_free(lilv_control_in);
     lilv_node_free(lilv_output);
@@ -1215,6 +1341,7 @@ int effects_add(const char *uid, int instance)
     error:
         lilv_node_free(lilv_audio);
         lilv_node_free(lilv_control);
+        lilv_node_free(lilv_cv);
         lilv_node_free(lilv_input);
         lilv_node_free(lilv_control_in);
         lilv_node_free(lilv_output);
