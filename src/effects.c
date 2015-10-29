@@ -1356,7 +1356,7 @@ int effects_connect(const char *portA, const char *portB)
     int ret;
 
     ret = jack_connect(g_jack_global_client, portA, portB);
-    if (ret != 0) ret = jack_connect(g_jack_global_client, portB, portA);
+    if (ret != 0 && ret != EEXIST) ret = jack_connect(g_jack_global_client, portB, portA);
     if (ret == EEXIST) ret = 0;
 
     if (ret != 0) return ERR_JACK_PORT_CONNECTION;
