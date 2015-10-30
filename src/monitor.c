@@ -135,7 +135,7 @@ int monitor_start(char *addr, int port)
     g_status = ON;
 
     int flags = fcntl(g_sockfd, F_GETFL, 0);
-    if(fcntl(g_sockfd, F_SETFL, flags | O_NONBLOCK) != 0)
+    if (fcntl(g_sockfd, F_SETFL, flags | O_NONBLOCK) != 0)
         perror("ERROR setting socket to nonblocking");
 
 
@@ -174,7 +174,8 @@ int monitor_send(int instance, const char *symbol, float value)
 
 int monitor_check_condition(int op, float cond_value, float value)
 {
-    switch(op) {
+    switch(op)
+    {
         case 0:
             return value > cond_value ? 1 : 0;
         case 1:

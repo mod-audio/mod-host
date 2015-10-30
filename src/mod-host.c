@@ -183,7 +183,8 @@ static void effects_set_param_cb(proto_t *proto)
 {
     int resp;
     resp = effects_set_parameter(atoi(proto->list[1]), proto->list[2], atof(proto->list[3]));
-    if (resp != SUCCESS) {
+    if (resp != SUCCESS)
+    {
         resp = effects_set_property(atoi(proto->list[1]), proto->list[2], proto->list[3]);
     }
 
@@ -462,7 +463,8 @@ int main(int argc, char **argv)
     if (effects_init()) return -1;
 
     /* Setup the socket */
-    if (socket_start(socket_port, SOCKET_MSG_BUFFER_SIZE) < 0) {
+    if (socket_start(socket_port, SOCKET_MSG_BUFFER_SIZE) < 0)
+    {
         exit(EXIT_FAILURE);
     }
     socket_set_receive_cb(protocol_parse);

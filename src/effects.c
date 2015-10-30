@@ -393,11 +393,13 @@ static int ProcessAudio(jack_nframes_t nframes, void *arg)
         lv2_evbuf_reset(effect->output_event_ports[i]->evbuf, false);
 
     /* control in events */
-    if (effect->events_buffer) {
+    if (effect->events_buffer)
+    {
         const size_t space = jack_ringbuffer_read_space(effect->events_buffer);
         LV2_Atom atom;
         size_t j;
-        for(j=0; j < space; j += sizeof(atom) + atom.size) {
+        for (j = 0; j < space; j += sizeof(atom) + atom.size)
+        {
             jack_ringbuffer_read(effect->events_buffer, (char*)&atom, sizeof(atom));
             char fatom[sizeof(atom)+atom.size];
             memcpy(&fatom, (char*)&atom, sizeof(atom));
@@ -496,7 +498,8 @@ static int ProcessAudio(jack_nframes_t nframes, void *arg)
         {
             /* Process any replies from the worker. */
             worker_emit_responses(&effect->worker);
-            if (effect->worker.iface->end_run) {
+            if (effect->worker.iface->end_run)
+            {
                 effect->worker.iface->end_run(effect->lilv_instance->lv2_handle);
             }
         }
@@ -515,7 +518,8 @@ static int ProcessAudio(jack_nframes_t nframes, void *arg)
             memcpy(buffer_out, effect->output_cv_ports[i]->buffer, (sizeof(float) * nframes));
         }
 
-        for (i = 0; i < effect->monitors_count; i++) {
+        for (i = 0; i < effect->monitors_count; i++)
+        {
             int port_id = effect->monitors[i]->port_id;
             float value = *(effect->ports[port_id]->buffer);
             if (monitor_check_condition(effect->monitors[i]->op, effect->monitors[i]->value, value) &&
@@ -533,7 +537,9 @@ static int ProcessAudio(jack_nframes_t nframes, void *arg)
     for (p = 0; p < effect->output_event_ports_count; p++)
     {
         port_t *port = effect->output_event_ports[p];
-        if (port->jack_port && port->flow == FLOW_OUTPUT && port->type == TYPE_EVENT)
+        if (port->jack_port &&
+            port->flow == FLOW_OUTPUT &&
+            port->type == TYPE_EVENT)
         {
             void* buf = jack_port_get_buffer(port->jack_port, nframes);
             jack_midi_clear_buffer(buf);
@@ -648,7 +654,8 @@ static const void* GetPortValueForState(const char* symbol, void* user_data,
 {
     effect_t *effect = (effect_t*)user_data;
     port_t *port = FindEffectPortBySymbol(effect, symbol);
-    if (port) {
+    if (port)
+    {
         *size = sizeof(float);
         *type = g_urids.atom_Float;
     }
@@ -666,7 +673,8 @@ int LoadPresets(effect_t *effect)
     uint32_t j = 0;
     for (j = 0; j < presets_count; j++) effect->presets[j] = NULL;
     j = 0;
-    LILV_FOREACH(nodes, i, presets) {
+    LILV_FOREACH(nodes, i, presets)
+    {
         const LilvNode* preset = lilv_nodes_get(presets, i);
         effect->presets[j] = (preset_t *) malloc(sizeof(preset_t));
         effect->presets[j]->uri = lilv_node_duplicate(preset);
@@ -680,13 +688,15 @@ int LoadPresets(effect_t *effect)
 int FindPreset(effect_t *effect, const char *uri, const LilvNode **preset)
 {
     uint32_t i;
-    for(i=0; i<effect->presets_count; i++) {
-        if(strcmp(uri, lilv_node_as_uri(effect->presets[i]->uri)) == 0) {
+    for (i = 0; i < effect->presets_count; i++)
+    {
+        if (strcmp(uri, lilv_node_as_uri(effect->presets[i]->uri)) == 0)
+        {
             *preset = (effect->presets[i]->uri);
             return SUCCESS;
         }
     }
-    return -400;
+    return -400; // FIXME: hardcoded
 }
 
 void FreeFeatures(effect_t *effect)
@@ -1085,7 +1095,9 @@ int effects_add(const char *uid, int instance)
 
             /* Set the default value of control */
             lilv_port_get_range(plugin, lilv_port, &lilv_default, &lilv_minimum, &lilv_maximum);
-            if (lilv_node_is_float(lilv_default) || lilv_node_is_int(lilv_default) || lilv_node_is_bool(lilv_default))
+            if (lilv_node_is_float(lilv_default) ||
+                lilv_node_is_int(lilv_default) ||
+                lilv_node_is_bool(lilv_default))
             {
                 (*control_buffer) = lilv_node_as_float(lilv_default);
             }
@@ -1148,7 +1160,8 @@ int effects_add(const char *uid, int instance)
 
 	const LilvPort* control_input = lilv_plugin_get_port_by_designation(
 		plugin, lilv_input, lilv_control_in);
-	if (control_input) {
+	if (control_input)
+    {
 		effect->control_in = lilv_port_get_index(plugin, control_input);
 	}
 
@@ -1287,7 +1300,8 @@ int effects_add(const char *uid, int instance)
     for (j = 0; j < effect->properties_count; j++) effect->properties[j] = NULL;
     j = 0;
 
-    LILV_FOREACH(nodes, p, properties) {
+    LILV_FOREACH(nodes, p, properties)
+    {
         const LilvNode* property = lilv_nodes_get(properties, p);
         LilvNode*       label    = lilv_nodes_get_first(
             lilv_world_find_nodes(
@@ -1322,7 +1336,8 @@ int effects_add(const char *uid, int instance)
     lilv_instance_activate(lilv_instance);
 
     /* create ring buffer for events from socket/commandline */
-    if(control_input) {
+    if (control_input)
+    {
         effect->events_buffer = jack_ringbuffer_create(g_midi_buffer_size * 16); // 16 taken from jalv source code
         jack_ringbuffer_mlock(effect->events_buffer);
     }
@@ -1355,7 +1370,8 @@ int effects_add(const char *uid, int instance)
     return error;
 }
 
-int effects_preset_save(int effect_id, const char *dir, const char *fname, const char *label) {
+int effects_preset_save(int effect_id, const char *dir, const char *fname, const char *label)
+{
     LilvState* const state = lilv_state_new_from_instance(
         g_effects[effect_id].lilv_plugin, g_effects[effect_id].lilv_instance,
         &g_urid_map,
@@ -1366,7 +1382,8 @@ int effects_preset_save(int effect_id, const char *dir, const char *fname, const
         GetPortValueForState, &(g_effects[effect_id]),
         LV2_STATE_IS_POD|LV2_STATE_IS_PORTABLE, NULL);
 
-    if (label) {
+    if (label)
+    {
         lilv_state_set_label(state, label);
     }
 
@@ -1376,7 +1393,8 @@ int effects_preset_save(int effect_id, const char *dir, const char *fname, const
     return ret;
 }
 
-int effects_preset_load(int effect_id, const char *uri) {
+int effects_preset_load(int effect_id, const char *uri)
+{
     effect_t *effect;
     if (InstanceExist(effect_id))
     {
@@ -1386,7 +1404,8 @@ int effects_preset_load(int effect_id, const char *uri) {
         {
             lilv_world_load_resource(g_lv2_data, preset);
             LilvState* state = lilv_state_new_from_world(g_lv2_data, &g_urid_map, preset);
-            if (! state) {
+            if (! state)
+            {
                 return ERR_LILV_INSTANTIATION;
             }
             lilv_state_restore(state, effect->lilv_instance, SetParameterFromState, effect, 0, NULL);
@@ -1538,15 +1557,20 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
         }
 
         port = FindEffectPortBySymbol(&(g_effects[effect_id]), control_symbol);
-        if (port) {
+        if (port)
+        {
             lilv_port = port->lilv_port;
             lilv_plugin = g_effects[effect_id].lilv_plugin;
             lilv_port_get_range(lilv_plugin, lilv_port, &lilv_default, &lilv_minimum, &lilv_maximum);
 
-            if (lilv_node_is_float(lilv_minimum) || lilv_node_is_int(lilv_minimum) || lilv_node_is_bool(lilv_minimum))
+            if (lilv_node_is_float(lilv_minimum) ||
+                lilv_node_is_int(lilv_minimum) ||
+                lilv_node_is_bool(lilv_minimum))
                 min = lilv_node_as_float(lilv_minimum);
 
-            if (lilv_node_is_float(lilv_maximum) || lilv_node_is_int(lilv_maximum) || lilv_node_is_bool(lilv_maximum))
+            if (lilv_node_is_float(lilv_maximum) ||
+                lilv_node_is_int(lilv_maximum) ||
+                lilv_node_is_bool(lilv_maximum))
                 max = lilv_node_as_float(lilv_maximum);
 
             if (lilv_port_has_property(lilv_plugin, lilv_port, g_sample_rate_node))
@@ -1616,10 +1640,14 @@ int effects_get_parameter(int effect_id, const char *control_symbol, float *valu
         {
            lilv_port_get_range(g_effects[effect_id].lilv_plugin, port->lilv_port, &lilv_default, &lilv_minimum, &lilv_maximum);
 
-           if (lilv_node_is_float(lilv_minimum) || lilv_node_is_int(lilv_minimum) || lilv_node_is_bool(lilv_minimum))
+           if (lilv_node_is_float(lilv_minimum) ||
+               lilv_node_is_int(lilv_minimum) ||
+               lilv_node_is_bool(lilv_minimum))
                min = lilv_node_as_float(lilv_minimum);
 
-           if (lilv_node_is_float(lilv_maximum) || lilv_node_is_int(lilv_maximum) || lilv_node_is_bool(lilv_maximum))
+           if (lilv_node_is_float(lilv_maximum) ||
+               lilv_node_is_int(lilv_maximum) ||
+               lilv_node_is_bool(lilv_maximum))
                max = lilv_node_as_float(lilv_maximum);
 
            (*value) = *(port->buffer);
@@ -1766,13 +1794,19 @@ int effects_get_parameter_info(int effect_id, const char *control_symbol, float 
             /* Get the parameter range */
             lilv_port_get_range(lilv_plugin, lilv_port, &lilv_default, &lilv_minimum, &lilv_maximum);
 
-            if (lilv_node_is_float(lilv_minimum) || lilv_node_is_int(lilv_minimum) || lilv_node_is_bool(lilv_minimum))
+            if (lilv_node_is_float(lilv_minimum) ||
+                lilv_node_is_int(lilv_minimum) ||
+                lilv_node_is_bool(lilv_minimum))
                 min = lilv_node_as_float(lilv_minimum);
 
-            if (lilv_node_is_float(lilv_maximum) || lilv_node_is_int(lilv_maximum) || lilv_node_is_bool(lilv_maximum))
+            if (lilv_node_is_float(lilv_maximum) ||
+                lilv_node_is_int(lilv_maximum) ||
+                lilv_node_is_bool(lilv_maximum))
                 max = lilv_node_as_float(lilv_maximum);
 
-            if (lilv_node_is_float(lilv_default) || lilv_node_is_int(lilv_default) || lilv_node_is_bool(lilv_default))
+            if (lilv_node_is_float(lilv_default) ||
+                lilv_node_is_int(lilv_default) ||
+                lilv_node_is_bool(lilv_default))
                 def = lilv_node_as_float(lilv_default);
 
             if (lilv_port_has_property(lilv_plugin, lilv_port, g_sample_rate_node))
