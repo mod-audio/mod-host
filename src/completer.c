@@ -49,8 +49,8 @@
 static char *g_commands[] = {
     "add",
     "remove",
-    "preset",
-    "save_preset",
+    "preset_load",
+    "preset_save",
     "connect",
     "disconnect",
     "bypass",
@@ -233,7 +233,7 @@ static char **completion(const char *text, int start, int end)
                     g_list = g_ports_list;
                 }
             }
-            else if (strcmp(cmd[0], "preset") == 0)
+            else if (strcmp(cmd[0], "preset_load") == 0)
             {
                 if (count == 1)
                 {
@@ -242,6 +242,13 @@ static char **completion(const char *text, int start, int end)
                 else if (count == 2)
                 {
                     get_presets = 1;
+                }
+            }
+            else if (strcmp(cmd[0], "preset_save") == 0)
+            {
+                if (count == 1)
+                {
+                    get_instances = 1;
                 }
             }
             else if (strcmp(cmd[0], "param_get") == 0)
@@ -287,13 +294,6 @@ static char **completion(const char *text, int start, int end)
                 else if (count == 4)
                 {
                     get_param_info = 1;
-                }
-            }
-            else if (strcmp(cmd[0], "save_preset") == 0)
-            {
-                if (count == 1)
-                {
-                    get_instances = 1;
                 }
             }
 

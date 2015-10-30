@@ -139,10 +139,10 @@ static void effects_preset_save_cb(proto_t *proto)
     protocol_response(buffer, proto);
 }
 
-static void effects_preset_cb(proto_t *proto)
+static void effects_preset_load_cb(proto_t *proto)
 {
     int resp;
-    resp = effects_preset(atoi(proto->list[1]), proto->list[2]);
+    resp = effects_preset_load(atoi(proto->list[1]), proto->list[2]);
 
     char buffer[128];
     sprintf(buffer, "resp %i", resp);
@@ -443,7 +443,7 @@ int main(int argc, char **argv)
     /* Setup the protocol */
     protocol_add_command(EFFECT_ADD, effects_add_cb);
     protocol_add_command(EFFECT_REMOVE, effects_remove_cb);
-    protocol_add_command(EFFECT_PRESET, effects_preset_cb);
+    protocol_add_command(EFFECT_PRESET_LOAD, effects_preset_load_cb);
     protocol_add_command(EFFECT_PRESET_SAVE, effects_preset_save_cb);
     protocol_add_command(EFFECT_CONNECT, effects_connect_cb);
     protocol_add_command(EFFECT_DISCONNECT, effects_disconnect_cb);

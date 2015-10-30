@@ -1376,7 +1376,7 @@ int effects_preset_save(int effect_id, const char *dir, const char *fname, const
     return ret;
 }
 
-int effects_preset(int effect_id, const char *uri) {
+int effects_preset_load(int effect_id, const char *uri) {
     effect_t *effect;
     if (InstanceExist(effect_id))
     {

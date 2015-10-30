@@ -96,11 +96,11 @@ The commands supported by mod-host are:
     disconnect <origin_port> <destination_port>
         e.g.: disconnect system:capture_1 effect_0:in
 
-    preset <instance_number> <preset_name>
-        e.g.: preset 0 "Invert CC Value"
+    preset_load <instance_number> <preset_uri>
+        e.g.: preset_load 0 "http://drobilla.net/plugins/mda/presets#JX10-moogcury-lite"
 
-    save_preset <instance_number> <preset_name> <dir> <fname>
-        e.g.: preset 0 "My Preset" /home/user/.lv2/my-presets.lv2 mypreset.ttl
+    preset_save <instance_number> <preset_name> <dir> <file_name>
+        e.g.: preset_save 0 "My Preset" /home/user/.lv2/my-presets.lv2 mypreset.ttl
 
     param_set <instance_number> <param_symbol> <param_value>
         e.g.: param_set 0 gain 2.50

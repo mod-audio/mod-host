@@ -102,7 +102,7 @@ int effects_init(void);
 int effects_finish(void);
 int effects_add(const char *uid, int instance);
 int effects_remove(int effect_id);
-int effects_preset(int effect_id, const char *uri);
+int effects_preset_load(int effect_id, const char *uri);
 int effects_preset_save(int effect_id, const char *dir, const char *fname, const char *label);
 int effects_connect(const char *portA, const char *portB);
 int effects_disconnect(const char *portA, const char *portB);

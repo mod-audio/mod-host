@@ -32,9 +32,6 @@ LIBS = $(shell pkg-config --libs jack lilv-0) -lreadline -lpthread
 # include paths
 INCS = $(shell pkg-config --cflags jack lilv-0)
 
-# remove command
-RM = rm -f
-
 # source and object files
 SRC = $(wildcard $(SRC_DIR)/*.$(EXT))
 OBJ = $(SRC:.$(EXT)=.o)
@@ -55,11 +52,11 @@ install: install_man
 
 # clean rule
 clean:
-	$(RM) $(SRC_DIR)/*.o $(PROG) src/info.h
+	@rm -f $(SRC_DIR)/*.o $(PROG) src/info.h
 
 test:
 	py.test tests/test_host.py
-	
+
 # manual page rule
 # Uses md2man to convert the README to groff man page
 # https://github.com/sunaku/md2man
