@@ -38,6 +38,10 @@
 #include <readline/readline.h>
 #include <readline/history.h>
 
+#ifdef HAVE_FFTW335
+#include <fftw3.h>
+#endif
+
 #include "mod-host.h"
 #include "effects.h"
 #include "socket.h"
@@ -453,6 +457,12 @@ int main(int argc, char **argv)
             exit(EXIT_SUCCESS);
         }
     }
+
+#ifdef HAVE_FFTW335
+    /* Make fftw thread-safe */
+    fftw_make_planner_thread_safe();
+    fftwf_make_planner_thread_safe();
+#endif
 
     /* Setup the protocol */
     protocol_add_command(EFFECT_ADD, effects_add_cb);
