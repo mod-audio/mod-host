@@ -47,9 +47,10 @@ enum {
     ERR_INSTANCE_NON_EXISTS = -3,
 
     ERR_LV2_INVALID_URI = -101,
-    ERR_LILV_INSTANTIATION = -102,
+    ERR_LV2_INSTANTIATION = -102,
     ERR_LV2_INVALID_PARAM_SYMBOL = -103,
     ERR_LV2_INVALID_PRESET_URI = -104,
+    ERR_LV2_CANT_LOAD_STATE = -105,
 
     ERR_JACK_CLIENT_CREATION = -201,
     ERR_JACK_CLIENT_ACTIVATION = -202,
@@ -103,7 +104,8 @@ int effects_finish(void);
 int effects_add(const char *uid, int instance);
 int effects_remove(int effect_id);
 int effects_preset_load(int effect_id, const char *uri);
-int effects_preset_save(int effect_id, const char *dir, const char *fname, const char *label);
+int effects_preset_save(int effect_id, const char *dir, const char *file_name, const char *label);
+int effects_preset_show(int effect_id, const char *uri, char **state_str);
 int effects_connect(const char *portA, const char *portB);
 int effects_disconnect(const char *portA, const char *portB);
 int effects_set_parameter(int effect_id, const char *control_symbol, float value);

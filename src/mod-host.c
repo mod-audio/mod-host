@@ -149,6 +149,19 @@ static void effects_preset_load_cb(proto_t *proto)
     protocol_response(buffer, proto);
 }
 
+static void effects_preset_show_cb(proto_t *proto)
+{
+    char *state_str = NULL;
+    if (effects_preset_show(atoi(proto->list[1]), proto->list[2], &state_str) == SUCCESS)
+    {
+        if (state_str)
+        {
+            printf("%s", state_str);
+            free(state_str);
+        }
+    }
+}
+
 static void effects_connect_cb(proto_t *proto)
 {
     int resp;
@@ -446,6 +459,7 @@ int main(int argc, char **argv)
     protocol_add_command(EFFECT_REMOVE, effects_remove_cb);
     protocol_add_command(EFFECT_PRESET_LOAD, effects_preset_load_cb);
     protocol_add_command(EFFECT_PRESET_SAVE, effects_preset_save_cb);
+    protocol_add_command(EFFECT_PRESET_SHOW, effects_preset_show_cb);
     protocol_add_command(EFFECT_CONNECT, effects_connect_cb);
     protocol_add_command(EFFECT_DISCONNECT, effects_disconnect_cb);
     protocol_add_command(EFFECT_BYPASS, effects_bypass_cb);

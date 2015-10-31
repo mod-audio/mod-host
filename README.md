@@ -19,7 +19,7 @@ Currently the host supports the following LV2 features:
 * worker
 * presets
 
-mod-host is part of the [MOD project](http://portalmod.com).
+mod-host is part of the [MOD project](http://moddevices.com).
 
 
 Building
@@ -57,7 +57,7 @@ commands must be provided on the shell prompt.
 The interactive mode has autocomplete, therefore, you can always type `[TAB]`
 twice any time you want a hint.
 
-Note: When you are in the interactive mode, the socket communication won't work.
+Note: When you are in the interactive mode, socket communication won't work.
 
 
 Options
@@ -84,52 +84,70 @@ Commands (or Protocol)
 The commands supported by mod-host are:
 
     add <lv2_uri> <instance_number>
+        * add a LV2 plugin encapsulated as a jack client
         e.g.: add http://lv2plug.in/plugins/eg-amp 0
         instance_number must be any value between 0 ~ 9999, inclusively
 
     remove <instance_number>
+        * remove a LV2 plugin instance (and also the jack client)
         e.g.: remove 0
 
     connect <origin_port> <destination_port>
+        * connect two effect audio ports
         e.g.: connect system:capture_1 effect_0:in
 
     disconnect <origin_port> <destination_port>
+        * disconnect two effect audio ports
         e.g.: disconnect system:capture_1 effect_0:in
 
     preset_load <instance_number> <preset_uri>
+        * load a preset state to given effect instance
         e.g.: preset_load 0 "http://drobilla.net/plugins/mda/presets#JX10-moogcury-lite"
 
     preset_save <instance_number> <preset_name> <dir> <file_name>
+        * save a preset state from given effect instance
         e.g.: preset_save 0 "My Preset" /home/user/.lv2/my-presets.lv2 mypreset.ttl
 
+    preset_show <instance_number> <preset_uri>
+        * show the preset information of requested instance / URI
+        e.g.: preset_show 0 http://drobilla.net/plugins/mda/presets#EPiano-bright
+
     param_set <instance_number> <param_symbol> <param_value>
+        * set a value to given control
         e.g.: param_set 0 gain 2.50
 
     param_get <instance_number> <param_symbol>
+        * get the value of the request control
         e.g.: param_get 0 gain
 
     param_monitor <instance_number> <param_symbol> <cond_op> <value>
+        * do monitoring a effect instance control port according given condition
         e.g: param_monitor 0 gain > 2.50
 
     monitor <addr> <port> <status>
+        * open a socket port to monitoring parameters
         e.g: monitor localhost 12345 1
         if status = 1 start monitoring
         if status = 0 stop monitoring
 
     bypass <instance_number> <bypass_value>
+        * toggle effect processing
         e.g.: bypass 0 1
-        if bypass_value = 1 bypass the effect
-        if bypass_value = 0 process the effect
+        if bypass_value = 1 bypass effect
+        if bypass_value = 0 process effect
 
-    load <filename>
+    load <file_name>
+        * load a history command file
+        * dummy way to save/load workspace state
         e.g.: load my_setup
 
-    save <filename>
+    save <file_name>
+        * saves the history of typed commands
+        * dummy way to save/load workspace state
         e.g.: save my_setup
-        this command saves the history of typed commands
 
     help
-        show a help message
+        * show a help message
 
     quit
         bye!
@@ -137,13 +155,11 @@ The commands supported by mod-host are:
 For each effect added one client on JACK will be created. The names of clients
 follow the standard: effect_\<instance_number\>
 
-For each command sent one response is given. If the command is valid the
-response format will be:
+If a valid command is executed a response is given as following:
 
     resp <status> [value]
 
-If status is a negative number, an error occurred. The error will be one of the
-following:
+If status is a negative number an error has occurred. The table below shows the number of each error.
 
 | status  | error                            |
 | --------|----------------------------------|
@@ -151,8 +167,10 @@ following:
 | -2      | ERR\_INSTANCE\_ALREADY\_EXISTS   |
 | -3      | ERR\_INSTANCE\_NON\_EXISTS       |
 | -101    | ERR\_LV2\_INVALID\_URI           |
-| -102    | ERR\_LILV\_INSTANTIATION         |
+| -102    | ERR\_LV2\_INSTANTIATION          |
 | -103    | ERR\_LV2\_INVALID\_PARAM\_SYMBOL |
+| -104    | ERR\_LV2\_INVALID\_PRESET\_URI   |
+| -105    | ERR\_LV2\_CANT\_LOAD\_STATE      |
 | -201    | ERR\_JACK\_CLIENT\_CREATION      |
 | -202    | ERR\_JACK\_CLIENT\_ACTIVATION    |
 | -203    | ERR\_JACK\_CLIENT\_DEACTIVATION  |

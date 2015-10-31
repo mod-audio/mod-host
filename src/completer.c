@@ -51,6 +51,7 @@ static char *g_commands[] = {
     "remove",
     "preset_load",
     "preset_save",
+    "preset_show",
     "connect",
     "disconnect",
     "bypass",
@@ -233,7 +234,8 @@ static char **completion(const char *text, int start, int end)
                     g_list = g_ports_list;
                 }
             }
-            else if (strcmp(cmd[0], "preset_load") == 0)
+            else if (strcmp(cmd[0], "preset_load") == 0 ||
+                     strcmp(cmd[0], "preset_show") == 0)
             {
                 if (count == 1)
                 {
