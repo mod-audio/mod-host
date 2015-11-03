@@ -27,7 +27,7 @@ def test_load_gain_change_param():
 
 def test_preset_load():
     load_egamp()
-    r = s('preset 0 urn:test:Gain3')
+    r = s('preset_load 0 urn:test:Gain3')
     assert int(r[0]) == 0
     r = s("param_get 0 gain")
     assert int(r[0]) == 0
@@ -38,7 +38,7 @@ def test_preset_save():
     r = s('param_set 0 gain 5.0')
     assert int(r[0]) == 0
 
-    r = s("save_preset 0 Gain5 /tmp/lv2path/presets.lv2 gain_5.ttl")
+    r = s("preset_save 0 Gain5 /tmp/lv2path/presets.lv2 gain_5.ttl")
     assert int(r[0]) == 0
 
     # restarting the mod-host to load the saved preset
@@ -53,7 +53,7 @@ def test_preset_save():
     assert int(r[0]) == 0
     assert float(r[1]) == 0.0
 
-    r = s('preset 0 file:///tmp/lv2path/presets.lv2/gain_5.ttl')
+    r = s('preset_load 0 file:///tmp/lv2path/presets.lv2/gain_5.ttl')
     assert int(r[0]) == 0
 
     r = s('param_get 0 gain')
