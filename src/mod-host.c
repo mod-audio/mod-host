@@ -35,12 +35,17 @@
 #include <string.h>
 #include <unistd.h>
 #include <getopt.h>
-#include <lilv/lilv.h>
 #include <readline/readline.h>
 #include <readline/history.h>
 
 #ifdef HAVE_FFTW335
 #include <fftw3.h>
+#endif
+
+#ifdef HAVE_NEW_LILV
+#include <lilv/lilv.h>
+#else
+#define lilv_free(x) free(x)
 #endif
 
 #include "mod-host.h"

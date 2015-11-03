@@ -37,6 +37,10 @@ LIBS += $(shell pkg-config --libs fftw3 fftw3f) -lfftw3_threads -lfftw3f_threads
 INCS += $(shell pkg-config --cflags fftw3 fftw3f) -DHAVE_FFTW335
 endif
 
+ifeq ($(shell pkg-config --atleast-version=0.22.0 lilv-0 && echo true), true)
+INCS += -DHAVE_NEW_LILV
+endif
+
 # source and object files
 SRC = $(wildcard $(SRC_DIR)/*.$(EXT))
 OBJ = $(SRC:.$(EXT)=.o)
