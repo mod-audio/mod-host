@@ -35,6 +35,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <getopt.h>
+#include <lilv/lilv.h>
 #include <readline/readline.h>
 #include <readline/history.h>
 
@@ -160,10 +161,12 @@ static void effects_preset_show_cb(proto_t *proto)
     {
         if (state_str)
         {
-            printf("%s", state_str);
-            free(state_str);
+            protocol_response(state_str, proto);
+            lilv_free(state_str);
+            return;
         }
     }
+    protocol_response("", proto);
 }
 
 static void effects_connect_cb(proto_t *proto)
