@@ -79,7 +79,7 @@ int socket_start(int port, int buffer_size);
 void socket_finish(void);
 void socket_set_receive_cb(void (*receive_cb)(msg_t *msg));
 int socket_send(int destination, const char *buffer, int size);
-void socket_run(void);
+void socket_run(int exit_on_failure);
 
 
 /*

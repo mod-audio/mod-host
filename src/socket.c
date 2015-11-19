@@ -140,6 +140,7 @@ int socket_start(int port, int buffer_size)
 
 void socket_finish(void)
 {
+    shutdown(g_serverfd, SHUT_RDWR);
     close(g_serverfd);
 }
 
@@ -164,7 +165,7 @@ int socket_send(int destination, const char *buffer, int size)
 }
 
 
-void socket_run(void)
+void socket_run(int exit_on_failure)
 {
     int clientfd, count;
     struct sockaddr_in cli_addr;
@@ -176,6 +177,9 @@ void socket_run(void)
     buffer = malloc(g_buffer_size);
     if (buffer == NULL)
     {
+        if (! exit_on_failure)
+            return;
+
         perror("malloc error");
         exit(EXIT_FAILURE);
     }
@@ -186,6 +190,10 @@ void socket_run(void)
     if (clientfd < 0)
     {
         free(buffer);
+
+        if (! exit_on_failure)
+            return;
+
         perror("accept error");
         exit(EXIT_FAILURE);
     }
@@ -204,6 +212,9 @@ void socket_run(void)
         }
         else if (count < 0) /* Error */
         {
+            if (! exit_on_failure)
+                break;
+
             perror("read error");
             exit(EXIT_FAILURE);
         }

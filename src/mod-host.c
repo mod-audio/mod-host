@@ -35,6 +35,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <getopt.h>
+#include <jack/jack.h>
 #include <readline/readline.h>
 #include <readline/history.h>
 
@@ -76,7 +77,9 @@
 extern const char help_msg[];
 /* The version is extracted from git history */
 extern const char version[];
-
+/* Thread that calls socket_run() for the JACK internal client */
+static pthread_t intclient_socket_thread;
+static volatile int intclient_running;
 
 /*
 ************************************************************************************************************************
@@ -335,11 +338,11 @@ static void quit_cb(proto_t *proto)
 
     protocol_remove_commands();
     socket_finish();
-    effects_finish();
+    effects_finish(1);
     exit(EXIT_SUCCESS);
 }
 
-void interactive_mode(void)
+static void interactive_mode(void)
 {
     msg_t msg;
     char *input;
@@ -372,6 +375,68 @@ void interactive_mode(void)
         }
         else break;
     }
+}
+
+static int mod_host_init(jack_client_t* client, int socket_port, int interactive, int verbose)
+{
+#ifdef HAVE_FFTW335
+    /* Make fftw thread-safe */
+    fftw_make_planner_thread_safe();
+    fftwf_make_planner_thread_safe();
+#endif
+
+    /* Setup the protocol */
+    protocol_add_command(EFFECT_ADD, effects_add_cb);
+    protocol_add_command(EFFECT_REMOVE, effects_remove_cb);
+    protocol_add_command(EFFECT_PRESET_LOAD, effects_preset_load_cb);
+    protocol_add_command(EFFECT_PRESET_SAVE, effects_preset_save_cb);
+    protocol_add_command(EFFECT_PRESET_SHOW, effects_preset_show_cb);
+    protocol_add_command(EFFECT_CONNECT, effects_connect_cb);
+    protocol_add_command(EFFECT_DISCONNECT, effects_disconnect_cb);
+    protocol_add_command(EFFECT_BYPASS, effects_bypass_cb);
+    protocol_add_command(EFFECT_PARAM_SET, effects_set_param_cb);
+    protocol_add_command(EFFECT_PARAM_GET, effects_get_param_cb);
+    protocol_add_command(EFFECT_PARAM_MON, effects_monitor_param_cb);
+    protocol_add_command(MONITOR_ADDR_SET, monitor_addr_set_cb);
+    protocol_add_command(CPU_LOAD, cpu_load_cb);
+    protocol_add_command(LOAD_COMMANDS, load_cb);
+    protocol_add_command(SAVE_COMMANDS, save_cb);
+
+    /* skip help and quit for internal client */
+    if (client == NULL)
+    {
+        protocol_add_command(HELP, help_cb);
+        protocol_add_command(QUIT, quit_cb);
+    }
+
+    /* Startup the effects */
+    if (effects_init(client))
+        return -1;
+
+    /* Setup the socket */
+    if (socket_start(socket_port, SOCKET_MSG_BUFFER_SIZE) < 0)
+        return -1;
+
+    socket_set_receive_cb(protocol_parse);
+
+    /* Interactice mode */
+    if (interactive)
+        interactive_mode();
+
+    /* Verbose */
+    protocol_verbose(verbose);
+
+    return 0;
+}
+
+static void* intclient_socket_run(void* ptr)
+{
+    while (intclient_running)
+        socket_run(0);
+
+    /* unused */
+    return NULL;
+    (void)ptr;
 }
 
 
@@ -423,7 +488,7 @@ int main(int argc, char **argv)
             case 'V':
                 printf(
                     "%s version: %s\n"
-                    "source code: https://github.com/portalmod/mod-host\n",
+                    "source code: https://github.com/moddevices/mod-host\n",
                 argv[0], version);
 
                 exit(EXIT_SUCCESS);
@@ -466,52 +531,48 @@ int main(int argc, char **argv)
         }
     }
 
-#ifdef HAVE_FFTW335
-    /* Make fftw thread-safe */
-    fftw_make_planner_thread_safe();
-    fftwf_make_planner_thread_safe();
-#endif
-
-    /* Setup the protocol */
-    protocol_add_command(EFFECT_ADD, effects_add_cb);
-    protocol_add_command(EFFECT_REMOVE, effects_remove_cb);
-    protocol_add_command(EFFECT_PRESET_LOAD, effects_preset_load_cb);
-    protocol_add_command(EFFECT_PRESET_SAVE, effects_preset_save_cb);
-    protocol_add_command(EFFECT_PRESET_SHOW, effects_preset_show_cb);
-    protocol_add_command(EFFECT_CONNECT, effects_connect_cb);
-    protocol_add_command(EFFECT_DISCONNECT, effects_disconnect_cb);
-    protocol_add_command(EFFECT_BYPASS, effects_bypass_cb);
-    protocol_add_command(EFFECT_PARAM_SET, effects_set_param_cb);
-    protocol_add_command(EFFECT_PARAM_GET, effects_get_param_cb);
-    protocol_add_command(EFFECT_PARAM_MON, effects_monitor_param_cb);
-    protocol_add_command(MONITOR_ADDR_SET, monitor_addr_set_cb);
-    protocol_add_command(CPU_LOAD, cpu_load_cb);
-    protocol_add_command(LOAD_COMMANDS, load_cb);
-    protocol_add_command(SAVE_COMMANDS, save_cb);
-    protocol_add_command(HELP, help_cb);
-    protocol_add_command(QUIT, quit_cb);
-
-    /* Startup the effects */
-    if (effects_init()) return -1;
-
-    /* Setup the socket */
-    if (socket_start(socket_port, SOCKET_MSG_BUFFER_SIZE) < 0)
+    if (mod_host_init(NULL, socket_port, interactive, verbose) != 0)
     {
         exit(EXIT_FAILURE);
+        return 1;
     }
-    socket_set_receive_cb(protocol_parse);
 
-    /* Interactice mode */
-    if (interactive) interactive_mode();
-
-    /* Verbose */
-    protocol_verbose(verbose);
-
-    while (1) socket_run();
+    while (1) socket_run(1);
 
     protocol_remove_commands();
     socket_finish();
-    effects_finish();
+    effects_finish(1);
 
     return 0;
+}
+
+__attribute__ ((visibility("default")))
+int jack_initialize(jack_client_t* client, const char* load_init);
+
+int jack_initialize(jack_client_t* client, const char* load_init)
+{
+    int socket_port = SOCKET_DEFAULT_PORT;
+
+    if (load_init != NULL && load_init[0] != '\0')
+        socket_port = atoi(load_init);
+
+    if (mod_host_init(client, socket_port, 0, 0) != 0)
+        return 1;
+
+    intclient_running = 1;
+    pthread_create(&intclient_socket_thread, NULL, intclient_socket_run, NULL);
+
+    return 0;
+}
+
+__attribute__ ((visibility("default")))
+void jack_finish(void);
+
+void jack_finish(void)
+{
+    intclient_running = 0;
+    protocol_remove_commands();
+    socket_finish();
+    pthread_join(intclient_socket_thread, NULL);
+    effects_finish(0);
 }

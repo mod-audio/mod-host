@@ -17,7 +17,7 @@ SHAREDIR = $(PREFIX)/share
 MANDIR = $(SHAREDIR)/man/man1/
 
 # default compiler and linker flags
-CFLAGS += -O3 -Wall -Wextra -c -std=gnu99
+CFLAGS += -O3 -Wall -Wextra -c -std=gnu99 -fPIC
 LDFLAGS += -Wl,--no-undefined
 
 # debug mode compiler and linker flags
@@ -48,10 +48,17 @@ endif
 SRC = $(wildcard $(SRC_DIR)/*.$(EXT))
 OBJ = $(SRC:.$(EXT)=.o)
 
+# default build
+all: $(PROG) $(PROG).so
+
 # linking rule
 $(PROG): get_info $(OBJ)
-	$(CC) $(OBJ) $(LDFLAGS) $(LIBS) -o $(PROG)
-	@rm src/info.h
+	$(CC) $(OBJ) $(LDFLAGS) $(LIBS) -o $@
+	@rm -f src/info.h
+
+$(PROG).so: get_info $(OBJ)
+	$(CC) $(OBJ) $(LDFLAGS) $(LIBS) -shared -o $@
+	@rm -f src/info.h
 
 # meta-rule to generate the object files
 %.o: %.$(EXT)
@@ -61,6 +68,7 @@ $(PROG): get_info $(OBJ)
 install: install_man
 	install -d $(DESTDIR)$(BINDIR)
 	install -m 755 $(PROG) $(DESTDIR)$(BINDIR)
+	install -m 755 $(PROG).so $(DESTDIR)$(shell pkg-config --variable=libdir jack)/jack/
 
 # clean rule
 clean:

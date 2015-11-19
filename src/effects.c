@@ -722,10 +722,17 @@ void FreeFeatures(effect_t *effect)
 ************************************************************************************************************************
 */
 
-int effects_init(void)
+int effects_init(void* client)
 {
     /* This global client is for connections / disconnections */
-    g_jack_global_client = jack_client_open("Global", JackNoStartServer, NULL);
+    if (client != NULL)
+    {
+        g_jack_global_client = (jack_client_t*)client;
+    }
+    else
+    {
+        g_jack_global_client = jack_client_open("Global", JackNoStartServer, NULL);
+    }
 
     if (g_jack_global_client == NULL)
     {
@@ -838,12 +845,12 @@ int effects_init(void)
     return SUCCESS;
 }
 
-int effects_finish(void)
+int effects_finish(int close_client)
 {
     effects_remove(REMOVE_ALL);
     if (g_capture_ports) jack_free(g_capture_ports);
     if (g_playback_ports) jack_free(g_playback_ports);
-    jack_client_close(g_jack_global_client);
+    if (close_client) jack_client_close(g_jack_global_client);
     symap_free(g_symap);
     lilv_node_free(g_sample_rate_node);
     lilv_world_free(g_lv2_data);
