@@ -18,12 +18,15 @@ MANDIR = $(SHAREDIR)/man/man1/
 
 # default compiler and linker flags
 CFLAGS += -O3 -Wall -Wextra -c -std=gnu99
-LDFLAGS += -s
+LDFLAGS += -Wl,--no-undefined
 
 # debug mode compiler and linker flags
 ifeq ($(DEBUG), 1)
-   CFLAGS = -O0 -g -Wall -Wextra -c -DDEBUG -std=gnu99
-   LDFLAGS =
+   CFLAGS += -O0 -g -Wall -Wextra -c -DDEBUG -std=gnu99
+   LDFLAGS +=
+else
+   CFLAGS += -fvisibility=hidden
+   LDFLAGS += -s
 endif
 
 # libraries
