@@ -52,13 +52,11 @@ OBJ = $(SRC:.$(EXT)=.o)
 all: $(PROG) $(PROG).so
 
 # linking rule
-$(PROG): get_info $(OBJ)
+$(PROG): src/info.h $(OBJ)
 	$(CC) $(OBJ) $(LDFLAGS) $(LIBS) -o $@
-	@rm -f src/info.h
 
-$(PROG).so: get_info $(OBJ)
+$(PROG).so: src/info.h $(OBJ)
 	$(CC) $(OBJ) $(LDFLAGS) $(LIBS) -shared -o $@
-	@rm -f src/info.h
 
 # meta-rule to generate the object files
 %.o: %.$(EXT)
@@ -91,7 +89,7 @@ install_man:
 # generate the source file with the help message
 A=`grep -n 'The commands supported' README.md | cut -d':' -f1`
 B=`grep -n 'bye!' README.md | cut -d':' -f1`
-get_info:
+src/info.h:
 	@sed -n -e "$A,$B p" -e "$B q" README.md > help_msg
 	@utils/txt2cvar.py help_msg > src/info.h
 	@rm help_msg

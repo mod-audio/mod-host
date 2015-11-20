@@ -10,4 +10,5 @@ mod-host
 mod-host.install
 mod-host.service
 tests/effectlib_test
+src/info.h
 PKGBUILD
