@@ -326,8 +326,8 @@ static void help_cb(proto_t *proto)
 {
     proto->response = 0;
 
-    unsigned int i;
-    for (i = 0; i < sizeof(help_msg); i++)
+    size_t i, len = strlen(help_msg);
+    for (i = 0; i < len; i++)
         printf("%c", help_msg[i]);
     fflush(stdout);
 }
