@@ -377,7 +377,7 @@ static void interactive_mode(void)
     }
 }
 
-static int mod_host_init(jack_client_t* client, int socket_port, int interactive, int verbose)
+static int mod_host_init(jack_client_t* client, int socket_port)
 {
 #ifdef HAVE_FFTW335
     /* Make fftw thread-safe */
@@ -418,13 +418,6 @@ static int mod_host_init(jack_client_t* client, int socket_port, int interactive
         return -1;
 
     socket_set_receive_cb(protocol_parse);
-
-    /* Interactice mode */
-    if (interactive)
-        interactive_mode();
-
-    /* Verbose */
-    protocol_verbose(verbose);
 
     return 0;
 }
@@ -531,11 +524,18 @@ int main(int argc, char **argv)
         }
     }
 
-    if (mod_host_init(NULL, socket_port, interactive, verbose) != 0)
+    if (mod_host_init(NULL, socket_port) != 0)
     {
         exit(EXIT_FAILURE);
         return 1;
     }
+
+    /* Interactice mode */
+    if (interactive)
+        interactive_mode();
+
+    /* Verbose */
+    protocol_verbose(verbose);
 
     while (1) socket_run(1);
 
@@ -556,7 +556,7 @@ int jack_initialize(jack_client_t* client, const char* load_init)
     if (load_init != NULL && load_init[0] != '\0')
         socket_port = atoi(load_init);
 
-    if (mod_host_init(client, socket_port, 0, 0) != 0)
+    if (mod_host_init(client, socket_port) != 0)
         return 1;
 
     intclient_running = 1;
