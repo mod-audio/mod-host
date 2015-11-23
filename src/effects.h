@@ -117,6 +117,8 @@ int effects_get_parameter_symbols(int effect_id, char** symbols);
 int effects_get_presets_uris(int effect_id, char **uris);
 int effects_get_parameter_info(int effect_id, const char *control_symbol, float **range, const char **scale_points);
 float effects_jack_cpu_load(void);
+void effects_bundle_add(const char* bundlepath);
+void effects_bundle_remove(const char* bundlepath);
 
 /*
 ************************************************************************************************************************

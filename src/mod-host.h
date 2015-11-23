@@ -66,6 +66,8 @@
 #define CPU_LOAD            "cpu_load"
 #define LOAD_COMMANDS       "load %s"
 #define SAVE_COMMANDS       "save %s"
+#define BUNDLE_ADD          "bundle_add %s"
+#define BUNDLE_REMOVE       "bundle_remove %s"
 #define HELP                "help"
 #define QUIT                "quit"
 

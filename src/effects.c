@@ -1894,3 +1894,13 @@ float effects_jack_cpu_load(void)
 {
     return jack_cpu_load(g_jack_global_client);
 }
+
+void effects_bundle_add(const char* bundlepath)
+{
+    // TODO
+}
+
+void effects_bundle_remove(const char* bundlepath)
+{
+    // TODO
+}

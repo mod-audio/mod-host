@@ -322,6 +322,18 @@ static void save_cb(proto_t *proto)
     }
 }
 
+static void bundle_add(proto_t *proto)
+{
+    effects_bundle_add(proto->list[1]);
+    protocol_response("resp 0", proto);
+}
+
+static void bundle_remove(proto_t *proto)
+{
+    effects_bundle_remove(proto->list[1]);
+    protocol_response("resp 0", proto);
+}
+
 static void help_cb(proto_t *proto)
 {
     proto->response = 0;
@@ -401,6 +413,8 @@ static int mod_host_init(jack_client_t* client, int socket_port)
     protocol_add_command(CPU_LOAD, cpu_load_cb);
     protocol_add_command(LOAD_COMMANDS, load_cb);
     protocol_add_command(SAVE_COMMANDS, save_cb);
+    protocol_add_command(BUNDLE_ADD, bundle_add);
+    protocol_add_command(BUNDLE_REMOVE, bundle_remove);
 
     /* skip help and quit for internal client */
     if (client == NULL)
