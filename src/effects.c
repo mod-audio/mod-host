@@ -28,6 +28,7 @@
 #include <unistd.h>
 #include <dlfcn.h>
 #include <errno.h>
+#include <limits.h>
 
 /* Jack */
 #include <jack/jack.h>
@@ -54,7 +55,9 @@
 #define LV2_BUF_SIZE__nominalBlockLength  LV2_BUF_SIZE_PREFIX "nominalBlockLength"
 #endif
 
+#ifndef LILV_URI_CV_PORT
 #define LILV_URI_CV_PORT "http://lv2plug.in/ns/lv2core#CVPort"
+#endif
 
 // custom jack flag used for cv
 // needed because we prefer jack2 which doesn't have metadata yet
@@ -1895,12 +1898,72 @@ float effects_jack_cpu_load(void)
     return jack_cpu_load(g_jack_global_client);
 }
 
-void effects_bundle_add(const char* bundlepath)
+#define OS_SEP '/'
+
+void effects_bundle_add(const char* bpath)
 {
-    // TODO
+    // lilv wants the last character as the separator
+    char tmppath[PATH_MAX+2];
+    char* bundlepath = realpath(bpath, tmppath);
+
+    if (bundlepath == NULL)
+        return;
+
+    {
+        const size_t size = strlen(bundlepath);
+        if (size <= 1)
+            return;
+
+        if (bundlepath[size] != OS_SEP)
+        {
+            bundlepath[size  ] = OS_SEP;
+            bundlepath[size+1] = '\0';
+        }
+    }
+
+    // convert bundle string into a lilv node
+    LilvNode* bundlenode = lilv_new_file_uri(g_lv2_data, NULL, bundlepath);
+
+    // load the bundle
+    lilv_world_load_bundle(g_lv2_data, bundlenode);
+
+    // free bundlenode, no longer needed
+    lilv_node_free(bundlenode);
+
+    // refresh plugins
+    g_plugins = lilv_world_get_all_plugins(g_lv2_data);
 }
 
-void effects_bundle_remove(const char* bundlepath)
+void effects_bundle_remove(const char* bpath)
 {
-    // TODO
+    // lilv wants the last character as the separator
+    char tmppath[PATH_MAX+2];
+    char* bundlepath = realpath(bpath, tmppath);
+
+    if (bundlepath == NULL)
+        return;
+
+    {
+        const size_t size = strlen(bundlepath);
+        if (size <= 1)
+            return;
+
+        if (bundlepath[size] != OS_SEP)
+        {
+            bundlepath[size  ] = OS_SEP;
+            bundlepath[size+1] = '\0';
+        }
+    }
+
+    // convert bundle string into a lilv node
+    LilvNode* bundlenode = lilv_new_file_uri(g_lv2_data, NULL, bundlepath);
+
+    // unload the bundle
+    lilv_world_unload_bundle(g_lv2_data, bundlenode);
+
+    // free bundlenode, no longer needed
+    lilv_node_free(bundlenode);
+
+    // refresh plugins
+    g_plugins = lilv_world_get_all_plugins(g_lv2_data);
 }
