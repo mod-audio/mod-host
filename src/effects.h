@@ -105,7 +105,7 @@ int effects_add(const char *uid, int instance);
 int effects_remove(int effect_id);
 int effects_preset_load(int effect_id, const char *uri);
 int effects_preset_save(int effect_id, const char *dir, const char *file_name, const char *label);
-int effects_preset_show(int effect_id, const char *uri, char **state_str);
+int effects_preset_show(const char *uri, char **state_str);
 int effects_connect(const char *portA, const char *portB);
 int effects_disconnect(const char *portA, const char *portB);
 int effects_set_parameter(int effect_id, const char *control_symbol, float value);

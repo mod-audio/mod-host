@@ -688,20 +688,6 @@ int LoadPresets(effect_t *effect)
     return 0;
 }
 
-int FindPreset(effect_t *effect, const char *uri, const LilvNode **preset)
-{
-    uint32_t i;
-    for (i = 0; i < effect->presets_count; i++)
-    {
-        if (strcmp(uri, lilv_node_as_uri(effect->presets[i]->uri)) == 0)
-        {
-            *preset = (effect->presets[i]->uri);
-            return SUCCESS;
-        }
-    }
-    return -400; // FIXME: hardcoded
-}
-
 void FreeFeatures(effect_t *effect)
 {
     worker_finish(&effect->worker);
@@ -1385,21 +1371,27 @@ int effects_preset_load(int effect_id, const char *uri)
     effect_t *effect;
     if (InstanceExist(effect_id))
     {
-        const LilvNode* preset_uri;
+        LilvNode* preset_uri = lilv_new_uri(g_lv2_data, uri);
         effect = &g_effects[effect_id];
-        if (FindPreset(effect, uri, &preset_uri) == SUCCESS)
+
+        if (lilv_world_load_resource(g_lv2_data, preset_uri) >= 0)
         {
-            lilv_world_load_resource(g_lv2_data, preset_uri);
             LilvState* state = lilv_state_new_from_world(g_lv2_data, &g_urid_map, preset_uri);
             if (!state)
             {
+                lilv_node_free(preset_uri);
+                printf("HOST STATE FAIL\n");
                 return ERR_LV2_CANT_LOAD_STATE;
             }
+            printf("HOST STATE LOADED OK\n");
             lilv_state_restore(state, effect->lilv_instance, SetParameterFromState, effect, 0, NULL);
             lilv_state_free(state);
+            lilv_node_free(preset_uri);
             return SUCCESS;
         }
+        printf("HOST STATE INVALID\n");
 
+        lilv_node_free(preset_uri);
         return ERR_LV2_INVALID_PRESET_URI;
     }
 
@@ -1429,33 +1421,29 @@ int effects_preset_save(int effect_id, const char *dir, const char *file_name, c
     return ret;
 }
 
-int effects_preset_show(int effect_id, const char *uri, char **state_str)
+int effects_preset_show(const char *uri, char **state_str)
 {
-    effect_t *effect;
-    if (InstanceExist(effect_id))
+    LilvNode* preset_uri = lilv_new_uri(g_lv2_data, uri);
+
+    if (lilv_world_load_resource(g_lv2_data, preset_uri) >= 0)
     {
-        const LilvNode* preset_uri;
-        effect = &g_effects[effect_id];
-        if (FindPreset(effect, uri, &preset_uri) == SUCCESS)
+        LilvState* state = lilv_state_new_from_world(g_lv2_data, &g_urid_map, preset_uri);
+        if (!state)
         {
-            lilv_world_load_resource(g_lv2_data, preset_uri);
-            LilvState* state = lilv_state_new_from_world(g_lv2_data, &g_urid_map, preset_uri);
-            if (!state)
-            {
-                return ERR_LV2_CANT_LOAD_STATE;
-            }
-
-            (*state_str) =
-                lilv_state_to_string(g_lv2_data, &g_urid_map, &g_urid_unmap, state, uri, NULL);
-
-            lilv_state_free(state);
-            return SUCCESS;
+            lilv_node_free(preset_uri);
+            return ERR_LV2_CANT_LOAD_STATE;
         }
 
-        return ERR_LV2_INVALID_PRESET_URI;
+        (*state_str) =
+            lilv_state_to_string(g_lv2_data, &g_urid_map, &g_urid_unmap, state, uri, NULL);
+
+        lilv_state_free(state);
+        lilv_node_free(preset_uri);
+        return SUCCESS;
     }
 
-    return ERR_INSTANCE_NON_EXISTS;
+    lilv_node_free(preset_uri);
+    return ERR_LV2_INVALID_PRESET_URI;
 }
 
 int effects_remove(int effect_id)

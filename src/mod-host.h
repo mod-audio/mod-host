@@ -55,7 +55,7 @@
 #define EFFECT_REMOVE       "remove %i"
 #define EFFECT_PRESET_LOAD  "preset_load %i %s"
 #define EFFECT_PRESET_SAVE  "preset_save %i %s %s %s"
-#define EFFECT_PRESET_SHOW  "preset_show %i %s"
+#define EFFECT_PRESET_SHOW  "preset_show %s"
 #define EFFECT_CONNECT      "connect %s %s"
 #define EFFECT_DISCONNECT   "disconnect %s %s"
 #define EFFECT_BYPASS       "bypass %i %i"

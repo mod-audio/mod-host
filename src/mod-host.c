@@ -165,7 +165,7 @@ static void effects_preset_load_cb(proto_t *proto)
 static void effects_preset_show_cb(proto_t *proto)
 {
     char *state_str = NULL;
-    if (effects_preset_show(atoi(proto->list[1]), proto->list[2], &state_str) == SUCCESS)
+    if (effects_preset_show(proto->list[1], &state_str) == SUCCESS)
     {
         if (state_str)
         {
