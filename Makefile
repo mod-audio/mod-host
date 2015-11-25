@@ -66,6 +66,7 @@ $(PROG).so: src/info.h $(OBJ)
 install: install_man
 	install -d $(DESTDIR)$(BINDIR)
 	install -m 755 $(PROG) $(DESTDIR)$(BINDIR)
+	install -d $(DESTDIR)$(shell pkg-config --variable=libdir jack)/jack/
 	install -m 755 $(PROG).so $(DESTDIR)$(shell pkg-config --variable=libdir jack)/jack/
 
 # clean rule
