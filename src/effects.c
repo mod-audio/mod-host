@@ -51,6 +51,10 @@
 #include <lv2/lv2plug.in/ns/ext/buf-size/buf-size.h>
 #include <lv2/lv2plug.in/ns/ext/parameters/parameters.h>
 
+#ifndef HAVE_NEW_LILV
+#define lilv_free(x) free(x)
+#endif
+
 #ifndef LV2_BUF_SIZE__nominalBlockLength
 #define LV2_BUF_SIZE__nominalBlockLength  LV2_BUF_SIZE_PREFIX "nominalBlockLength"
 #endif
@@ -1924,6 +1928,7 @@ void effects_bundle_add(const char* bpath)
 
 void effects_bundle_remove(const char* bpath)
 {
+#ifdef HAVE_NEW_LILV
     // lilv wants the last character as the separator
     char tmppath[PATH_MAX+2];
     char* bundlepath = realpath(bpath, tmppath);
@@ -1954,4 +1959,7 @@ void effects_bundle_remove(const char* bpath)
 
     // refresh plugins
     g_plugins = lilv_world_get_all_plugins(g_lv2_data);
+#else
+#warning Your current lilv version does not support unloading bundles
+#endif
 }
