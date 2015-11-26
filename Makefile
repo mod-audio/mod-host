@@ -52,14 +52,14 @@ OBJ = $(SRC:.$(EXT)=.o)
 all: $(PROG) $(PROG).so
 
 # linking rule
-$(PROG): src/info.h $(OBJ)
+$(PROG): $(OBJ)
 	$(CC) $(OBJ) $(LDFLAGS) $(LIBS) -o $@
 
-$(PROG).so: src/info.h $(OBJ)
+$(PROG).so: $(OBJ)
 	$(CC) $(OBJ) $(LDFLAGS) $(LIBS) -shared -o $@
 
 # meta-rule to generate the object files
-%.o: %.$(EXT)
+%.o: %.$(EXT) src/info.h
 	$(CC) $(INCS) $(CFLAGS) -o $@ $<
 
 # install rule
@@ -94,4 +94,4 @@ src/info.h:
 	@sed -n -e "$A,$B p" -e "$B q" README.md > help_msg
 	@utils/txt2cvar.py help_msg > src/info.h
 	@rm help_msg
-	@echo "const char version[] = {\""`git describe --tags`\""};" >> src/info.h
+	@echo "const char version[] = {\""`git describe --tags 2>/dev/null || echo 0.0.0`\""};" >> src/info.h
