@@ -135,6 +135,8 @@ typedef struct PORT_T {
     uint32_t buffer_count;
     LV2_Evbuf *evbuf;
     bool old_ev_api;
+    bool needs_smoothing;
+    float target_value;
 } port_t;
 
 typedef struct PROPERTY_T {
@@ -419,6 +421,13 @@ static int ProcessAudio(jack_nframes_t nframes, void *arg)
             lv2_evbuf_write(&e, nframes, 0, ratom->type, ratom->size,
                                 LV2_ATOM_BODY_CONST(ratom));
         }
+    }
+
+    for (i = 0; i < effect->input_control_ports_count; i++)
+    {
+        if (! effect->ports[i]->needs_smoothing)
+            continue;
+        *(effect->ports[i]->buffer) = (*(effect->ports[i]->buffer) * 2.0f + effect->ports[i]->target_value) / 3.0f;
     }
 
     /* Bypass */
@@ -1081,6 +1090,7 @@ int effects_add(const char *uid, int instance)
         else if (lilv_port_is_a(plugin, lilv_port, lilv_control))
         {
             effect->ports[i]->type = TYPE_CONTROL;
+            effect->ports[i]->needs_smoothing = false;
 
             /* Allocate memory to control port */
             control_buffer = (float *) malloc(sizeof(float));
@@ -1101,6 +1111,12 @@ int effects_add(const char *uid, int instance)
                 lilv_node_is_bool(lilv_default))
             {
                 (*control_buffer) = lilv_node_as_float(lilv_default);
+
+                if (lilv_node_is_float(lilv_default) && lilv_port_is_a(plugin, lilv_port, lilv_input))
+                {
+                    effect->ports[i]->needs_smoothing = true;
+                    effect->ports[i]->target_value = (*control_buffer);
+                }
             }
             effect->ports[i]->jack_port = NULL;
 
@@ -1563,7 +1579,7 @@ int effects_disconnect(const char *portA, const char *portB)
 
 int effects_set_parameter(int effect_id, const char *control_symbol, float value)
 {
-    const port_t *port;
+    port_t *port;
     const LilvPlugin *lilv_plugin;
     const LilvPort *lilv_port;
     LilvNode *lilv_default, *lilv_minimum, *lilv_maximum;
@@ -1572,6 +1588,10 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
     static int last_effect_id = -1;
     static const char *last_symbol = 0;
     static float *last_buffer = 0, last_min, last_max;
+
+    // parameter smoothing for float inputs
+    static bool last_needs_smoothing = false;
+    static float *last_target_value = 0;
 
     if (InstanceExist(effect_id))
     {
@@ -1584,7 +1604,11 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
                 else if (value < last_min) value = last_min;
 
                 last_effect_id = effect_id;
-                *last_buffer = value;
+
+                if (last_needs_smoothing)
+                    *last_target_value = value;
+                else
+                    *last_buffer = value;
 
                 return SUCCESS;
             }
@@ -1615,11 +1639,24 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
 
             if (value > max) value = max;
             else if (value < min) value = min;
-            *(port->buffer) = value;
+
+            if (port->needs_smoothing)
+            {
+                port->target_value = value;
+                last_needs_smoothing = true;
+                last_buffer = 0;
+                last_target_value = &port->target_value;
+            }
+            else
+            {
+                *(port->buffer) = value;
+                last_needs_smoothing = false;
+                last_buffer = port->buffer;
+                last_target_value = 0;
+            }
 
             // stores the data of the current control
             last_symbol = control_symbol;
-            last_buffer = port->buffer;
             last_min = min;
             last_max = max;
 
