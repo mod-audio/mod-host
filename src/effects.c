@@ -425,9 +425,10 @@ static int ProcessAudio(jack_nframes_t nframes, void *arg)
 
     for (i = 0; i < effect->input_control_ports_count; i++)
     {
-        if (! effect->ports[i]->needs_smoothing)
+        if (! effect->input_control_ports[i]->needs_smoothing)
             continue;
-        *(effect->ports[i]->buffer) = (*(effect->ports[i]->buffer) * 2.0f + effect->ports[i]->target_value) / 3.0f;
+        *(effect->input_control_ports[i]->buffer) =
+            (*(effect->input_control_ports[i]->buffer) * 2.0f + effect->input_control_ports[i]->target_value) / 3.0f;
     }
 
     /* Bypass */
