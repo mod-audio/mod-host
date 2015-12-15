@@ -676,8 +676,11 @@ static const void* GetPortValueForState(const char* symbol, void* user_data,
     {
         *size = sizeof(float);
         *type = g_urids.atom_Float;
+        if (port->needs_smoothing)
+            return &port->target_value;
+        return port->buffer;
     }
-    return port->buffer;
+    return NULL;
 }
 
 int LoadPresets(effect_t *effect)
@@ -884,7 +887,8 @@ int effects_add(const char *uid, int instance)
     const LilvPlugin *plugin;
     LilvInstance *lilv_instance;
     LilvNode *plugin_uri;
-    LilvNode *lilv_input, *lilv_control_in, *lilv_output, *lilv_control, *lilv_audio, *lilv_cv, *lilv_event, *lilv_midi;
+    LilvNode *lilv_input, *lilv_control_in, *lilv_enumeration, *lilv_integer, *lilv_toggled, *lilv_output;
+    LilvNode *lilv_control, *lilv_audio, *lilv_cv, *lilv_event, *lilv_midi;
     LilvNode *lilv_default, *lilv_minimum, *lilv_maximum, *lilv_atom_port, *lilv_worker_interface;
     const LilvPort *lilv_port;
     const LilvNode *symbol_node;
@@ -912,6 +916,9 @@ int effects_add(const char *uid, int instance)
     lilv_instance = NULL;
     lilv_input = NULL;
     lilv_control_in = NULL;
+    lilv_enumeration = NULL;
+    lilv_integer = NULL;
+    lilv_toggled = NULL;
     lilv_output = NULL;
     lilv_control = NULL;
     lilv_audio = NULL;
@@ -1001,6 +1008,9 @@ int effects_add(const char *uid, int instance)
     lilv_cv = lilv_new_uri(g_lv2_data, LILV_URI_CV_PORT);
     lilv_input = lilv_new_uri(g_lv2_data, LILV_URI_INPUT_PORT);
     lilv_control_in = lilv_new_uri(g_lv2_data, LV2_CORE__control);
+    lilv_enumeration = lilv_new_uri(g_lv2_data, LV2_CORE__enumeration);
+    lilv_integer = lilv_new_uri(g_lv2_data, LV2_CORE__integer);
+    lilv_toggled = lilv_new_uri(g_lv2_data, LV2_CORE__toggled);
     lilv_output = lilv_new_uri(g_lv2_data, LILV_URI_OUTPUT_PORT);
     lilv_event = lilv_new_uri(g_lv2_data, LILV_URI_EVENT_PORT);
     lilv_atom_port = lilv_new_uri(g_lv2_data, LV2_ATOM__AtomPort);
@@ -1113,7 +1123,10 @@ int effects_add(const char *uid, int instance)
             {
                 (*control_buffer) = lilv_node_as_float(lilv_default);
 
-                if (lilv_node_is_float(lilv_default) && lilv_port_is_a(plugin, lilv_port, lilv_input))
+                if (lilv_port_is_a(plugin, lilv_port, lilv_input) && !
+                    (lilv_port_has_property(plugin, lilv_port, lilv_enumeration) ||
+                     lilv_port_has_property(plugin, lilv_port, lilv_integer) ||
+                     lilv_port_has_property(plugin, lilv_port, lilv_toggled)))
                 {
                     effect->ports[i]->needs_smoothing = true;
                     effect->ports[i]->target_value = (*control_buffer);
@@ -1176,12 +1189,11 @@ int effects_add(const char *uid, int instance)
         }
     }
 
-	const LilvPort* control_input = lilv_plugin_get_port_by_designation(
-		plugin, lilv_input, lilv_control_in);
-	if (control_input)
+    const LilvPort* control_input = lilv_plugin_get_port_by_designation(plugin, lilv_input, lilv_control_in);
+    if (control_input)
     {
-		effect->control_in = lilv_port_get_index(plugin, control_input);
-	}
+        effect->control_in = lilv_port_get_index(plugin, control_input);
+    }
 
 
     /* Allocate memory to indexes */
@@ -1341,6 +1353,9 @@ int effects_add(const char *uid, int instance)
     lilv_node_free(lilv_cv);
     lilv_node_free(lilv_input);
     lilv_node_free(lilv_control_in);
+    lilv_node_free(lilv_enumeration);
+    lilv_node_free(lilv_integer);
+    lilv_node_free(lilv_toggled);
     lilv_node_free(lilv_output);
     lilv_node_free(lilv_event);
     lilv_node_free(lilv_midi);
@@ -1377,6 +1392,9 @@ int effects_add(const char *uid, int instance)
         lilv_node_free(lilv_cv);
         lilv_node_free(lilv_input);
         lilv_node_free(lilv_control_in);
+        lilv_node_free(lilv_enumeration);
+        lilv_node_free(lilv_integer);
+        lilv_node_free(lilv_toggled);
         lilv_node_free(lilv_output);
         lilv_node_free(lilv_event);
         lilv_node_free(lilv_midi);
