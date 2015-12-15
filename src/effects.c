@@ -1722,7 +1722,10 @@ int effects_get_parameter(int effect_id, const char *control_symbol, float *valu
                lilv_node_is_bool(lilv_maximum))
                max = lilv_node_as_float(lilv_maximum);
 
-           (*value) = *(port->buffer);
+           if (port->needs_smoothing)
+               (*value) = port->target_value;
+           else
+               (*value) = *(port->buffer);
 
            if (lilv_port_has_property(g_effects[effect_id].lilv_plugin, port->lilv_port, g_sample_rate_node))
            {
