@@ -290,6 +290,7 @@ static LV2_Feature g_buf_size_features[3] = {
     { LV2_BUF_SIZE__boundedBlockLength, NULL }
     };
 
+static bool g_smooth_controls = false;
 
 /*
 ************************************************************************************************************************
@@ -423,12 +424,15 @@ static int ProcessAudio(jack_nframes_t nframes, void *arg)
         }
     }
 
-    for (i = 0; i < effect->input_control_ports_count; i++)
+    if (g_smooth_controls)
     {
-        if (! effect->input_control_ports[i]->needs_smoothing)
-            continue;
-        *(effect->input_control_ports[i]->buffer) =
-            (*(effect->input_control_ports[i]->buffer) * 2.0f + effect->input_control_ports[i]->target_value) / 3.0f;
+        for (i = 0; i < effect->input_control_ports_count; i++)
+        {
+            if (! effect->input_control_ports[i]->needs_smoothing)
+                continue;
+            *(effect->input_control_ports[i]->buffer) =
+                (*(effect->input_control_ports[i]->buffer) * 5.0f + effect->input_control_ports[i]->target_value) / 6.0f;
+        }
     }
 
     /* Bypass */
@@ -745,6 +749,10 @@ int effects_init(void* client)
     {
         return ERR_JACK_CLIENT_CREATION;
     }
+
+    /* check if we want parameter smoothing */
+    const char* const smooth_var = getenv("MOD_HOST_SMOOTH_CONTROLS");
+    g_smooth_controls = smooth_var != NULL && !strcmp(smooth_var, "1");
 
     /* Get the system ports */
     g_capture_ports = jack_get_ports(g_jack_global_client, "system", NULL, JackPortIsOutput);
@@ -1123,7 +1131,7 @@ int effects_add(const char *uid, int instance)
             {
                 (*control_buffer) = lilv_node_as_float(lilv_default);
 
-                if (lilv_port_is_a(plugin, lilv_port, lilv_input) && !
+                if (g_smooth_controls && lilv_port_is_a(plugin, lilv_port, lilv_input) && !
                     (lilv_port_has_property(plugin, lilv_port, lilv_enumeration) ||
                      lilv_port_has_property(plugin, lilv_port, lilv_integer) ||
                      lilv_port_has_property(plugin, lilv_port, lilv_toggled)))
