@@ -958,6 +958,9 @@ int effects_add(const char *uid, int instance)
 
     if (!plugin)
     {
+        // NOTE: Reloading the entire world is nasty!
+        //       It may result in crashes, and we now have a way to add/remove bundles as needed anyway.
+#if 0
         /* If the plugin are not found reload all plugins */
         lilv_world_load_all(g_lv2_data);
         g_plugins = lilv_world_get_all_plugins(g_lv2_data);
@@ -968,6 +971,7 @@ int effects_add(const char *uid, int instance)
         lilv_node_free(plugin_uri);
 
         if (!plugin)
+#endif
         {
             fprintf(stderr, "can't get plugin\n");
             error = ERR_LV2_INVALID_URI;
