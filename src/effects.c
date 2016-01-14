@@ -64,6 +64,8 @@
 #define LILV_URI_CV_PORT "http://lv2plug.in/ns/lv2core#CVPort"
 #endif
 
+#define LILV_NS_MOD "http://moddevices.com/ns/mod#"
+
 // custom jack flag used for cv
 // needed because we prefer jack2 which doesn't have metadata yet
 #define JackPortIsControlVoltage 0x100
@@ -897,7 +899,7 @@ int effects_add(const char *uid, int instance)
     LilvNode *plugin_uri;
     LilvNode *lilv_input, *lilv_control_in, *lilv_enumeration, *lilv_integer, *lilv_toggled, *lilv_output;
     LilvNode *lilv_control, *lilv_audio, *lilv_cv, *lilv_event, *lilv_midi;
-    LilvNode *lilv_default, *lilv_minimum, *lilv_maximum, *lilv_atom_port, *lilv_worker_interface;
+    LilvNode *lilv_default, *lilv_mod_default, *lilv_atom_port, *lilv_worker_interface;
     const LilvPort *lilv_port;
     const LilvNode *symbol_node;
 
@@ -933,8 +935,7 @@ int effects_add(const char *uid, int instance)
     lilv_cv = NULL;
     lilv_midi = NULL;
     lilv_default = NULL;
-    lilv_minimum = NULL;
-    lilv_maximum = NULL;
+    lilv_mod_default = NULL;
     lilv_event = NULL;
     lilv_atom_port = NULL;
     lilv_worker_interface = NULL;
@@ -1027,6 +1028,8 @@ int effects_add(const char *uid, int instance)
     lilv_event = lilv_new_uri(g_lv2_data, LILV_URI_EVENT_PORT);
     lilv_atom_port = lilv_new_uri(g_lv2_data, LV2_ATOM__AtomPort);
     lilv_midi = lilv_new_uri(g_lv2_data, LILV_URI_MIDI_EVENT);
+    lilv_default = lilv_new_uri(g_lv2_data, LV2_CORE__default);
+    lilv_mod_default = lilv_new_uri(g_lv2_data, LILV_NS_MOD "default");
 
     /* Allocate memory to ports */
     audio_ports_count = 0;
@@ -1128,12 +1131,13 @@ int effects_add(const char *uid, int instance)
             lilv_instance_connect_port(lilv_instance, i, control_buffer);
 
             /* Set the default value of control */
-            lilv_port_get_range(plugin, lilv_port, &lilv_default, &lilv_minimum, &lilv_maximum);
-            if (lilv_node_is_float(lilv_default) ||
-                lilv_node_is_int(lilv_default) ||
-                lilv_node_is_bool(lilv_default))
+            LilvNodes* valuedefault = lilv_port_get_value(plugin, lilv_port, lilv_mod_default);
+            if (valuedefault == NULL)
+                valuedefault = lilv_port_get_value(plugin, lilv_port, lilv_default);
+
+            if (valuedefault != NULL)
             {
-                (*control_buffer) = lilv_node_as_float(lilv_default);
+                (*control_buffer) = lilv_node_as_float(lilv_nodes_get_first(valuedefault));
 
                 if (g_smooth_controls && lilv_port_is_a(plugin, lilv_port, lilv_input) && !
                     (lilv_port_has_property(plugin, lilv_port, lilv_enumeration) ||
@@ -1144,6 +1148,11 @@ int effects_add(const char *uid, int instance)
                     effect->ports[i]->target_value = (*control_buffer);
                 }
             }
+            else
+            {
+                (*control_buffer) = 0.0f;
+            }
+
             effect->ports[i]->jack_port = NULL;
 
             control_ports_count++;
@@ -1371,6 +1380,8 @@ int effects_add(const char *uid, int instance)
     lilv_node_free(lilv_output);
     lilv_node_free(lilv_event);
     lilv_node_free(lilv_midi);
+    lilv_node_free(lilv_default);
+    lilv_node_free(lilv_mod_default);
     lilv_node_free(lilv_atom_port);
     lilv_node_free(lilv_worker_interface);
 
@@ -1410,6 +1421,8 @@ int effects_add(const char *uid, int instance)
         lilv_node_free(lilv_output);
         lilv_node_free(lilv_event);
         lilv_node_free(lilv_midi);
+        lilv_node_free(lilv_default);
+        lilv_node_free(lilv_mod_default);
         lilv_node_free(lilv_atom_port);
         lilv_node_free(lilv_worker_interface);
 
