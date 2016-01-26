@@ -667,8 +667,6 @@ static void SetParameterFromState(const char* symbol, void* user_data,
                                   const void* value, uint32_t size,
                                   uint32_t type)
 {
-    UNUSED_PARAM(size);
-    UNUSED_PARAM(type);
     effect_t *effect = (effect_t*)user_data;
     float realvalue;
 
