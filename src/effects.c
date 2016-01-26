@@ -670,7 +670,27 @@ static void SetParameterFromState(const char* symbol, void* user_data,
     UNUSED_PARAM(size);
     UNUSED_PARAM(type);
     effect_t *effect = (effect_t*)user_data;
-    effects_set_parameter(effect->instance, symbol, *((float*)value));
+    float realvalue;
+
+    if (type == g_urids.atom_Float)
+    {
+        if (size != sizeof(float))
+            return;
+        realvalue = *((float*)value);
+    }
+    else if (type == g_urids.atom_Int)
+    {
+        if (size != sizeof(int32_t))
+            return;
+        realvalue = *((int32_t*)value);
+    }
+    else
+    {
+        printf("mod-host SetParameterFromState called with unknown type: %u %u\n", type, size);
+        return;
+    }
+
+    effects_set_parameter(effect->instance, symbol, realvalue);
 }
 
 static const void* GetPortValueForState(const char* symbol, void* user_data,
