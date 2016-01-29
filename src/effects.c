@@ -48,6 +48,7 @@
 #include <lv2/lv2plug.in/ns/ext/state/state.h>
 #include <lv2/lv2plug.in/ns/ext/presets/presets.h>
 #include <lv2/lv2plug.in/ns/ext/options/options.h>
+#include <lv2/lv2plug.in/ns/ext/port-props/port-props.h>
 #include <lv2/lv2plug.in/ns/ext/buf-size/buf-size.h>
 #include <lv2/lv2plug.in/ns/ext/parameters/parameters.h>
 
@@ -137,8 +138,9 @@ typedef struct PORT_T {
     uint32_t buffer_count;
     LV2_Evbuf *evbuf;
     bool old_ev_api;
+    bool is_trigger;
     bool needs_smoothing;
-    float target_value;
+    float target_value; // NOTE: used as 'default' in trigger
 } port_t;
 
 typedef struct PROPERTY_T {
@@ -217,6 +219,7 @@ typedef struct EFFECT_T {
     jack_ringbuffer_t *events_buffer;
 
     int bypass;
+    bool has_triggers; // avoids itenerating controls each cycle
 } effect_t;
 
 typedef struct URIDS_T {
@@ -588,6 +591,17 @@ static int ProcessAudio(jack_nframes_t nframes, void *arg)
             }
         }
     }
+
+    if (effect->has_triggers)
+    {
+        for (i = 0; i < effect->input_control_ports_count; i++)
+        {
+            if (! effect->input_control_ports[i]->is_trigger)
+                continue;
+            *(effect->input_control_ports[i]->buffer) = effect->input_control_ports[i]->target_value;
+        }
+    }
+
     return SUCCESS;
 }
 
@@ -915,7 +929,8 @@ int effects_add(const char *uid, int instance)
     const LilvPlugin *plugin;
     LilvInstance *lilv_instance;
     LilvNode *plugin_uri;
-    LilvNode *lilv_input, *lilv_control_in, *lilv_enumeration, *lilv_integer, *lilv_toggled, *lilv_output;
+    LilvNode *lilv_input, *lilv_control_in, *lilv_output;
+    LilvNode *lilv_enumeration, *lilv_integer, *lilv_toggled, *lilv_trigger;
     LilvNode *lilv_control, *lilv_audio, *lilv_cv, *lilv_event, *lilv_midi;
     LilvNode *lilv_default, *lilv_mod_default, *lilv_atom_port, *lilv_worker_interface;
     const LilvPort *lilv_port;
@@ -939,6 +954,7 @@ int effects_add(const char *uid, int instance)
     effect->control_ports = NULL;
     effect->presets = NULL;
     effect->events_buffer = NULL;
+    effect->has_triggers = false;
 
     /* Init the pointers */
     lilv_instance = NULL;
@@ -947,6 +963,7 @@ int effects_add(const char *uid, int instance)
     lilv_enumeration = NULL;
     lilv_integer = NULL;
     lilv_toggled = NULL;
+    lilv_trigger = NULL;
     lilv_output = NULL;
     lilv_control = NULL;
     lilv_audio = NULL;
@@ -1042,6 +1059,7 @@ int effects_add(const char *uid, int instance)
     lilv_enumeration = lilv_new_uri(g_lv2_data, LV2_CORE__enumeration);
     lilv_integer = lilv_new_uri(g_lv2_data, LV2_CORE__integer);
     lilv_toggled = lilv_new_uri(g_lv2_data, LV2_CORE__toggled);
+    lilv_trigger = lilv_new_uri(g_lv2_data, LV2_PORT_PROPS__trigger);
     lilv_output = lilv_new_uri(g_lv2_data, LILV_URI_OUTPUT_PORT);
     lilv_event = lilv_new_uri(g_lv2_data, LILV_URI_EVENT_PORT);
     lilv_atom_port = lilv_new_uri(g_lv2_data, LV2_ATOM__AtomPort);
@@ -1134,6 +1152,7 @@ int effects_add(const char *uid, int instance)
         else if (lilv_port_is_a(plugin, lilv_port, lilv_control))
         {
             effect->ports[i]->type = TYPE_CONTROL;
+            effect->ports[i]->is_trigger = false;
             effect->ports[i]->needs_smoothing = false;
 
             /* Allocate memory to control port */
@@ -1157,7 +1176,13 @@ int effects_add(const char *uid, int instance)
             {
                 (*control_buffer) = lilv_node_as_float(lilv_nodes_get_first(valuedefault));
 
-                if (g_smooth_controls && lilv_port_is_a(plugin, lilv_port, lilv_input) && !
+                if (lilv_port_has_property(plugin, lilv_port, lilv_trigger))
+                {
+                    effect->ports[i]->is_trigger = true;
+                    effect->ports[i]->target_value = (*control_buffer);
+                    effect->has_triggers = true;
+                }
+                else if (g_smooth_controls && lilv_port_is_a(plugin, lilv_port, lilv_input) && !
                     (lilv_port_has_property(plugin, lilv_port, lilv_enumeration) ||
                      lilv_port_has_property(plugin, lilv_port, lilv_integer) ||
                      lilv_port_has_property(plugin, lilv_port, lilv_toggled)))
@@ -1395,6 +1420,7 @@ int effects_add(const char *uid, int instance)
     lilv_node_free(lilv_enumeration);
     lilv_node_free(lilv_integer);
     lilv_node_free(lilv_toggled);
+    lilv_node_free(lilv_trigger);
     lilv_node_free(lilv_output);
     lilv_node_free(lilv_event);
     lilv_node_free(lilv_midi);
@@ -1436,6 +1462,7 @@ int effects_add(const char *uid, int instance)
         lilv_node_free(lilv_enumeration);
         lilv_node_free(lilv_integer);
         lilv_node_free(lilv_toggled);
+        lilv_node_free(lilv_trigger);
         lilv_node_free(lilv_output);
         lilv_node_free(lilv_event);
         lilv_node_free(lilv_midi);
@@ -1645,7 +1672,7 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
     const LilvPlugin *lilv_plugin;
     const LilvPort *lilv_port;
     LilvNode *lilv_default, *lilv_minimum, *lilv_maximum;
-    float min = 0.0, max = 0.0;
+    float min = 0.0f, max = 1.0f;
 
     static int last_effect_id = -1;
     static const char *last_symbol = 0;
