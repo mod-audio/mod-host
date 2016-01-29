@@ -1490,16 +1490,13 @@ int effects_preset_load(int effect_id, const char *uri)
             if (!state)
             {
                 lilv_node_free(preset_uri);
-                printf("HOST STATE FAIL\n");
                 return ERR_LV2_CANT_LOAD_STATE;
             }
-            printf("HOST STATE LOADED OK\n");
             lilv_state_restore(state, effect->lilv_instance, SetParameterFromState, effect, 0, NULL);
             lilv_state_free(state);
             lilv_node_free(preset_uri);
             return SUCCESS;
         }
-        printf("HOST STATE INVALID\n");
 
         lilv_node_free(preset_uri);
         return ERR_LV2_INVALID_PRESET_URI;
