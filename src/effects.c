@@ -1541,8 +1541,12 @@ int effects_preset_show(const char *uri, char **state_str)
             return ERR_LV2_CANT_LOAD_STATE;
         }
 
+        setenv("LILV_STATE_SKIP_PROPERTIES", "1", 1);
+
         (*state_str) =
             lilv_state_to_string(g_lv2_data, &g_urid_map, &g_urid_unmap, state, uri, NULL);
+
+        unsetenv("LILV_STATE_SKIP_PROPERTIES");
 
         lilv_state_free(state);
         lilv_node_free(preset_uri);
