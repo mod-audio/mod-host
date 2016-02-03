@@ -92,6 +92,10 @@
 #define MIDI_LEARN_UNUSED -1
 #define MIDI_LEARN_NULL   -2
 
+#define BYPASS_PORT_SYMBOL ":bypass"
+#define PRESET_PORT_SYMBOL ":preset"
+
+
 /*
 ************************************************************************************************************************
 *           LOCAL CONSTANTS
@@ -326,6 +330,9 @@ static LV2_Feature g_buf_size_features[3] = {
 static bool g_smooth_controls = false;
 static pthread_mutex_t g_midi_learning_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+static const char* const g_bypass_port_symbol = BYPASS_PORT_SYMBOL;
+
+
 /*
 ************************************************************************************************************************
 *           LOCAL FUNCTION PROTOTYPES
@@ -338,7 +345,7 @@ static void AllocatePortBuffers(effect_t* effect);
 static int BufferSize(jack_nframes_t nframes, void* data);
 static int ProcessAudio(jack_nframes_t nframes, void *arg);
 static int ProcessMidi(jack_nframes_t nframes, void *arg);
-static void JackPortRegistered(jack_port_id_t port, int reg, void *arg);
+//static void JackPortRegistered(jack_port_id_t port, int reg, void *arg);
 static void GetFeatures(effect_t *effect);
 static void FreeFeatures(effect_t *effect);
 
@@ -680,21 +687,28 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
                 g_midi_cc_list[i].controller == controller)
             {
                 handled = true;
-                value   = event.buffer[2];
-                port    = g_midi_cc_list[i].port;
 
-                // rvalue as multiplier
-                value /= 127.0f;
-                // make sure bounds are correct
-                if (value < 0.0f)
-                    value = 0.0f;
-                else if (value > 127.0f)
-                    value = 127.0f;
-                // real value
-                value = port->min_value + (port->max_value - port->min_value) * value;
-                // set param
-                effects_set_parameter(g_midi_cc_list[i].effect_id, port->symbol, value);
-                printf("got midi %i %i | FOUND | %f %f\n", channel, controller, port->min_value, port->max_value);
+                if (!strcmp(g_midi_cc_list[i].symbol, g_bypass_port_symbol))
+                {
+                    g_effects[g_midi_cc_list[i].effect_id].bypass = (event.buffer[2] < 64);
+                }
+                else
+                {
+                    port  = g_midi_cc_list[i].port;
+                    value = event.buffer[2];
+
+                    // rvalue as multiplier
+                    value /= 127.0f;
+                    // make sure bounds are correct
+                    if (value < 0.0f)
+                        value = 0.0f;
+                    else if (value > 127.0f)
+                        value = 127.0f;
+                    // real value
+                    value = port->min_value + (port->max_value - port->min_value) * value;
+                    // set param
+                    effects_set_parameter(g_midi_cc_list[i].effect_id, g_midi_cc_list[i].symbol, value);
+                }
                 break;
             }
         }
@@ -720,14 +734,13 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
     return 0;
 }
 
+#if 0
 static void JackPortRegistered(jack_port_id_t port, int reg, void *arg)
 {
     UNUSED_PARAM(arg);
 
     if (reg == 0)
         return;
-
-    printf("HERE 001\n");
 
     // WARNING: the following code assumes JACK2
 
@@ -744,9 +757,9 @@ static void JackPortRegistered(jack_port_id_t port, int reg, void *arg)
     strcpy(ourport, jack_get_client_name(g_jack_global_client));
     strcat(ourport, ":midi_in");
 
-    printf("CONN: %s %s\n", jack_port_name(jackport), ourport);
     //jack_connect(g_jack_global_client, jack_port_name(jackport), ourport);
 }
+#endif
 
 static void GetFeatures(effect_t *effect)
 {
@@ -932,7 +945,7 @@ int effects_init(void* client)
 
     /* Set jack callbacks */
     jack_set_process_callback(g_jack_global_client, ProcessMidi, NULL);
-    jack_set_port_registration_callback(g_jack_global_client, JackPortRegistered, NULL);
+    //jack_set_port_registration_callback(g_jack_global_client, JackPortRegistered, NULL);
 
     /* Register midi input jack port */
     g_jack_midi_cc_port = jack_port_register(g_jack_global_client, "midi_in", JACK_DEFAULT_MIDI_TYPE, JackPortIsInput, 0);
@@ -2237,13 +2250,6 @@ int effects_midi_learn(int effect_id, const char *control_symbol)
     }
 
     // Otherwise locate a free position on list and take it
-    port = FindEffectPortBySymbol(&(g_effects[effect_id]), control_symbol);
-
-    if (port == NULL)
-    {
-        return ERR_LV2_INVALID_PARAM_SYMBOL;
-    }
-
     for (int i = 0; i < MAX_MIDI_CC_ASSIGN; i++)
     {
         if (INSTANCE_IS_VALID(g_midi_cc_list[i].effect_id))
@@ -2252,8 +2258,22 @@ int effects_midi_learn(int effect_id, const char *control_symbol)
         g_midi_cc_list[i].channel = -1;
         g_midi_cc_list[i].controller = -1;
         g_midi_cc_list[i].effect_id = effect_id;
-        g_midi_cc_list[i].symbol = port->symbol;
-        g_midi_cc_list[i].port = port;
+
+        if (!strcmp(control_symbol, g_bypass_port_symbol))
+        {
+            g_midi_cc_list[i].symbol = g_bypass_port_symbol;
+            g_midi_cc_list[i].port = NULL;
+        }
+        else
+        {
+            port = FindEffectPortBySymbol(&(g_effects[effect_id]), control_symbol);
+
+            if (port == NULL)
+                return ERR_LV2_INVALID_PARAM_SYMBOL;
+
+            g_midi_cc_list[i].symbol = port->symbol;
+            g_midi_cc_list[i].port = port;
+        }
 
         pthread_mutex_lock(&g_midi_learning_mutex);
         g_midi_learning = &g_midi_cc_list[i];
@@ -2291,13 +2311,6 @@ int effects_midi_map(int effect_id, const char *control_symbol, int channel, int
     }
 
     // Otherwise locate a free position on list and take it
-    port = FindEffectPortBySymbol(&(g_effects[effect_id]), control_symbol);
-
-    if (port == NULL)
-    {
-        return ERR_LV2_INVALID_PARAM_SYMBOL;
-    }
-
     for (int i = 0; i < MAX_MIDI_CC_ASSIGN; i++)
     {
         if (INSTANCE_IS_VALID(g_midi_cc_list[i].effect_id))
@@ -2306,8 +2319,22 @@ int effects_midi_map(int effect_id, const char *control_symbol, int channel, int
         g_midi_cc_list[i].channel = channel;
         g_midi_cc_list[i].controller = controller;
         g_midi_cc_list[i].effect_id = effect_id;
-        g_midi_cc_list[i].symbol = port->symbol;
-        g_midi_cc_list[i].port = port;
+
+        if (!strcmp(control_symbol, g_bypass_port_symbol))
+        {
+            g_midi_cc_list[i].symbol = g_bypass_port_symbol;
+            g_midi_cc_list[i].port = NULL;
+        }
+        else
+        {
+            port = FindEffectPortBySymbol(&(g_effects[effect_id]), control_symbol);
+
+            if (port == NULL)
+                return ERR_LV2_INVALID_PARAM_SYMBOL;
+
+            g_midi_cc_list[i].symbol = port->symbol;
+            g_midi_cc_list[i].port = port;
+        }
         return SUCCESS;
     }
 

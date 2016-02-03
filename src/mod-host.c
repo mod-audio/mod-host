@@ -586,9 +586,9 @@ int main(int argc, char **argv)
 
     while (1) socket_run(1);
 
-    protocol_remove_commands();
     socket_finish();
     effects_finish(1);
+    protocol_remove_commands();
 
     return 0;
 }
@@ -618,8 +618,8 @@ void jack_finish(void);
 void jack_finish(void)
 {
     intclient_running = 0;
-    protocol_remove_commands();
     socket_finish();
     pthread_join(intclient_socket_thread, NULL);
     effects_finish(0);
+    protocol_remove_commands();
 }
