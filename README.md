@@ -4,7 +4,7 @@ mod-host
 About
 -----
 
-mod-host is a LV2 host for JACK, controllable via socket or command line
+mod-host is an LV2 host for JACK, controllable via socket or command line
 
 Currently the host supports the following LV2 features:
 
@@ -84,12 +84,12 @@ Commands (or Protocol)
 The commands supported by mod-host are:
 
     add <lv2_uri> <instance_number>
-        * add a LV2 plugin encapsulated as a jack client
+        * add an LV2 plugin encapsulated as a jack client
         e.g.: add http://lv2plug.in/plugins/eg-amp 0
         instance_number must be any value between 0 ~ 9999, inclusively
 
     remove <instance_number>
-        * remove a LV2 plugin instance (and also the jack client)
+        * remove an LV2 plugin instance (and also the jack client)
         e.g.: remove 0
 
     connect <origin_port> <destination_port>
@@ -129,6 +129,18 @@ The commands supported by mod-host are:
         e.g: monitor localhost 12345 1
         if status = 1 start monitoring
         if status = 0 stop monitoring
+
+    midi_learn <instance_number> <param_symbol>
+        This command maps starts MIDI learn for a parameter
+        e.g.: midi_learn 0 gain
+
+    midi_map <instance_number> <param_symbol> <midi_channel> <midi_cc>
+        This command maps a MIDI controller to a parameter
+        e.g.: midi_map 0 gain 0 7
+
+    midi_unmap <instance_number> <param_symbol>
+        This command unmaps the MIDI controller from a parameter
+        e.g.: unmap 0 gain
 
     bypass <instance_number> <bypass_value>
         * toggle effect processing

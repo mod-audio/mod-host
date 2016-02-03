@@ -59,7 +59,10 @@ enum {
     ERR_JACK_PORT_CONNECTION = -205,
     ERR_JACK_PORT_DISCONNECTION = -206,
 
-    ERR_MEMORY_ALLOCATION = -301,
+    ERR_MIDI_ASSIGNMENT_LIST_IS_FULL = -301,
+    ERR_MIDI_PARAM_NOT_FOUND = -302,
+
+    ERR_MEMORY_ALLOCATION = -901,
 };
 
 
@@ -70,6 +73,7 @@ enum {
 */
 
 #define MAX_INSTANCES           10000
+#define MAX_MIDI_CC_ASSIGN      1024
 
 
 /*
@@ -116,6 +120,9 @@ int effects_bypass(int effect_id, int value);
 int effects_get_parameter_symbols(int effect_id, char** symbols);
 int effects_get_presets_uris(int effect_id, char **uris);
 int effects_get_parameter_info(int effect_id, const char *control_symbol, float **range, const char **scale_points);
+int effects_midi_learn(int effect_id, const char *control_symbol);
+int effects_midi_map(int effect_id, const char *control_symbol, int channel, int controller);
+int effects_midi_unmap(int effect_id, const char *control_symbol);
 float effects_jack_cpu_load(void);
 void effects_bundle_add(const char* bundlepath);
 void effects_bundle_remove(const char* bundlepath);

@@ -29,6 +29,7 @@
 #include <dlfcn.h>
 #include <errno.h>
 #include <limits.h>
+#include <pthread.h>
 
 /* Jack */
 #include <jack/jack.h>
@@ -88,6 +89,8 @@
 
 #define REMOVE_ALL      (-1)
 
+#define MIDI_LEARN_UNUSED -1
+#define MIDI_LEARN_NULL   -2
 
 /*
 ************************************************************************************************************************
@@ -107,6 +110,18 @@ enum PortType {
     TYPE_AUDIO,
     TYPE_CV,
     TYPE_EVENT
+};
+
+enum PortHints {
+    // controls
+    HINT_ENUMERATION   = 1 << 0,
+    HINT_INTEGER       = 1 << 1,
+    HINT_TOGGLE        = 1 << 2,
+    HINT_TRIGGER       = 1 << 3,
+    HINT_LOGARITHMIC   = 1 << 4,
+    HINT_NEEDS_SMOOTH  = 1 << 5,
+    // events
+    HINT_OLD_EVENT_API = 1 << 0,
 };
 
 enum {
@@ -132,15 +147,17 @@ typedef struct PORT_T {
     uint32_t index;
     enum PortType type;
     enum PortFlow flow;
+    enum PortHints hints;
+    const char* symbol;
     jack_port_t *jack_port;
-    const LilvPort *lilv_port;
     float *buffer;
     uint32_t buffer_count;
     LV2_Evbuf *evbuf;
-    bool old_ev_api;
-    bool is_trigger;
-    bool needs_smoothing;
-    float target_value; // NOTE: used as 'default' in trigger
+    float min_value;
+    float max_value;
+    float def_value;
+    float target_value; // used for smoothing
+    LilvScalePoints* scale_points;
 } port_t;
 
 typedef struct PROPERTY_T {
@@ -246,6 +263,15 @@ typedef struct URIDS_T {
     LV2_URID time_speed;
 } urids_t;
 
+typedef struct MIDI_CC_T {
+    int8_t channel;
+    int8_t controller;
+
+    int effect_id;
+    const char* symbol;
+    const port_t* port;
+} midi_cc_t;
+
 
 /*
 ************************************************************************************************************************
@@ -264,12 +290,14 @@ typedef struct URIDS_T {
 */
 
 static effect_t g_effects[MAX_INSTANCES];
+static midi_cc_t g_midi_cc_list[MAX_MIDI_CC_ASSIGN], *g_midi_learning;
 
 /* Jack */
 static jack_client_t *g_jack_global_client;
 static jack_nframes_t g_sample_rate, g_block_length;
 static const char **g_capture_ports, **g_playback_ports;
 static size_t g_midi_buffer_size;
+static jack_port_t *g_jack_midi_cc_port;
 
 /* LV2 and Lilv */
 static LilvWorld *g_lv2_data;
@@ -296,6 +324,7 @@ static LV2_Feature g_buf_size_features[3] = {
     };
 
 static bool g_smooth_controls = false;
+static pthread_mutex_t g_midi_learning_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /*
 ************************************************************************************************************************
@@ -308,7 +337,10 @@ static int InstanceExist(int effect_id);
 static void AllocatePortBuffers(effect_t* effect);
 static int BufferSize(jack_nframes_t nframes, void* data);
 static int ProcessAudio(jack_nframes_t nframes, void *arg);
+static int ProcessMidi(jack_nframes_t nframes, void *arg);
+static void JackPortRegistered(jack_port_id_t port, int reg, void *arg);
 static void GetFeatures(effect_t *effect);
+static void FreeFeatures(effect_t *effect);
 
 
 /*
@@ -352,7 +384,7 @@ static void AllocatePortBuffers(effect_t* effect)
         lv2_evbuf_free(effect->event_ports[i]->evbuf);
         effect->event_ports[i]->evbuf = lv2_evbuf_new(
             g_midi_buffer_size,
-            effect->event_ports[i]->old_ev_api ? LV2_EVBUF_EVENT : LV2_EVBUF_ATOM,
+            (effect->event_ports[i]->hints & HINT_OLD_EVENT_API) ? LV2_EVBUF_EVENT : LV2_EVBUF_ATOM,
             g_urid_map.map(g_urid_map.handle, lilv_node_as_string(lilv_new_uri(g_lv2_data, LV2_ATOM__Chunk))),
             g_urid_map.map(g_urid_map.handle, lilv_node_as_string(lilv_new_uri(g_lv2_data, LV2_ATOM__Sequence))));
 
@@ -433,10 +465,11 @@ static int ProcessAudio(jack_nframes_t nframes, void *arg)
     {
         for (i = 0; i < effect->input_control_ports_count; i++)
         {
-            if (! effect->input_control_ports[i]->needs_smoothing)
-                continue;
-            *(effect->input_control_ports[i]->buffer) =
-                (*(effect->input_control_ports[i]->buffer) * 5.0f + effect->input_control_ports[i]->target_value) / 6.0f;
+            if (effect->input_control_ports[i]->hints & HINT_NEEDS_SMOOTH)
+            {
+                *(effect->input_control_ports[i]->buffer) =
+                    (*(effect->input_control_ports[i]->buffer) * 5.0f + effect->input_control_ports[i]->target_value) / 6.0f;
+            }
         }
     }
 
@@ -551,9 +584,7 @@ static int ProcessAudio(jack_nframes_t nframes, void *arg)
             float value = *(effect->ports[port_id]->buffer);
             if (monitor_check_condition(effect->monitors[i]->op, effect->monitors[i]->value, value) &&
                 value != effect->monitors[i]->last_notified_value) {
-                const LilvNode *symbol_node = lilv_port_get_symbol(effect->lilv_plugin, effect->ports[port_id]->lilv_port);
-                const char *symbol = lilv_node_as_string(symbol_node);
-                if (monitor_send(effect->instance, symbol, value) >= 0)
+                if (monitor_send(effect->instance, effect->ports[port_id]->symbol, value) >= 0)
                     effect->monitors[i]->last_notified_value = value;
             }
         }
@@ -596,13 +627,125 @@ static int ProcessAudio(jack_nframes_t nframes, void *arg)
     {
         for (i = 0; i < effect->input_control_ports_count; i++)
         {
-            if (! effect->input_control_ports[i]->is_trigger)
-                continue;
-            *(effect->input_control_ports[i]->buffer) = effect->input_control_ports[i]->target_value;
+            if (effect->input_control_ports[i]->hints & HINT_TRIGGER)
+                *(effect->input_control_ports[i]->buffer) = effect->input_control_ports[i]->def_value;
         }
     }
 
-    return SUCCESS;
+    return 0;
+}
+
+static int ProcessMidi(jack_nframes_t nframes, void *arg)
+{
+    const port_t *port;
+    void *port_buf;
+    jack_midi_event_t event;
+    jack_nframes_t event_count;
+    int8_t channel, controller;
+    float value;
+    bool handled;
+
+    UNUSED_PARAM(arg);
+
+    port_buf = jack_port_get_buffer(g_jack_midi_cc_port, nframes);
+    event_count = jack_midi_get_event_count(port_buf);
+
+    for (jack_nframes_t i = 0 ; i < event_count; i++)
+    {
+        if (jack_midi_event_get(&event, port_buf, i) != 0)
+            break;
+
+        // check if it's a CC event
+        if (event.buffer[0] < 0xB0)
+            continue;
+        if (event.buffer[0] > 0xBF)
+            continue;
+        if (event.size != 3)
+            continue;
+
+        handled    = false;
+        channel    = (event.buffer[0] & 0x0F);
+        controller =  event.buffer[1];
+
+        printf("got midi %i %i\n", channel, controller);
+
+        for (int i = 0; i < MAX_MIDI_CC_ASSIGN; i++)
+        {
+            if (g_midi_cc_list[i].effect_id == MIDI_LEARN_NULL)
+                break;
+            if (g_midi_cc_list[i].effect_id == MIDI_LEARN_UNUSED)
+                continue;
+
+            if (g_midi_cc_list[i].channel    == channel &&
+                g_midi_cc_list[i].controller == controller)
+            {
+                handled = true;
+                value   = event.buffer[2];
+                port    = g_midi_cc_list[i].port;
+
+                // rvalue as multiplier
+                value /= 127.0f;
+                // make sure bounds are correct
+                if (value < 0.0f)
+                    value = 0.0f;
+                else if (value > 127.0f)
+                    value = 127.0f;
+                // real value
+                value = port->min_value + (port->max_value - port->min_value) * value;
+                // set param
+                effects_set_parameter(g_midi_cc_list[i].effect_id, port->symbol, value);
+                printf("got midi %i %i | FOUND | %f %f\n", channel, controller, port->min_value, port->max_value);
+                break;
+            }
+        }
+
+        if (! handled)
+        {
+            printf("got midi %i %i | NOT FOUND\n", channel, controller);
+
+            pthread_mutex_lock(&g_midi_learning_mutex);
+
+            if (g_midi_learning != NULL)
+            {
+                printf("MIDI CC auto-mapped to channel %i, CC %i\n", channel, controller);
+                g_midi_learning->channel    = channel;
+                g_midi_learning->controller = controller;
+                g_midi_learning = NULL;
+            }
+
+            pthread_mutex_unlock(&g_midi_learning_mutex);
+        }
+    }
+
+    return 0;
+}
+
+static void JackPortRegistered(jack_port_id_t port, int reg, void *arg)
+{
+    UNUSED_PARAM(arg);
+
+    if (reg == 0)
+        return;
+
+    printf("HERE 001\n");
+
+    // WARNING: the following code assumes JACK2
+
+    const jack_port_t* jackport = jack_port_by_id(g_jack_global_client, port);
+
+    if (jackport == NULL)
+        return;
+    if ((jack_port_flags(jackport) & (JackPortIsOutput|JackPortIsPhysical)) == 0)
+        return;
+    if (strcmp(jack_port_type(jackport), JACK_DEFAULT_MIDI_TYPE))
+        return;
+
+    char ourport[128];
+    strcpy(ourport, jack_get_client_name(g_jack_global_client));
+    strcat(ourport, ":midi_in");
+
+    printf("CONN: %s %s\n", jack_port_name(jackport), ourport);
+    //jack_connect(g_jack_global_client, jack_port_name(jackport), ourport);
 }
 
 static void GetFeatures(effect_t *effect)
@@ -660,18 +803,9 @@ property_t *FindEffectPropertyByLabel(effect_t *effect, const char *label)
 
 port_t *FindEffectPortBySymbol(effect_t *effect, const char *control_symbol)
 {
-    // TODO: index symbols to make it faster
-
-    uint32_t i;
-    const LilvNode *symbol_node;
-    const char *symbol;
-
-    for (i = 0; i < effect->input_control_ports_count; i++)
+    for (uint32_t i = 0; i < effect->input_control_ports_count; i++)
     {
-        symbol_node = lilv_port_get_symbol(effect->lilv_plugin, effect->input_control_ports[i]->lilv_port);
-        symbol = lilv_node_as_string(symbol_node);
-
-        if (strcmp(control_symbol, symbol) == 0)
+        if (strcmp(effect->input_control_ports[i]->symbol, control_symbol) == 0)
             return effect->input_control_ports[i];
     }
     return NULL;
@@ -714,7 +848,7 @@ static const void* GetPortValueForState(const char* symbol, void* user_data,
     {
         *size = sizeof(float);
         *type = g_urids.atom_Float;
-        if (port->needs_smoothing)
+        if (port->hints & HINT_NEEDS_SMOOTH)
             return &port->target_value;
         return port->buffer;
     }
@@ -744,7 +878,7 @@ int LoadPresets(effect_t *effect)
     return 0;
 }
 
-void FreeFeatures(effect_t *effect)
+static void FreeFeatures(effect_t *effect)
 {
     worker_finish(&effect->worker);
 
@@ -769,14 +903,14 @@ void FreeFeatures(effect_t *effect)
 
 int effects_init(void* client)
 {
-    /* This global client is for connections / disconnections */
+    /* This global client is for connections / disconnections and midi-learn */
     if (client != NULL)
     {
         g_jack_global_client = (jack_client_t*)client;
     }
     else
     {
-        g_jack_global_client = jack_client_open("Global", JackNoStartServer, NULL);
+        g_jack_global_client = jack_client_open("mod-host", JackNoStartServer, NULL);
     }
 
     if (g_jack_global_client == NULL)
@@ -789,12 +923,52 @@ int effects_init(void* client)
     g_smooth_controls = smooth_var != NULL && !strcmp(smooth_var, "1");
 
     /* Get the system ports */
-    g_capture_ports = jack_get_ports(g_jack_global_client, "system", NULL, JackPortIsOutput);
-    g_playback_ports = jack_get_ports(g_jack_global_client, "system", NULL, JackPortIsInput);
+    g_capture_ports = jack_get_ports(g_jack_global_client, "system", JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput);
+    g_playback_ports = jack_get_ports(g_jack_global_client, "system", JACK_DEFAULT_AUDIO_TYPE, JackPortIsInput);
 
     /* Get buffers size */
     g_block_length = jack_get_buffer_size(g_jack_global_client);
     g_midi_buffer_size = jack_port_type_get_buffer_size(g_jack_global_client, JACK_DEFAULT_MIDI_TYPE);
+
+    /* Set jack callbacks */
+    jack_set_process_callback(g_jack_global_client, ProcessMidi, NULL);
+    jack_set_port_registration_callback(g_jack_global_client, JackPortRegistered, NULL);
+
+    /* Register midi input jack port */
+    g_jack_midi_cc_port = jack_port_register(g_jack_global_client, "midi_in", JACK_DEFAULT_MIDI_TYPE, JackPortIsInput, 0);
+    if (!g_jack_midi_cc_port)
+    {
+        fprintf(stderr, "can't register global jack midi-in port\n");
+        if (client == NULL)
+            jack_client_close(g_jack_global_client);
+        return ERR_JACK_PORT_REGISTER;
+    }
+
+    /* Try activate the jack global client */
+    if (jack_activate(g_jack_global_client) != 0)
+    {
+        fprintf(stderr, "can't activate global jack client\n");
+        if (client == NULL)
+            jack_client_close(g_jack_global_client);
+        return ERR_JACK_CLIENT_ACTIVATION;
+    }
+
+    /* Connect midi cc port to all HW inputs */
+    {
+        const char** const midihwports = jack_get_ports(g_jack_global_client, "", JACK_DEFAULT_MIDI_TYPE, JackPortIsOutput|JackPortIsPhysical);
+
+        if (midihwports != NULL)
+        {
+            char ourport[128];
+            strcpy(ourport, jack_get_client_name(g_jack_global_client));
+            strcat(ourport, ":midi_in");
+
+            for (int i = 0; midihwports[i] != NULL; i++)
+                jack_connect(g_jack_global_client, midihwports[i], ourport);
+
+            jack_free(midihwports);
+        }
+    }
 
     /* Load all LV2 data */
     g_lv2_data = lilv_world_new();
@@ -885,11 +1059,19 @@ int effects_init(void* client)
     lv2_atom_forge_init(&g_lv2_atom_forge, &g_urid_map);
 
     /* Init lilv_instance as NULL for all plugins */
-    int i;
-    for (i = 0; i < MAX_INSTANCES; i++)
-    {
+    for (int i = 0; i < MAX_INSTANCES; i++)
         g_effects[i].lilv_instance = NULL;
+
+    /* Init the midi variables */
+    for (int i = 0; i < MAX_MIDI_CC_ASSIGN; i++)
+    {
+        g_midi_cc_list[i].channel = -1;
+        g_midi_cc_list[i].controller = -1;
+        g_midi_cc_list[i].effect_id = MIDI_LEARN_NULL;
+        g_midi_cc_list[i].symbol = NULL;
+        g_midi_cc_list[i].port = NULL;
     }
+    g_midi_learning = NULL;
 
     return SUCCESS;
 }
@@ -930,9 +1112,12 @@ int effects_add(const char *uid, int instance)
     LilvInstance *lilv_instance;
     LilvNode *plugin_uri;
     LilvNode *lilv_input, *lilv_control_in, *lilv_output;
-    LilvNode *lilv_enumeration, *lilv_integer, *lilv_toggled, *lilv_trigger;
+    LilvNode *lilv_enumeration, *lilv_integer, *lilv_toggled, *lilv_trigger, *lilv_logarithmic;
     LilvNode *lilv_control, *lilv_audio, *lilv_cv, *lilv_event, *lilv_midi;
-    LilvNode *lilv_default, *lilv_mod_default, *lilv_atom_port, *lilv_worker_interface;
+    LilvNode *lilv_default, *lilv_mod_default;
+    LilvNode *lilv_minimum, *lilv_mod_minimum;
+    LilvNode *lilv_maximum, *lilv_mod_maximum;
+    LilvNode *lilv_atom_port, *lilv_worker_interface;
     const LilvPort *lilv_port;
     const LilvNode *symbol_node;
 
@@ -964,13 +1149,18 @@ int effects_add(const char *uid, int instance)
     lilv_integer = NULL;
     lilv_toggled = NULL;
     lilv_trigger = NULL;
+    lilv_logarithmic = NULL;
     lilv_output = NULL;
     lilv_control = NULL;
     lilv_audio = NULL;
     lilv_cv = NULL;
     lilv_midi = NULL;
     lilv_default = NULL;
+    lilv_minimum = NULL;
+    lilv_maximum = NULL;
     lilv_mod_default = NULL;
+    lilv_mod_minimum = NULL;
+    lilv_mod_maximum = NULL;
     lilv_event = NULL;
     lilv_atom_port = NULL;
     lilv_worker_interface = NULL;
@@ -1060,12 +1250,17 @@ int effects_add(const char *uid, int instance)
     lilv_integer = lilv_new_uri(g_lv2_data, LV2_CORE__integer);
     lilv_toggled = lilv_new_uri(g_lv2_data, LV2_CORE__toggled);
     lilv_trigger = lilv_new_uri(g_lv2_data, LV2_PORT_PROPS__trigger);
+    lilv_logarithmic = lilv_new_uri(g_lv2_data, LV2_PORT_PROPS__logarithmic);
     lilv_output = lilv_new_uri(g_lv2_data, LILV_URI_OUTPUT_PORT);
     lilv_event = lilv_new_uri(g_lv2_data, LILV_URI_EVENT_PORT);
     lilv_atom_port = lilv_new_uri(g_lv2_data, LV2_ATOM__AtomPort);
     lilv_midi = lilv_new_uri(g_lv2_data, LILV_URI_MIDI_EVENT);
     lilv_default = lilv_new_uri(g_lv2_data, LV2_CORE__default);
+    lilv_minimum = lilv_new_uri(g_lv2_data, LV2_CORE__minimum);
+    lilv_maximum = lilv_new_uri(g_lv2_data, LV2_CORE__maximum);
     lilv_mod_default = lilv_new_uri(g_lv2_data, LILV_NS_MOD "default");
+    lilv_mod_minimum = lilv_new_uri(g_lv2_data, LILV_NS_MOD "minimum");
+    lilv_mod_maximum = lilv_new_uri(g_lv2_data, LILV_NS_MOD "maximum");
 
     /* Allocate memory to ports */
     audio_ports_count = 0;
@@ -1098,8 +1293,12 @@ int effects_add(const char *uid, int instance)
 
         /* Lilv port */
         lilv_port = lilv_plugin_get_port_by_index(plugin, i);
+        symbol_node = lilv_port_get_symbol(plugin, lilv_port);
         effect->ports[i]->index = i;
-        effect->ports[i]->lilv_port = lilv_port;
+        effect->ports[i]->symbol = lilv_node_as_string(symbol_node);
+        effect->ports[i]->scale_points = NULL;
+
+        sprintf(port_name, "%s", lilv_node_as_string(symbol_node));
 
         /* Port flow */
         effect->ports[i]->flow = FLOW_UNKNOWN;
@@ -1114,10 +1313,9 @@ int effects_add(const char *uid, int instance)
             effect->ports[i]->flow = FLOW_OUTPUT;
         }
 
-        symbol_node = lilv_port_get_symbol(plugin, lilv_port);
-        sprintf(port_name, "%s", lilv_node_as_string(symbol_node));
-
         effect->ports[i]->type = TYPE_UNKNOWN;
+        effect->ports[i]->hints = 0x0;
+
         if (lilv_port_is_a(plugin, lilv_port, lilv_audio))
         {
             effect->ports[i]->type = TYPE_AUDIO;
@@ -1152,8 +1350,6 @@ int effects_add(const char *uid, int instance)
         else if (lilv_port_is_a(plugin, lilv_port, lilv_control))
         {
             effect->ports[i]->type = TYPE_CONTROL;
-            effect->ports[i]->is_trigger = false;
-            effect->ports[i]->needs_smoothing = false;
 
             /* Allocate memory to control port */
             control_buffer = (float *) malloc(sizeof(float));
@@ -1167,36 +1363,88 @@ int effects_add(const char *uid, int instance)
             effect->ports[i]->buffer_count = 1;
             lilv_instance_connect_port(lilv_instance, i, control_buffer);
 
-            /* Set the default value of control */
-            LilvNodes* valuedefault = lilv_port_get_value(plugin, lilv_port, lilv_mod_default);
-            if (valuedefault == NULL)
-                valuedefault = lilv_port_get_value(plugin, lilv_port, lilv_default);
+            effect->ports[i]->scale_points = lilv_port_get_scale_points(plugin, lilv_port);
 
-            if (valuedefault != NULL)
-            {
-                (*control_buffer) = lilv_node_as_float(lilv_nodes_get_first(valuedefault));
+            /* Set the minimum value of control */
+            float min_value;
+            LilvNodes* lilvvalue_minimum = lilv_port_get_value(plugin, lilv_port, lilv_mod_minimum);
+            if (lilvvalue_minimum == NULL)
+                lilvvalue_minimum = lilv_port_get_value(plugin, lilv_port, lilv_minimum);
 
-                if (lilv_port_has_property(plugin, lilv_port, lilv_trigger))
-                {
-                    effect->ports[i]->is_trigger = true;
-                    effect->ports[i]->target_value = (*control_buffer);
-                    effect->has_triggers = true;
-                }
-                else if (g_smooth_controls && lilv_port_is_a(plugin, lilv_port, lilv_input) && !
-                    (lilv_port_has_property(plugin, lilv_port, lilv_enumeration) ||
-                     lilv_port_has_property(plugin, lilv_port, lilv_integer) ||
-                     lilv_port_has_property(plugin, lilv_port, lilv_toggled)))
-                {
-                    effect->ports[i]->needs_smoothing = true;
-                    effect->ports[i]->target_value = (*control_buffer);
-                }
-            }
+            if (lilvvalue_minimum != NULL)
+                min_value = lilv_node_as_float(lilv_nodes_get_first(lilvvalue_minimum));
             else
+                min_value = 0.0f;
+
+            /* Set the maximum value of control */
+            float max_value;
+            LilvNodes* lilvvalue_maximum = lilv_port_get_value(plugin, lilv_port, lilv_mod_maximum);
+            if (lilvvalue_maximum == NULL)
+                lilvvalue_maximum = lilv_port_get_value(plugin, lilv_port, lilv_maximum);
+
+            if (lilvvalue_maximum != NULL)
+                max_value = lilv_node_as_float(lilv_nodes_get_first(lilvvalue_maximum));
+            else
+                max_value = 1.0f;
+
+            /* Ensure min < max */
+            if (min_value >= max_value)
+                max_value = min_value + 0.1f;
+
+            /* multiply ranges by sample rate if requested */
+            if (lilv_port_has_property(plugin, lilv_port, g_sample_rate_node))
             {
-                (*control_buffer) = 0.0f;
+                min_value *= g_sample_rate;
+                max_value *= g_sample_rate;
+            }
+
+            /* Set the default value of control */
+            float def_value;
+            LilvNodes* lilvvalue_default = lilv_port_get_value(plugin, lilv_port, lilv_mod_default);
+            if (lilvvalue_default == NULL)
+                lilvvalue_default = lilv_port_get_value(plugin, lilv_port, lilv_default);
+
+            if (lilvvalue_default != NULL)
+                def_value = lilv_node_as_float(lilv_nodes_get_first(lilvvalue_default));
+            else
+                def_value = min_value;
+
+            (*control_buffer) = def_value;
+
+            if (lilv_port_has_property(plugin, lilv_port, lilv_enumeration))
+            {
+                effect->ports[i]->hints |= HINT_ENUMERATION;
+            }
+            if (lilv_port_has_property(plugin, lilv_port, lilv_integer))
+            {
+                effect->ports[i]->hints |= HINT_INTEGER;
+            }
+            if (lilv_port_has_property(plugin, lilv_port, lilv_toggled))
+            {
+                effect->ports[i]->hints |= HINT_TOGGLE;
+            }
+            if (lilv_port_has_property(plugin, lilv_port, lilv_trigger))
+            {
+                effect->ports[i]->hints |= HINT_TRIGGER;
+                effect->has_triggers = true;
+            }
+            if (lilv_port_has_property(plugin, lilv_port, lilv_logarithmic))
+            {
+                effect->ports[i]->hints |= HINT_LOGARITHMIC;
+            }
+
+            if (g_smooth_controls &&
+                lilv_port_is_a(plugin, lilv_port, lilv_input) &&
+                (effect->ports[i]->hints & (HINT_ENUMERATION|HINT_INTEGER|HINT_TOGGLE|HINT_TRIGGER)) == 0)
+            {
+                effect->ports[i]->hints |= HINT_NEEDS_SMOOTH;
+                effect->ports[i]->target_value = def_value;
             }
 
             effect->ports[i]->jack_port = NULL;
+            effect->ports[i]->def_value = def_value;
+            effect->ports[i]->min_value = min_value;
+            effect->ports[i]->max_value = max_value;
 
             control_ports_count++;
             if (lilv_port_is_a(plugin, lilv_port, lilv_input)) input_control_ports_count++;
@@ -1236,8 +1484,9 @@ int effects_add(const char *uid, int instance)
         else if (lilv_port_is_a(plugin, lilv_port, lilv_event) ||
                     lilv_port_is_a(plugin, lilv_port, lilv_atom_port))
         {
-            effect->ports[i]->old_ev_api = lilv_port_is_a(plugin, lilv_port, lilv_event) ? true : false;
             effect->ports[i]->type = TYPE_EVENT;
+            if (lilv_port_is_a(plugin, lilv_port, lilv_event))
+                effect->ports[i]->hints |= HINT_OLD_EVENT_API;
             jack_port = jack_port_register(jack_client, port_name, JACK_DEFAULT_MIDI_TYPE, jack_flags, 0);
             if (jack_port == NULL)
             {
@@ -1425,13 +1674,17 @@ int effects_add(const char *uid, int instance)
     lilv_node_free(lilv_event);
     lilv_node_free(lilv_midi);
     lilv_node_free(lilv_default);
+    lilv_node_free(lilv_minimum);
+    lilv_node_free(lilv_maximum);
     lilv_node_free(lilv_mod_default);
+    lilv_node_free(lilv_mod_minimum);
+    lilv_node_free(lilv_mod_maximum);
     lilv_node_free(lilv_atom_port);
     lilv_node_free(lilv_worker_interface);
 
     /* Jack callbacks */
-    jack_set_process_callback(jack_client, &ProcessAudio, effect);
-    jack_set_buffer_size_callback(jack_client, &BufferSize, effect);
+    jack_set_process_callback(jack_client, ProcessAudio, effect);
+    jack_set_buffer_size_callback(jack_client, BufferSize, effect);
 
     lilv_instance_activate(lilv_instance);
 
@@ -1463,11 +1716,16 @@ int effects_add(const char *uid, int instance)
         lilv_node_free(lilv_integer);
         lilv_node_free(lilv_toggled);
         lilv_node_free(lilv_trigger);
+        lilv_node_free(lilv_logarithmic);
         lilv_node_free(lilv_output);
         lilv_node_free(lilv_event);
         lilv_node_free(lilv_midi);
         lilv_node_free(lilv_default);
+        lilv_node_free(lilv_minimum);
+        lilv_node_free(lilv_maximum);
         lilv_node_free(lilv_mod_default);
+        lilv_node_free(lilv_mod_minimum);
+        lilv_node_free(lilv_mod_maximum);
         lilv_node_free(lilv_atom_port);
         lilv_node_free(lilv_worker_interface);
 
@@ -1670,10 +1928,6 @@ int effects_disconnect(const char *portA, const char *portB)
 int effects_set_parameter(int effect_id, const char *control_symbol, float value)
 {
     port_t *port;
-    const LilvPlugin *lilv_plugin;
-    const LilvPort *lilv_port;
-    LilvNode *lilv_default, *lilv_minimum, *lilv_maximum;
-    float min = 0.0f, max = 1.0f;
 
     static int last_effect_id = -1;
     static const char *last_symbol = 0;
@@ -1690,8 +1944,10 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
         {
             if (last_symbol && strcmp(last_symbol, control_symbol) == 0)
             {
-                if (value > last_max) value = last_max;
-                else if (value < last_min) value = last_min;
+                if (value < last_min)
+                    value = last_min;
+                else if (value > last_max)
+                    value = last_max;
 
                 last_effect_id = effect_id;
 
@@ -1707,34 +1963,19 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
         port = FindEffectPortBySymbol(&(g_effects[effect_id]), control_symbol);
         if (port)
         {
-            lilv_port = port->lilv_port;
-            lilv_plugin = g_effects[effect_id].lilv_plugin;
-            lilv_port_get_range(lilv_plugin, lilv_port, &lilv_default, &lilv_minimum, &lilv_maximum);
+            last_min = port->min_value;
+            last_max = port->max_value;
 
-            if (lilv_node_is_float(lilv_minimum) ||
-                lilv_node_is_int(lilv_minimum) ||
-                lilv_node_is_bool(lilv_minimum))
-                min = lilv_node_as_float(lilv_minimum);
+            if (value < port->min_value)
+                value = port->min_value;
+            else if (value > port->max_value)
+                value = port->max_value;
 
-            if (lilv_node_is_float(lilv_maximum) ||
-                lilv_node_is_int(lilv_maximum) ||
-                lilv_node_is_bool(lilv_maximum))
-                max = lilv_node_as_float(lilv_maximum);
-
-            if (lilv_port_has_property(lilv_plugin, lilv_port, g_sample_rate_node))
-            {
-                min *= g_sample_rate;
-                max *= g_sample_rate;
-            }
-
-            if (value > max) value = max;
-            else if (value < min) value = min;
-
-            if (port->needs_smoothing)
+            if (port->hints & HINT_NEEDS_SMOOTH)
             {
                 port->target_value = value;
                 last_needs_smoothing = true;
-                last_buffer = 0;
+                last_buffer = NULL;
                 last_target_value = &port->target_value;
             }
             else
@@ -1742,13 +1983,13 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
                 *(port->buffer) = value;
                 last_needs_smoothing = false;
                 last_buffer = port->buffer;
-                last_target_value = 0;
+                last_target_value = NULL;
             }
 
             // stores the data of the current control
-            last_symbol = control_symbol;
-            last_min = min;
-            last_max = max;
+            last_symbol = port->symbol;
+            last_min = port->min_value;
+            last_max = port->max_value;
 
             return SUCCESS;
         }
@@ -1791,39 +2032,16 @@ int effects_set_property(int effect_id, const char *label, const char *value)
 int effects_get_parameter(int effect_id, const char *control_symbol, float *value)
 {
     const port_t *port;
-    LilvNode *lilv_default, *lilv_minimum, *lilv_maximum;
-    float min = 0.0, max = 0.0;
 
     if (InstanceExist(effect_id))
     {
         port = FindEffectPortBySymbol(&(g_effects[effect_id]), control_symbol);
         if (port)
         {
-           lilv_port_get_range(g_effects[effect_id].lilv_plugin, port->lilv_port, &lilv_default, &lilv_minimum, &lilv_maximum);
-
-           if (lilv_node_is_float(lilv_minimum) ||
-               lilv_node_is_int(lilv_minimum) ||
-               lilv_node_is_bool(lilv_minimum))
-               min = lilv_node_as_float(lilv_minimum);
-
-           if (lilv_node_is_float(lilv_maximum) ||
-               lilv_node_is_int(lilv_maximum) ||
-               lilv_node_is_bool(lilv_maximum))
-               max = lilv_node_as_float(lilv_maximum);
-
-           if (port->needs_smoothing)
+           if (port->hints & HINT_NEEDS_SMOOTH)
                (*value) = port->target_value;
            else
                (*value) = *(port->buffer);
-
-           if (lilv_port_has_property(g_effects[effect_id].lilv_plugin, port->lilv_port, g_sample_rate_node))
-           {
-               min *= g_sample_rate;
-               max *= g_sample_rate;
-           }
-
-           if ((*value) > max) (*value) = max;
-           else if ((*value) < min) (*value) = min;
 
            return SUCCESS;
         }
@@ -1898,12 +2116,10 @@ int effects_get_parameter_symbols(int effect_id, char** symbols)
 
     uint32_t i;
     effect_t *effect = &g_effects[effect_id];
-    const LilvNode* symbol_node;
 
     for (i = 0; i < effect->control_ports_count; i++)
     {
-        symbol_node = lilv_port_get_symbol(effect->lilv_plugin, effect->control_ports[i]->lilv_port);
-        symbols[i] = (char *) lilv_node_as_string(symbol_node);
+        symbols[i] = (char *) effect->control_ports[i]->symbol;
     }
 
     symbols[i] = NULL;
@@ -1941,53 +2157,23 @@ int effects_get_parameter_info(int effect_id, const char *control_symbol, float 
 
     uint32_t i;
     effect_t *effect = &g_effects[effect_id];
-    const char *symbol;
-    float def = 0.0, min = 0.0, max = 0.0;
 
     for (i = 0; i < effect->control_ports_count; i++)
     {
-        const LilvPlugin *lilv_plugin = effect->lilv_plugin;
-        const LilvPort *lilv_port = effect->control_ports[i]->lilv_port;
-        const LilvNode *symbol_node = lilv_port_get_symbol(lilv_plugin, lilv_port);
-        LilvNode *lilv_default, *lilv_minimum, *lilv_maximum;
-
-        symbol = lilv_node_as_string(symbol_node);
-
-        if (strcmp(control_symbol, symbol) == 0)
+        if (strcmp(control_symbol, effect->control_ports[i]->symbol) == 0)
         {
-            /* Get the parameter range */
-            lilv_port_get_range(lilv_plugin, lilv_port, &lilv_default, &lilv_minimum, &lilv_maximum);
+            (*range[0]) = effect->control_ports[i]->def_value;
+            (*range[1]) = effect->control_ports[i]->min_value;
+            (*range[2]) = effect->control_ports[i]->max_value;
 
-            if (lilv_node_is_float(lilv_minimum) ||
-                lilv_node_is_int(lilv_minimum) ||
-                lilv_node_is_bool(lilv_minimum))
-                min = lilv_node_as_float(lilv_minimum);
-
-            if (lilv_node_is_float(lilv_maximum) ||
-                lilv_node_is_int(lilv_maximum) ||
-                lilv_node_is_bool(lilv_maximum))
-                max = lilv_node_as_float(lilv_maximum);
-
-            if (lilv_node_is_float(lilv_default) ||
-                lilv_node_is_int(lilv_default) ||
-                lilv_node_is_bool(lilv_default))
-                def = lilv_node_as_float(lilv_default);
-
-            if (lilv_port_has_property(lilv_plugin, lilv_port, g_sample_rate_node))
-            {
-                min *= g_sample_rate;
-                max *= g_sample_rate;
-            }
-
-            (*range[0]) = def;
-            (*range[1]) = min;
-            (*range[2]) = max;
-            (*range[3]) = *(effect->control_ports[i]->buffer);
+            if (effect->control_ports[i]->hints & HINT_NEEDS_SMOOTH)
+                (*range[3]) = effect->control_ports[i]->target_value;
+            else
+                (*range[3]) = *(effect->control_ports[i]->buffer);
 
             /* Get the scale points */
-            LilvScalePoints *points;
-            points = lilv_port_get_scale_points(lilv_plugin, lilv_port);
-            if (points)
+            LilvScalePoints *points = effect->control_ports[i]->scale_points;
+            if (points != NULL)
             {
                 uint32_t j = 0;
                 LilvIter *iter;
@@ -2014,6 +2200,152 @@ int effects_get_parameter_info(int effect_id, const char *control_symbol, float 
     }
 
     return ERR_LV2_INVALID_PARAM_SYMBOL;
+}
+
+int effects_midi_learn(int effect_id, const char *control_symbol)
+{
+    const port_t *port;
+
+    if (!InstanceExist(effect_id))
+    {
+        return ERR_INSTANCE_NON_EXISTS;
+    }
+
+    pthread_mutex_lock(&g_midi_learning_mutex);
+    g_midi_learning = NULL;
+    pthread_mutex_unlock(&g_midi_learning_mutex);
+
+    // if already mapped set it to re-learn
+    for (int i = 0; i < MAX_MIDI_CC_ASSIGN; i++)
+    {
+        if (g_midi_cc_list[i].effect_id == MIDI_LEARN_NULL)
+            break;
+        if (g_midi_cc_list[i].effect_id == MIDI_LEARN_UNUSED)
+            continue;
+        if (g_midi_cc_list[i].effect_id != effect_id)
+            continue;
+        if (strcmp(g_midi_cc_list[i].symbol, control_symbol))
+            continue;
+
+        g_midi_cc_list[i].channel = -1;
+        g_midi_cc_list[i].controller = -1;
+
+        pthread_mutex_lock(&g_midi_learning_mutex);
+        g_midi_learning = &g_midi_cc_list[i];
+        pthread_mutex_unlock(&g_midi_learning_mutex);
+        return SUCCESS;
+    }
+
+    // Otherwise locate a free position on list and take it
+    port = FindEffectPortBySymbol(&(g_effects[effect_id]), control_symbol);
+
+    if (port == NULL)
+    {
+        return ERR_LV2_INVALID_PARAM_SYMBOL;
+    }
+
+    for (int i = 0; i < MAX_MIDI_CC_ASSIGN; i++)
+    {
+        if (INSTANCE_IS_VALID(g_midi_cc_list[i].effect_id))
+            continue;
+
+        g_midi_cc_list[i].channel = -1;
+        g_midi_cc_list[i].controller = -1;
+        g_midi_cc_list[i].effect_id = effect_id;
+        g_midi_cc_list[i].symbol = port->symbol;
+        g_midi_cc_list[i].port = port;
+
+        pthread_mutex_lock(&g_midi_learning_mutex);
+        g_midi_learning = &g_midi_cc_list[i];
+        pthread_mutex_unlock(&g_midi_learning_mutex);
+        return SUCCESS;
+    }
+
+    return ERR_MIDI_ASSIGNMENT_LIST_IS_FULL;
+}
+
+int effects_midi_map(int effect_id, const char *control_symbol, int channel, int controller)
+{
+    const port_t *port;
+
+    if (!InstanceExist(effect_id))
+    {
+        return ERR_INSTANCE_NON_EXISTS;
+    }
+
+    // update current mapping first if it exists
+    for (int i = 0; i < MAX_MIDI_CC_ASSIGN; i++)
+    {
+        if (g_midi_cc_list[i].effect_id == MIDI_LEARN_NULL)
+            break;
+        if (g_midi_cc_list[i].effect_id == MIDI_LEARN_UNUSED)
+            continue;
+        if (g_midi_cc_list[i].effect_id != effect_id)
+            continue;
+        if (strcmp(g_midi_cc_list[i].symbol, control_symbol))
+            continue;
+
+        g_midi_cc_list[i].channel = channel;
+        g_midi_cc_list[i].controller = controller;
+        return SUCCESS;
+    }
+
+    // Otherwise locate a free position on list and take it
+    port = FindEffectPortBySymbol(&(g_effects[effect_id]), control_symbol);
+
+    if (port == NULL)
+    {
+        return ERR_LV2_INVALID_PARAM_SYMBOL;
+    }
+
+    for (int i = 0; i < MAX_MIDI_CC_ASSIGN; i++)
+    {
+        if (INSTANCE_IS_VALID(g_midi_cc_list[i].effect_id))
+            continue;
+
+        g_midi_cc_list[i].channel = channel;
+        g_midi_cc_list[i].controller = controller;
+        g_midi_cc_list[i].effect_id = effect_id;
+        g_midi_cc_list[i].symbol = port->symbol;
+        g_midi_cc_list[i].port = port;
+        return SUCCESS;
+    }
+
+    return ERR_MIDI_ASSIGNMENT_LIST_IS_FULL;
+}
+
+int effects_midi_unmap(int effect_id, const char *control_symbol)
+{
+    if (!InstanceExist(effect_id))
+    {
+        return ERR_INSTANCE_NON_EXISTS;
+    }
+
+    for (int i = 0; i < MAX_MIDI_CC_ASSIGN; i++)
+    {
+        if (g_midi_cc_list[i].effect_id == MIDI_LEARN_NULL)
+            break;
+        if (g_midi_cc_list[i].effect_id == MIDI_LEARN_UNUSED)
+            continue;
+        if (g_midi_cc_list[i].effect_id != effect_id)
+            continue;
+        if (strcmp(g_midi_cc_list[i].symbol, control_symbol))
+            continue;
+
+        pthread_mutex_lock(&g_midi_learning_mutex);
+        if (g_midi_learning == &g_midi_cc_list[i])
+            g_midi_learning = NULL;
+        pthread_mutex_unlock(&g_midi_learning_mutex);
+
+        g_midi_cc_list[i].channel = -1;
+        g_midi_cc_list[i].controller = -1;
+        g_midi_cc_list[i].effect_id = MIDI_LEARN_UNUSED;
+        g_midi_cc_list[i].symbol = NULL;
+        g_midi_cc_list[i].port = NULL;
+        return SUCCESS;
+    }
+
+    return ERR_MIDI_PARAM_NOT_FOUND;
 }
 
 float effects_jack_cpu_load(void)
