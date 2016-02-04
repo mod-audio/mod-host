@@ -157,14 +157,12 @@ void socket_finish(void)
     // make local copies so that we can invalidate these vars first
     int serverfd   = g_serverfd;
     int fbserverfd = g_fbserverfd;
-    int fbclientfd = g_fbclientfd;
-    g_serverfd = g_fbserverfd = g_fbclientfd = -1;
+    g_serverfd = g_fbserverfd = -1;
 
     shutdown(serverfd, SHUT_RDWR);
     shutdown(fbserverfd, SHUT_RDWR);
     close(serverfd);
     close(fbserverfd);
-    close(fbclientfd);
 }
 
 
@@ -267,6 +265,10 @@ void socket_run(int exit_on_failure)
             break;
         }
     }
+
+    int fbclientfd = g_fbclientfd;
+    g_fbclientfd = -1;
+    close(fbclientfd);
 
     free(buffer);
     close(clientfd);
