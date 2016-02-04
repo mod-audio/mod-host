@@ -266,7 +266,7 @@ static void monitor_addr_set_cb(proto_t *proto)
 static void midi_learn_cb(proto_t *proto)
 {
     int resp;
-    resp = effects_midi_learn(atoi(proto->list[1]), proto->list[2]);
+    resp = !effects_midi_learn(atoi(proto->list[1]), proto->list[2]);
 
     char buffer[128];
     sprintf(buffer, "resp %i", resp);
@@ -276,7 +276,7 @@ static void midi_learn_cb(proto_t *proto)
 static void midi_map_cb(proto_t *proto)
 {
     int resp;
-    resp = effects_midi_map(atoi(proto->list[1]), proto->list[2], atoi(proto->list[3]), atoi(proto->list[4]));
+    resp = !effects_midi_map(atoi(proto->list[1]), proto->list[2], atoi(proto->list[3]), atoi(proto->list[4]));
 
     char buffer[128];
     sprintf(buffer, "resp %i", resp);
@@ -286,7 +286,7 @@ static void midi_map_cb(proto_t *proto)
 static void midi_unmap_cb(proto_t *proto)
 {
     int resp;
-    resp = effects_midi_unmap(atoi(proto->list[1]), proto->list[2]);
+    resp = !effects_midi_unmap(atoi(proto->list[1]), proto->list[2]);
 
     char buffer[128];
     sprintf(buffer, "resp %i", resp);

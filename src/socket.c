@@ -69,6 +69,8 @@
 static int g_serverfd, g_buffer_size;
 static void (*g_receive_cb)(msg_t *msg);
 
+// used for feedback
+static int g_fbserverfd, g_fbclientfd;
 
 /*
 ************************************************************************************************************************
@@ -100,7 +102,10 @@ static void (*g_receive_cb)(msg_t *msg);
 int socket_start(int port, int buffer_size)
 {
     g_serverfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (g_serverfd < 0)
+    g_fbserverfd = socket(AF_INET, SOCK_STREAM, 0);
+    g_fbclientfd = -1;
+
+    if (g_serverfd < 0 || g_fbserverfd < 0)
     {
         perror("socket error");
         return -1;
@@ -109,23 +114,32 @@ int socket_start(int port, int buffer_size)
     /* Allow the reuse of the socket address */
     int value = 1;
     setsockopt(g_serverfd, SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value));
+    setsockopt(g_fbserverfd, SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value));
 
     /* Startup the socket struct */
     struct sockaddr_in serv_addr;
     memset((char *) &serv_addr, 0, sizeof(serv_addr));
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_addr.s_addr = INADDR_ANY;
-    serv_addr.sin_port = htons(port);
 
-    /* Try assign the address */
+    /* Try assign the server address */
+    serv_addr.sin_port = htons(port);
     if (bind(g_serverfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0)
     {
         perror("bind error");
         return -1;
     }
 
-    /* Start listen the socket */
-    if (listen(g_serverfd, 0) < 0)
+    /* Try assign the receiver address */
+    serv_addr.sin_port = htons(port+1);
+    if (bind(g_fbserverfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0)
+    {
+        perror("bind error");
+        return -1;
+    }
+
+    /* Start listen the sockets */
+    if (listen(g_serverfd, 0) < 0 || listen(g_fbserverfd, 0) < 0)
     {
         perror("listen error");
         return -1;
@@ -140,8 +154,17 @@ int socket_start(int port, int buffer_size)
 
 void socket_finish(void)
 {
-    shutdown(g_serverfd, SHUT_RDWR);
-    close(g_serverfd);
+    // make local copies so that we can invalidate these vars first
+    int serverfd   = g_serverfd;
+    int fbserverfd = g_fbserverfd;
+    int fbclientfd = g_fbclientfd;
+    g_serverfd = g_fbserverfd = g_fbclientfd = -1;
+
+    shutdown(serverfd, SHUT_RDWR);
+    shutdown(fbserverfd, SHUT_RDWR);
+    close(serverfd);
+    close(fbserverfd);
+    close(fbclientfd);
 }
 
 
@@ -162,6 +185,14 @@ int socket_send(int destination, const char *buffer, int size)
     }
 
     return ret;
+}
+
+
+int socket_send_feedback(const char *buffer)
+{
+    if (g_fbclientfd < 0) return -1;
+
+    return socket_send(g_fbclientfd, buffer, strlen(buffer)+1);
 }
 
 
@@ -198,7 +229,20 @@ void socket_run(int exit_on_failure)
         exit(EXIT_FAILURE);
     }
 
-    while (1)
+    g_fbclientfd = accept(g_fbserverfd, (struct sockaddr *) &cli_addr, &clilen);
+    if (g_fbclientfd < 0)
+    {
+        free(buffer);
+        close(clientfd);
+
+        if (! exit_on_failure)
+            return;
+
+        perror("accept error");
+        exit(EXIT_FAILURE);
+    }
+
+    while (g_serverfd >= 0)
     {
         memset(buffer, 0, g_buffer_size);
         count = read(clientfd, buffer, g_buffer_size);
@@ -225,6 +269,5 @@ void socket_run(int exit_on_failure)
     }
 
     free(buffer);
-
     close(clientfd);
 }

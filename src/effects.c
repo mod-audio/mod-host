@@ -75,6 +75,7 @@
 /* Local */
 #include "effects.h"
 #include "monitor.h"
+#include "socket.h"
 #include "uridmap.h"
 #include "lv2_evbuf.h"
 #include "worker.h"
@@ -344,6 +345,7 @@ static int InstanceExist(int effect_id);
 static void AllocatePortBuffers(effect_t* effect);
 static int BufferSize(jack_nframes_t nframes, void* data);
 static int ProcessAudio(jack_nframes_t nframes, void *arg);
+static float UpdateValueFromMidi(midi_cc_t* mcc, jack_midi_data_t mvalue);
 static int ProcessMidi(jack_nframes_t nframes, void *arg);
 //static void JackPortRegistered(jack_port_id_t port, int reg, void *arg);
 static void GetFeatures(effect_t *effect);
@@ -642,9 +644,41 @@ static int ProcessAudio(jack_nframes_t nframes, void *arg)
     return 0;
 }
 
+static float UpdateValueFromMidi(midi_cc_t* mcc, jack_midi_data_t mvalue)
+{
+    if (!strcmp(mcc->symbol, g_bypass_port_symbol))
+    {
+        g_effects[mcc->effect_id].bypass = (mvalue < 64);
+        return (mvalue >= 64) ? 1.0f : 0.0f;
+    }
+    else
+    {
+        const port_t* port;
+        float value;
+
+        port  = mcc->port;
+        value = (float)mvalue;
+
+        // get percentage by dividing by max MIDI value
+        value /= 127.0f;
+
+        // make sure bounds are correct
+        if (value < 0.0f)
+            value = 0.0f;
+        else if (value > 1.0f)
+            value = 1.0f;
+
+        // real value
+        value = port->min_value + (port->max_value - port->min_value) * value;
+
+        // set param
+        effects_set_parameter(mcc->effect_id, mcc->symbol, value);
+        return value;
+    }
+}
+
 static int ProcessMidi(jack_nframes_t nframes, void *arg)
 {
-    const port_t *port;
     void *port_buf;
     jack_midi_event_t event;
     jack_nframes_t event_count;
@@ -653,6 +687,9 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
     bool handled;
 
     UNUSED_PARAM(arg);
+
+    char buf[256];
+    buf[255] = 0;
 
     port_buf = jack_port_get_buffer(g_jack_midi_cc_port, nframes);
     event_count = jack_midi_get_event_count(port_buf);
@@ -674,8 +711,6 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
         channel    = (event.buffer[0] & 0x0F);
         controller =  event.buffer[1];
 
-        printf("got midi %i %i\n", channel, controller);
-
         for (int i = 0; i < MAX_MIDI_CC_ASSIGN; i++)
         {
             if (g_midi_cc_list[i].effect_id == MIDI_LEARN_NULL)
@@ -687,41 +722,25 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
                 g_midi_cc_list[i].controller == controller)
             {
                 handled = true;
+                value = UpdateValueFromMidi(&g_midi_cc_list[i], event.buffer[2]);
 
-                if (!strcmp(g_midi_cc_list[i].symbol, g_bypass_port_symbol))
-                {
-                    g_effects[g_midi_cc_list[i].effect_id].bypass = (event.buffer[2] < 64);
-                }
-                else
-                {
-                    port  = g_midi_cc_list[i].port;
-                    value = event.buffer[2];
-
-                    // rvalue as multiplier
-                    value /= 127.0f;
-                    // make sure bounds are correct
-                    if (value < 0.0f)
-                        value = 0.0f;
-                    else if (value > 127.0f)
-                        value = 127.0f;
-                    // real value
-                    value = port->min_value + (port->max_value - port->min_value) * value;
-                    // set param
-                    effects_set_parameter(g_midi_cc_list[i].effect_id, g_midi_cc_list[i].symbol, value);
-                }
+                snprintf(buf, 255, "param_set %i %s %f", g_midi_cc_list[i].effect_id, g_midi_cc_list[i].symbol, value);
+                socket_send_feedback(buf);
                 break;
             }
         }
 
         if (! handled)
         {
-            printf("got midi %i %i | NOT FOUND\n", channel, controller);
-
             pthread_mutex_lock(&g_midi_learning_mutex);
 
             if (g_midi_learning != NULL)
             {
-                printf("MIDI CC auto-mapped to channel %i, CC %i\n", channel, controller);
+                value = UpdateValueFromMidi(g_midi_learning, event.buffer[2]);
+
+                snprintf(buf, 255, "midi_mapped %i %s %i %i %f", g_midi_learning->effect_id, g_midi_learning->symbol, channel, controller, value);
+                socket_send_feedback(buf);
+
                 g_midi_learning->channel    = channel;
                 g_midi_learning->controller = controller;
                 g_midi_learning = NULL;
@@ -1868,9 +1887,10 @@ int effects_remove(int effect_id)
         if (InstanceExist(j))
         {
             effect = &g_effects[j];
-            FreeFeatures(effect);
 
             if (jack_deactivate(effect->jack_client) != 0) return ERR_JACK_CLIENT_DEACTIVATION;
+
+            FreeFeatures(effect);
 
             if (effect->ports)
             {
@@ -1908,6 +1928,40 @@ int effects_remove(int effect_id)
 
 
             InstanceDelete(j);
+        }
+    }
+
+    pthread_mutex_lock(&g_midi_learning_mutex);
+    g_midi_learning = NULL;
+    pthread_mutex_unlock(&g_midi_learning_mutex);
+
+    if (effect_id == REMOVE_ALL)
+    {
+        for (int i = 0; i < MAX_MIDI_CC_ASSIGN; i++)
+        {
+            g_midi_cc_list[i].effect_id = MIDI_LEARN_NULL;
+            g_midi_cc_list[i].channel = -1;
+            g_midi_cc_list[i].controller = -1;
+            g_midi_cc_list[i].symbol = NULL;
+            g_midi_cc_list[i].port = NULL;
+        }
+    }
+    else
+    {
+        for (int i = 0; i < MAX_MIDI_CC_ASSIGN; i++)
+        {
+            if (g_midi_cc_list[i].effect_id == MIDI_LEARN_NULL)
+                break;
+            if (g_midi_cc_list[i].effect_id == MIDI_LEARN_UNUSED)
+                continue;
+            if (g_midi_cc_list[i].effect_id != effect_id)
+                continue;
+
+            g_midi_cc_list[i].effect_id = MIDI_LEARN_UNUSED;
+            g_midi_cc_list[i].channel = -1;
+            g_midi_cc_list[i].controller = -1;
+            g_midi_cc_list[i].symbol = NULL;
+            g_midi_cc_list[i].port = NULL;
         }
     }
 
