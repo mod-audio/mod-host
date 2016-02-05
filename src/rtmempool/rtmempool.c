@@ -197,13 +197,6 @@ static bool rtsafe_memory_pool_create2(RtMemPool_Handle* handlePtr,
 
 // ------------------------------------------------------------------------------------------------
 
-static unsigned char rtsafe_memory_pool_create_old(const char* poolName, size_t dataSize, size_t minPreallocated, size_t maxPreallocated, RtMemPool_Handle* handlePtr)
-{
-    return rtsafe_memory_pool_create2(handlePtr, poolName, dataSize, minPreallocated, maxPreallocated, 0);
-}
-
-// ------------------------------------------------------------------------------------------------
-
 bool rtsafe_memory_pool_create(RtMemPool_Handle* handlePtr,
                                const char* poolName,
                                size_t dataSize,

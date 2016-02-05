@@ -30,7 +30,7 @@ else
 endif
 
 # libraries
-LIBS = $(shell pkg-config --libs jack lilv-0) -lreadline -lpthread
+LIBS = $(shell pkg-config --libs jack lilv-0) -lreadline -lpthread -lrt
 
 # include paths
 INCS = $(shell pkg-config --cflags jack lilv-0)

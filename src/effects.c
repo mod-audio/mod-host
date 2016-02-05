@@ -322,9 +322,9 @@ static struct list_head g_rtsafe_list = LIST_HEAD_INIT(g_rtsafe_list);
 static RtMemPool_Handle g_rtsafe_mem_pool;
 static pthread_mutex_t  g_rtsafe_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-static volatile bool g_postevents_running;
-static sem_t         g_postevents_semaphore;
-static pthread_t     g_postevents_thread;
+static volatile int g_postevents_running; // 0: stopped, 1: running, -1: stopped & about to close mod-host
+static sem_t        g_postevents_semaphore;
+static pthread_t    g_postevents_thread;
 
 /* Jack */
 static jack_client_t *g_jack_global_client;
@@ -369,12 +369,12 @@ static const char* const g_bypass_port_symbol = BYPASS_PORT_SYMBOL;
 ************************************************************************************************************************
 */
 
-static void IdleRtSafeStuff(void);
-static void* RunPostPonedEvents(void* arg);
 static void InstanceDelete(int effect_id);
 static int InstanceExist(int effect_id);
 static void AllocatePortBuffers(effect_t* effect);
 static int BufferSize(jack_nframes_t nframes, void* data);
+static void RunPostPonedEvents(int ignored_effect_id);
+static void* PostPonedEventsThread(void* arg);
 static int ProcessAudio(jack_nframes_t nframes, void *arg);
 static float UpdateValueFromMidi(midi_cc_t* mcc, jack_midi_data_t mvalue);
 static int ProcessMidi(jack_nframes_t nframes, void *arg);
@@ -394,62 +394,6 @@ static void FreeFeatures(effect_t *effect);
 *           LOCAL FUNCTIONS
 ************************************************************************************************************************
 */
-
-void IdleRtSafeStuff(void)
-{
-    struct list_head queue;
-    INIT_LIST_HEAD(&queue);
-
-    pthread_mutex_lock(&g_rtsafe_mutex);
-    list_splice_tail(&g_rtsafe_list, &queue);
-    INIT_LIST_HEAD(&g_rtsafe_list);
-    pthread_mutex_unlock(&g_rtsafe_mutex);
-
-    char buf[256];
-    buf[255] = '\0';
-
-    struct list_head* it;
-    postponed_event_list_data* eventptr;
-    list_for_each(it, &queue)
-    {
-        eventptr = list_entry(it, postponed_event_list_data, siblings);
-
-        switch (eventptr->event.etype)
-        {
-        case POSTPONED_PARAM_SET:
-            snprintf(buf, 255, "param_set %i %s %f", eventptr->event.effect_id, eventptr->event.symbol, eventptr->event.value);
-            socket_send_feedback(buf);
-            break;
-
-        case POSTPONED_MIDI_MAP:
-            snprintf(buf, 255, "midi_mapped %i %s %i %i %f", eventptr->event.effect_id, eventptr->event.symbol,
-                                                             eventptr->event.channel, eventptr->event.controller,
-                                                             eventptr->event.value);
-            socket_send_feedback(buf);
-            break;
-        }
-
-        rtsafe_memory_pool_deallocate(g_rtsafe_mem_pool, eventptr);
-    }
-}
-
-static void* RunPostPonedEvents(void* arg)
-{
-    struct timespec timeout;
-
-    while (g_postevents_running)
-    {
-        clock_gettime(CLOCK_REALTIME, &timeout);
-        timeout.tv_sec += 1;
-
-        if (sem_timedwait(&g_postevents_semaphore, &timeout) == 0)
-            IdleRtSafeStuff();
-    }
-
-    return NULL;
-
-    UNUSED_PARAM(arg);
-}
 
 static void InstanceDelete(int effect_id)
 {
@@ -498,6 +442,72 @@ static int BufferSize(jack_nframes_t nframes, void* data)
     return SUCCESS;
 }
 
+void RunPostPonedEvents(int ignored_effect_id)
+{
+    struct list_head queue;
+    INIT_LIST_HEAD(&queue);
+
+    pthread_mutex_lock(&g_rtsafe_mutex);
+    list_splice_tail(&g_rtsafe_list, &queue);
+    INIT_LIST_HEAD(&g_rtsafe_list);
+    pthread_mutex_unlock(&g_rtsafe_mutex);
+
+    char buf[256];
+    buf[255] = '\0';
+
+    struct list_head* it;
+    postponed_event_list_data* eventptr;
+    list_for_each(it, &queue)
+    {
+        eventptr = list_entry(it, postponed_event_list_data, siblings);
+
+        if (eventptr->event.effect_id != ignored_effect_id)
+        {
+            switch (eventptr->event.etype)
+            {
+            case POSTPONED_PARAM_SET:
+                snprintf(buf, 255, "param_set %i %s %f", eventptr->event.effect_id,
+                                                         eventptr->event.symbol,
+                                                         eventptr->event.value);
+                socket_send_feedback(buf);
+                break;
+
+            case POSTPONED_MIDI_MAP:
+                snprintf(buf, 255, "midi_mapped %i %s %i %i %f", eventptr->event.effect_id,
+                                                                 eventptr->event.symbol,
+                                                                 eventptr->event.channel,
+                                                                 eventptr->event.controller,
+                                                                 eventptr->event.value);
+                socket_send_feedback(buf);
+                break;
+            }
+        }
+
+        rtsafe_memory_pool_deallocate(g_rtsafe_mem_pool, eventptr);
+    }
+}
+
+static void* PostPonedEventsThread(void* arg)
+{
+    struct timespec timeout;
+
+    while (g_postevents_running == 1)
+    {
+        clock_gettime(CLOCK_REALTIME, &timeout);
+        timeout.tv_sec += 1;
+
+        if (sem_timedwait(&g_postevents_semaphore, &timeout) != 0)
+            continue;
+
+        if (g_postevents_running == 1)
+            RunPostPonedEvents(-3); // as all effects are valid we set ignored_effect_id to -3
+    }
+
+    return NULL;
+
+    UNUSED_PARAM(arg);
+}
+
 static int ProcessAudio(jack_nframes_t nframes, void *arg)
 {
     effect_t *effect;
@@ -505,7 +515,7 @@ static int ProcessAudio(jack_nframes_t nframes, void *arg)
     float *buffer_out;
     unsigned int i;
 
-    if (arg == NULL) return SUCCESS;
+    if (arg == NULL) return 0;
     effect = arg;
 
     /* Prepare midi/event ports */
@@ -833,20 +843,35 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
 
         if (! handled)
         {
-            pthread_mutex_lock(&g_midi_learning_mutex);
+            int effect_id;
+            const char* symbol;
 
+            pthread_mutex_lock(&g_midi_learning_mutex);
             if (g_midi_learning != NULL)
             {
-                value = UpdateValueFromMidi(g_midi_learning, event.buffer[2]);
+                effect_id = g_midi_learning->effect_id;
+                symbol    = g_midi_learning->symbol;
+                value     = UpdateValueFromMidi(g_midi_learning, event.buffer[2]);
+                g_midi_learning->channel    = channel;
+                g_midi_learning->controller = controller;
+                g_midi_learning = NULL;
+            }
+            else
+            {
+                effect_id = -1;
+            }
+            pthread_mutex_unlock(&g_midi_learning_mutex);
 
+            if (effect_id != -1)
+            {
                 postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
 
                 if (posteventptr)
                 {
                     const postponed_event_t event = {
                         POSTPONED_MIDI_MAP,
-                        g_midi_learning->effect_id,
-                        g_midi_learning->symbol,
+                        effect_id,
+                        symbol,
                         channel,
                         controller,
                         value
@@ -859,13 +884,7 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
 
                     sem_post(&g_postevents_semaphore);
                 }
-
-                g_midi_learning->channel    = channel;
-                g_midi_learning->controller = controller;
-                g_midi_learning = NULL;
             }
-
-            pthread_mutex_unlock(&g_midi_learning_mutex);
         }
     }
 
@@ -1105,22 +1124,6 @@ int effects_init(void* client)
         jack_connect(g_jack_global_client, "ttymidi:MIDI_in", ourportname);
     }
 
-    {
-        const char** const midihwports = jack_get_ports(g_jack_global_client, "", JACK_DEFAULT_MIDI_TYPE, JackPortIsOutput|JackPortIsPhysical);
-
-        if (midihwports != NULL)
-        {
-            char ourport[128];
-            strcpy(ourport, jack_get_client_name(g_jack_global_client));
-            strcat(ourport, ":midi_in");
-
-            for (int i = 0; midihwports[i] != NULL; i++)
-                jack_connect(g_jack_global_client, midihwports[i], ourport);
-
-            jack_free(midihwports);
-        }
-    }
-
     /* Load all LV2 data */
     g_lv2_data = lilv_world_new();
     lilv_world_load_all(g_lv2_data);
@@ -1224,15 +1227,16 @@ int effects_init(void* client)
     }
     g_midi_learning = NULL;
 
-    g_postevents_running = true;
-    pthread_create(&g_postevents_thread, NULL, RunPostPonedEvents, NULL);
+    g_postevents_running = 1;
+    pthread_create(&g_postevents_thread, NULL, PostPonedEventsThread, NULL);
 
     return SUCCESS;
 }
 
 int effects_finish(int close_client)
 {
-    g_postevents_running = false;
+    g_postevents_running = -1;
+    sem_post(&g_postevents_semaphore);
     pthread_join(g_postevents_thread, NULL);
 
     effects_remove(REMOVE_ALL);
@@ -1980,6 +1984,14 @@ int effects_remove(int effect_id)
     int j, start, end;
     effect_t *effect;
 
+    // stop postpone events thread
+    if (g_postevents_running == 1)
+    {
+        g_postevents_running = 0;
+        sem_post(&g_postevents_semaphore);
+        pthread_join(g_postevents_thread, NULL);
+    }
+
     if (effect_id == REMOVE_ALL)
     {
         /* Disconnect the system connections */
@@ -2072,6 +2084,11 @@ int effects_remove(int effect_id)
             g_midi_cc_list[i].symbol = NULL;
             g_midi_cc_list[i].port = NULL;
         }
+
+        // reset all events
+        pthread_mutex_lock(&g_rtsafe_mutex);
+        INIT_LIST_HEAD(&g_rtsafe_list);
+        pthread_mutex_unlock(&g_rtsafe_mutex);
     }
     else
     {
@@ -2090,6 +2107,16 @@ int effects_remove(int effect_id)
             g_midi_cc_list[i].symbol = NULL;
             g_midi_cc_list[i].port = NULL;
         }
+
+        // flush events for all effects except this one
+        RunPostPonedEvents(effect_id);
+    }
+
+    // start thread again
+    if (g_postevents_running == 0)
+    {
+        g_postevents_running = 1;
+        pthread_create(&g_postevents_thread, NULL, PostPonedEventsThread, NULL);
     }
 
     return SUCCESS;
