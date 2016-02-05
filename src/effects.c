@@ -80,6 +80,8 @@
 #include "lv2_evbuf.h"
 #include "worker.h"
 #include "symap.h"
+#include "rtmempool/list.h"
+#include "rtmempool/rtmempool.h"
 
 
 /*
@@ -139,6 +141,11 @@ enum {
     BUF_SIZE_FIXED_FEATURE,
     BUF_SIZE_BOUNDED_FEATURE,
     FEATURE_TERMINATOR
+};
+
+enum PostPonedEventType {
+    POSTPONED_PARAM_SET,
+    POSTPONED_MIDI_MAP
 };
 
 
@@ -277,6 +284,20 @@ typedef struct MIDI_CC_T {
     const port_t* port;
 } midi_cc_t;
 
+typedef struct POSTPONED_EVENT_T {
+    enum PostPonedEventType etype;
+    int effect_id;
+    const char* symbol;
+    int8_t channel;
+    int8_t controller;
+    float value;
+} postponed_event_t;
+
+typedef struct POSTPONED_EVENT_LIST_DATA {
+    postponed_event_t event;
+    struct list_head siblings;
+} postponed_event_list_data;
+
 
 /*
 ************************************************************************************************************************
@@ -296,6 +317,14 @@ typedef struct MIDI_CC_T {
 
 static effect_t g_effects[MAX_INSTANCES];
 static midi_cc_t g_midi_cc_list[MAX_MIDI_CC_ASSIGN], *g_midi_learning;
+
+static struct list_head g_rtsafe_list = LIST_HEAD_INIT(g_rtsafe_list);
+static RtMemPool_Handle g_rtsafe_mem_pool;
+static pthread_mutex_t  g_rtsafe_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static volatile bool g_postevents_running;
+static sem_t         g_postevents_semaphore;
+static pthread_t     g_postevents_thread;
 
 /* Jack */
 static jack_client_t *g_jack_global_client;
@@ -340,6 +369,8 @@ static const char* const g_bypass_port_symbol = BYPASS_PORT_SYMBOL;
 ************************************************************************************************************************
 */
 
+static void IdleRtSafeStuff(void);
+static void* RunPostPonedEvents(void* arg);
 static void InstanceDelete(int effect_id);
 static int InstanceExist(int effect_id);
 static void AllocatePortBuffers(effect_t* effect);
@@ -363,6 +394,62 @@ static void FreeFeatures(effect_t *effect);
 *           LOCAL FUNCTIONS
 ************************************************************************************************************************
 */
+
+void IdleRtSafeStuff(void)
+{
+    struct list_head queue;
+    INIT_LIST_HEAD(&queue);
+
+    pthread_mutex_lock(&g_rtsafe_mutex);
+    list_splice_tail(&g_rtsafe_list, &queue);
+    INIT_LIST_HEAD(&g_rtsafe_list);
+    pthread_mutex_unlock(&g_rtsafe_mutex);
+
+    char buf[256];
+    buf[255] = '\0';
+
+    struct list_head* it;
+    postponed_event_list_data* eventptr;
+    list_for_each(it, &queue)
+    {
+        eventptr = list_entry(it, postponed_event_list_data, siblings);
+
+        switch (eventptr->event.etype)
+        {
+        case POSTPONED_PARAM_SET:
+            snprintf(buf, 255, "param_set %i %s %f", eventptr->event.effect_id, eventptr->event.symbol, eventptr->event.value);
+            socket_send_feedback(buf);
+            break;
+
+        case POSTPONED_MIDI_MAP:
+            snprintf(buf, 255, "midi_mapped %i %s %i %i %f", eventptr->event.effect_id, eventptr->event.symbol,
+                                                             eventptr->event.channel, eventptr->event.controller,
+                                                             eventptr->event.value);
+            socket_send_feedback(buf);
+            break;
+        }
+
+        rtsafe_memory_pool_deallocate(g_rtsafe_mem_pool, eventptr);
+    }
+}
+
+static void* RunPostPonedEvents(void* arg)
+{
+    struct timespec timeout;
+
+    while (g_postevents_running)
+    {
+        clock_gettime(CLOCK_REALTIME, &timeout);
+        timeout.tv_sec += 1;
+
+        if (sem_timedwait(&g_postevents_semaphore, &timeout) == 0)
+            IdleRtSafeStuff();
+    }
+
+    return NULL;
+
+    UNUSED_PARAM(arg);
+}
 
 static void InstanceDelete(int effect_id)
 {
@@ -687,9 +774,6 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
 
     UNUSED_PARAM(arg);
 
-    char buf[256];
-    buf[255] = 0;
-
     port_buf = jack_port_get_buffer(g_jack_midi_cc_port, nframes);
     event_count = jack_midi_get_event_count(port_buf);
 
@@ -723,8 +807,26 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
                 handled = true;
                 value = UpdateValueFromMidi(&g_midi_cc_list[i], event.buffer[2]);
 
-                snprintf(buf, 255, "param_set %i %s %f", g_midi_cc_list[i].effect_id, g_midi_cc_list[i].symbol, value);
-                socket_send_feedback(buf);
+                postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
+
+                if (posteventptr)
+                {
+                    const postponed_event_t event = {
+                        POSTPONED_PARAM_SET,
+                        g_midi_cc_list[i].effect_id,
+                        g_midi_cc_list[i].symbol,
+                        -1, -1,
+                        value
+                    };
+                    memcpy(&posteventptr->event, &event, sizeof(postponed_event_t));
+
+                    pthread_mutex_lock(&g_rtsafe_mutex);
+                    list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
+                    pthread_mutex_unlock(&g_rtsafe_mutex);
+
+                    sem_post(&g_postevents_semaphore);
+                }
+
                 break;
             }
         }
@@ -737,8 +839,26 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
             {
                 value = UpdateValueFromMidi(g_midi_learning, event.buffer[2]);
 
-                snprintf(buf, 255, "midi_mapped %i %s %i %i %f", g_midi_learning->effect_id, g_midi_learning->symbol, channel, controller, value);
-                socket_send_feedback(buf);
+                postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
+
+                if (posteventptr)
+                {
+                    const postponed_event_t event = {
+                        POSTPONED_MIDI_MAP,
+                        g_midi_learning->effect_id,
+                        g_midi_learning->symbol,
+                        channel,
+                        controller,
+                        value
+                    };
+                    memcpy(&posteventptr->event, &event, sizeof(postponed_event_t));
+
+                    pthread_mutex_lock(&g_rtsafe_mutex);
+                    list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
+                    pthread_mutex_unlock(&g_rtsafe_mutex);
+
+                    sem_post(&g_postevents_semaphore);
+                }
 
                 g_midi_learning->channel    = channel;
                 g_midi_learning->controller = controller;
@@ -922,6 +1042,27 @@ int effects_init(void* client)
         return ERR_JACK_CLIENT_CREATION;
     }
 
+    INIT_LIST_HEAD(&g_rtsafe_list);
+
+    if (!rtsafe_memory_pool_create(&g_rtsafe_mem_pool, "mod-host", sizeof(postponed_event_list_data), MAX_MIDI_CC_ASSIGN, MAX_MIDI_CC_ASSIGN))
+    {
+        fprintf(stderr, "can't allocate realtime-safe memory pool\n");
+        if (client == NULL)
+            jack_client_close(g_jack_global_client);
+        return ERR_MEMORY_ALLOCATION;
+    }
+
+    sem_init(&g_postevents_semaphore, 0, 0);
+    /*
+    if (!)
+    {
+        fprintf(stderr, "can't initialize post-events semaphore, errno:%i\n", errno);
+        if (client == NULL)
+            jack_client_close(g_jack_global_client);
+        return ERR_MEMORY_ALLOCATION;
+    }
+    */
+
     /* check if we want parameter smoothing */
     const char* const smooth_var = getenv("MOD_HOST_SMOOTH_CONTROLS");
     g_smooth_controls = smooth_var != NULL && !strcmp(smooth_var, "1");
@@ -1083,11 +1224,17 @@ int effects_init(void* client)
     }
     g_midi_learning = NULL;
 
+    g_postevents_running = true;
+    pthread_create(&g_postevents_thread, NULL, RunPostPonedEvents, NULL);
+
     return SUCCESS;
 }
 
 int effects_finish(int close_client)
 {
+    g_postevents_running = false;
+    pthread_join(g_postevents_thread, NULL);
+
     effects_remove(REMOVE_ALL);
     if (g_capture_ports) jack_free(g_capture_ports);
     if (g_playback_ports) jack_free(g_playback_ports);
@@ -1095,6 +1242,8 @@ int effects_finish(int close_client)
     symap_free(g_symap);
     lilv_node_free(g_sample_rate_node);
     lilv_world_free(g_lv2_data);
+    rtsafe_memory_pool_destroy(g_rtsafe_mem_pool);
+    sem_destroy(&g_postevents_semaphore);
 
     return SUCCESS;
 }

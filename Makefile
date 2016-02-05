@@ -45,7 +45,7 @@ INCS += -DHAVE_NEW_LILV
 endif
 
 # source and object files
-SRC = $(wildcard $(SRC_DIR)/*.$(EXT))
+SRC = $(wildcard $(SRC_DIR)/*.$(EXT)) $(SRC_DIR)/rtmempool/rtmempool.c
 OBJ = $(SRC:.$(EXT)=.o)
 
 # default build
