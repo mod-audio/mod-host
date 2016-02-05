@@ -957,7 +957,7 @@ int effects_init(void* client)
     }
 
     /* Connect serial midi port if it exists */
-    if (jack_port_by_name(g_jack_global_client, "ttymidi:MIDI_in") != nullptr)
+    if (jack_port_by_name(g_jack_global_client, "ttymidi:MIDI_in") != NULL)
     {
         char ourportname[255];
         sprintf(ourportname, "%s:midi_in", jack_get_client_name(g_jack_global_client));
