@@ -584,6 +584,10 @@ int main(int argc, char **argv)
     /* Verbose */
     protocol_verbose(verbose);
 
+    /* Report ready */
+    printf("mod-host ready!\n");
+    fflush(stdout);
+
     while (1) socket_run(1);
 
     socket_finish();
