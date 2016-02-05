@@ -347,7 +347,6 @@ static int BufferSize(jack_nframes_t nframes, void* data);
 static int ProcessAudio(jack_nframes_t nframes, void *arg);
 static float UpdateValueFromMidi(midi_cc_t* mcc, jack_midi_data_t mvalue);
 static int ProcessMidi(jack_nframes_t nframes, void *arg);
-//static void JackPortRegistered(jack_port_id_t port, int reg, void *arg);
 static void GetFeatures(effect_t *effect);
 static void FreeFeatures(effect_t *effect);
 
@@ -753,33 +752,6 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
     return 0;
 }
 
-#if 0
-static void JackPortRegistered(jack_port_id_t port, int reg, void *arg)
-{
-    UNUSED_PARAM(arg);
-
-    if (reg == 0)
-        return;
-
-    // WARNING: the following code assumes JACK2
-
-    const jack_port_t* jackport = jack_port_by_id(g_jack_global_client, port);
-
-    if (jackport == NULL)
-        return;
-    if ((jack_port_flags(jackport) & (JackPortIsOutput|JackPortIsPhysical)) == 0)
-        return;
-    if (strcmp(jack_port_type(jackport), JACK_DEFAULT_MIDI_TYPE))
-        return;
-
-    char ourport[128];
-    strcpy(ourport, jack_get_client_name(g_jack_global_client));
-    strcat(ourport, ":midi_in");
-
-    //jack_connect(g_jack_global_client, jack_port_name(jackport), ourport);
-}
-#endif
-
 static void GetFeatures(effect_t *effect)
 {
     const LV2_Feature **features = (const LV2_Feature**) calloc(FEATURE_TERMINATOR+1, sizeof(LV2_Feature*));
@@ -964,7 +936,6 @@ int effects_init(void* client)
 
     /* Set jack callbacks */
     jack_set_process_callback(g_jack_global_client, ProcessMidi, NULL);
-    //jack_set_port_registration_callback(g_jack_global_client, JackPortRegistered, NULL);
 
     /* Register midi input jack port */
     g_jack_midi_cc_port = jack_port_register(g_jack_global_client, "midi_in", JACK_DEFAULT_MIDI_TYPE, JackPortIsInput, 0);
@@ -985,7 +956,14 @@ int effects_init(void* client)
         return ERR_JACK_CLIENT_ACTIVATION;
     }
 
-    /* Connect midi cc port to all HW inputs */
+    /* Connect serial midi port if it exists */
+    if (jack_port_by_name(g_jack_global_client, "ttymidi:MIDI_in") != nullptr)
+    {
+        char ourportname[255];
+        sprintf(ourportname, "%s:midi_in", jack_get_client_name(g_jack_global_client));
+        jack_connect(g_jack_global_client, "ttymidi:MIDI_in", ourportname);
+    }
+
     {
         const char** const midihwports = jack_get_ports(g_jack_global_client, "", JACK_DEFAULT_MIDI_TYPE, JackPortIsOutput|JackPortIsPhysical);
 
