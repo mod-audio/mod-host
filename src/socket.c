@@ -66,11 +66,11 @@
 ************************************************************************************************************************
 */
 
-static int g_serverfd, g_buffer_size;
+static int g_serverfd, g_fbserverfd, g_buffer_size;
 static void (*g_receive_cb)(msg_t *msg);
 
-// used for feedback
-static int g_fbserverfd, g_fbclientfd;
+// socket clients, for safe external shutdown
+static int g_clientfd, g_fbclientfd;
 
 /*
 ************************************************************************************************************************
@@ -103,7 +103,7 @@ int socket_start(int port, int buffer_size)
 {
     g_serverfd = socket(AF_INET, SOCK_STREAM, 0);
     g_fbserverfd = socket(AF_INET, SOCK_STREAM, 0);
-    g_fbclientfd = -1;
+    g_clientfd = g_fbclientfd = -1;
 
     if (g_serverfd < 0 || g_fbserverfd < 0)
     {
@@ -159,6 +159,11 @@ void socket_finish(void)
     int fbserverfd = g_fbserverfd;
     g_serverfd = g_fbserverfd = -1;
 
+    // shutdown clients, but don't close them
+    shutdown(g_clientfd, SHUT_RDWR);
+    shutdown(g_fbclientfd, SHUT_RDWR);
+
+    // shutdown and close servers
     shutdown(serverfd, SHUT_RDWR);
     shutdown(fbserverfd, SHUT_RDWR);
     close(serverfd);
@@ -196,7 +201,7 @@ int socket_send_feedback(const char *buffer)
 
 void socket_run(int exit_on_failure)
 {
-    int clientfd, count;
+    int clientfd, fbclientfd, count;
     struct sockaddr_in cli_addr;
     socklen_t clilen;
     char *buffer;
@@ -227,8 +232,8 @@ void socket_run(int exit_on_failure)
         exit(EXIT_FAILURE);
     }
 
-    g_fbclientfd = accept(g_fbserverfd, (struct sockaddr *) &cli_addr, &clilen);
-    if (g_fbclientfd < 0)
+    fbclientfd = accept(g_fbserverfd, (struct sockaddr *) &cli_addr, &clilen);
+    if (fbclientfd < 0)
     {
         free(buffer);
         close(clientfd);
@@ -239,6 +244,9 @@ void socket_run(int exit_on_failure)
         perror("accept error");
         exit(EXIT_FAILURE);
     }
+
+    g_clientfd = clientfd;
+    g_fbclientfd = fbclientfd;
 
     while (g_serverfd >= 0)
     {
@@ -266,10 +274,11 @@ void socket_run(int exit_on_failure)
         }
     }
 
-    int fbclientfd = g_fbclientfd;
     g_fbclientfd = -1;
     close(fbclientfd);
 
-    free(buffer);
+    g_clientfd = -1;
     close(clientfd);
+
+    free(buffer);
 }
