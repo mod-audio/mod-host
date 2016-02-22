@@ -331,7 +331,7 @@ static jack_client_t *g_jack_global_client;
 static jack_nframes_t g_sample_rate, g_block_length;
 static const char **g_capture_ports, **g_playback_ports;
 static size_t g_midi_buffer_size;
-static jack_port_t *g_jack_midi_cc_port;
+static jack_port_t *g_jack_ports[5]; // in1, in2, out1, out2, midi-in
 
 /* LV2 and Lilv */
 static LilvWorld *g_lv2_data;
@@ -375,9 +375,9 @@ static void AllocatePortBuffers(effect_t* effect);
 static int BufferSize(jack_nframes_t nframes, void* data);
 static void RunPostPonedEvents(int ignored_effect_id);
 static void* PostPonedEventsThread(void* arg);
-static int ProcessAudio(jack_nframes_t nframes, void *arg);
+static int ProcessPlugin(jack_nframes_t nframes, void *arg);
 static float UpdateValueFromMidi(midi_cc_t* mcc, jack_midi_data_t mvalue);
-static int ProcessMidi(jack_nframes_t nframes, void *arg);
+static int ProcessMonitorMidi(jack_nframes_t nframes, void *arg);
 static void GetFeatures(effect_t *effect);
 static void FreeFeatures(effect_t *effect);
 
@@ -508,7 +508,7 @@ static void* PostPonedEventsThread(void* arg)
     UNUSED_PARAM(arg);
 }
 
-static int ProcessAudio(jack_nframes_t nframes, void *arg)
+static int ProcessPlugin(jack_nframes_t nframes, void *arg)
 {
     effect_t *effect;
     const float *buffer_in;
@@ -773,19 +773,24 @@ static float UpdateValueFromMidi(midi_cc_t* mcc, jack_midi_data_t mvalue)
     }
 }
 
-static int ProcessMidi(jack_nframes_t nframes, void *arg)
+static int ProcessMonitorMidi(jack_nframes_t nframes, void *arg)
 {
-    void *port_buf;
+    // bypass monitor ports
+    memcpy(jack_port_get_buffer(g_jack_ports[2], nframes),
+           jack_port_get_buffer(g_jack_ports[0], nframes),
+           sizeof(jack_nframes_t)*nframes);
+
+    memcpy(jack_port_get_buffer(g_jack_ports[3], nframes),
+           jack_port_get_buffer(g_jack_ports[1], nframes),
+           sizeof(jack_nframes_t)*nframes);
+
     jack_midi_event_t event;
-    jack_nframes_t event_count;
     int8_t channel, controller;
     float value;
     bool handled;
 
-    UNUSED_PARAM(arg);
-
-    port_buf = jack_port_get_buffer(g_jack_midi_cc_port, nframes);
-    event_count = jack_midi_get_event_count(port_buf);
+    void *const port_buf = jack_port_get_buffer(g_jack_ports[4], nframes);
+    const jack_nframes_t event_count = jack_midi_get_event_count(port_buf);
 
     for (jack_nframes_t i = 0 ; i < event_count; i++)
     {
@@ -889,6 +894,8 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
     }
 
     return 0;
+
+    UNUSED_PARAM(arg);
 }
 
 static void GetFeatures(effect_t *effect)
@@ -1095,13 +1102,18 @@ int effects_init(void* client)
     g_midi_buffer_size = jack_port_type_get_buffer_size(g_jack_global_client, JACK_DEFAULT_MIDI_TYPE);
 
     /* Set jack callbacks */
-    jack_set_process_callback(g_jack_global_client, ProcessMidi, NULL);
+    jack_set_process_callback(g_jack_global_client, ProcessMonitorMidi, NULL);
 
-    /* Register midi input jack port */
-    g_jack_midi_cc_port = jack_port_register(g_jack_global_client, "midi_in", JACK_DEFAULT_MIDI_TYPE, JackPortIsInput, 0);
-    if (!g_jack_midi_cc_port)
+    /* Register jack ports */
+    g_jack_ports[0] = jack_port_register(g_jack_global_client, "monitor-in_1", JACK_DEFAULT_AUDIO_TYPE, JackPortIsInput, 0);
+    g_jack_ports[1] = jack_port_register(g_jack_global_client, "monitor-in_2", JACK_DEFAULT_AUDIO_TYPE, JackPortIsInput, 0);
+    g_jack_ports[2] = jack_port_register(g_jack_global_client, "monitor-out_1", JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput, 0);
+    g_jack_ports[3] = jack_port_register(g_jack_global_client, "monitor-out_2", JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput, 0);
+    g_jack_ports[4] = jack_port_register(g_jack_global_client, "midi_in", JACK_DEFAULT_MIDI_TYPE, JackPortIsInput, 0);
+
+    if (! (g_jack_ports[0] && g_jack_ports[1] && g_jack_ports[2] && g_jack_ports[3] && g_jack_ports[4]))
     {
-        fprintf(stderr, "can't register global jack midi-in port\n");
+        fprintf(stderr, "can't register global jack ports\n");
         if (client == NULL)
             jack_client_close(g_jack_global_client);
         return ERR_JACK_PORT_REGISTER;
@@ -1116,11 +1128,20 @@ int effects_init(void* client)
         return ERR_JACK_CLIENT_ACTIVATION;
     }
 
+    /* connect monitor output ports */
+    char ourportname[255];
+    const char* const ourclientname = jack_get_client_name(g_jack_global_client);
+
+    sprintf(ourportname, "%s:monitor-out_1", ourclientname);
+    jack_connect(g_jack_global_client, ourportname, "system:playback_1");
+
+    sprintf(ourportname, "%s:monitor-out_2", ourclientname);
+    jack_connect(g_jack_global_client, ourportname, "system:playback_2");
+
     /* Connect serial midi port if it exists */
     if (jack_port_by_name(g_jack_global_client, "ttymidi:MIDI_in") != NULL)
     {
-        char ourportname[255];
-        sprintf(ourportname, "%s:midi_in", jack_get_client_name(g_jack_global_client));
+        sprintf(ourportname, "%s:midi_in", ourclientname);
         jack_connect(g_jack_global_client, "ttymidi:MIDI_in", ourportname);
     }
 
@@ -1846,7 +1867,7 @@ int effects_add(const char *uid, int instance)
     lilv_node_free(lilv_worker_interface);
 
     /* Jack callbacks */
-    jack_set_process_callback(jack_client, ProcessAudio, effect);
+    jack_set_process_callback(jack_client, ProcessPlugin, effect);
     jack_set_buffer_size_callback(jack_client, BufferSize, effect);
 
     lilv_instance_activate(lilv_instance);
