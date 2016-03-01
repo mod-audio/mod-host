@@ -709,7 +709,22 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
 
             if (effect->bypass)
             {
-                // TODO: bypass MIDI events if there is no audio or cv
+                if (effect->input_audio_ports_count == 0 &&
+                    effect->output_audio_ports_count == 0 &&
+                    effect->input_event_ports_count == effect->output_event_ports_count)
+                {
+                    void* bufIn = jack_port_get_buffer(effect->input_event_ports[p]->jack_port, nframes);
+                    jack_midi_event_t ev;
+
+                    for (i = 0; i < jack_midi_get_event_count(bufIn); ++i)
+                    {
+                        if (jack_midi_event_get(&ev, bufIn, i) == 0)
+                        {
+                            if (jack_midi_event_write(buf, ev.time, ev.buffer, ev.size) != 0)
+                                break;
+                        }
+                    }
+                }
             }
             else
             {
