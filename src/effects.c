@@ -1266,8 +1266,6 @@ int effects_init(void* client)
     g_postevents_running = 1;
     pthread_create(&g_postevents_thread, NULL, PostPonedEventsThread, NULL);
 
-    printf("DBEUG: jack running at %u\n", g_sample_rate);
-
     return SUCCESS;
 }
 
@@ -1412,8 +1410,7 @@ int effects_add(const char *uid, int instance)
     GetFeatures(effect);
 
     /* Create and activate the plugin instance */
-    printf("DEBUG: Plugin running at %u\n", g_sample_rate);
-    lilv_instance = lilv_plugin_instantiate(plugin, (double)g_sample_rate, effect->features);
+    lilv_instance = lilv_plugin_instantiate(plugin, g_sample_rate, effect->features);
 
     if (!lilv_instance)
     {
