@@ -760,7 +760,7 @@ static float UpdateValueFromMidi(midi_cc_t* mcc, jack_midi_data_t mvalue)
     if (!strcmp(mcc->symbol, g_bypass_port_symbol))
     {
         g_effects[mcc->effect_id].bypass = (mvalue < 64);
-        return (mvalue >= 64) ? 1.0f : 0.0f;
+        return (mvalue < 64) ? 1.0f : 0.0f;
     }
     else
     {
