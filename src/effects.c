@@ -1150,8 +1150,14 @@ int effects_init(void* client)
     sprintf(ourportname, "%s:monitor-out_1", ourclientname);
     jack_connect(g_jack_global_client, ourportname, "system:playback_1");
 
+    if (jack_port_by_name(g_jack_global_client, "mod-peakmeter:in_3") != NULL)
+        jack_connect(g_jack_global_client, ourportname, "mod-peakmeter:in_3");
+
     sprintf(ourportname, "%s:monitor-out_2", ourclientname);
     jack_connect(g_jack_global_client, ourportname, "system:playback_2");
+
+    if (jack_port_by_name(g_jack_global_client, "mod-peakmeter:in_4") != NULL)
+        jack_connect(g_jack_global_client, ourportname, "mod-peakmeter:in_4");
 
     /* Connect serial midi port if it exists */
     if (jack_port_by_name(g_jack_global_client, "ttymidi:MIDI_in") != NULL)
