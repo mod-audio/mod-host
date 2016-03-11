@@ -318,9 +318,9 @@ typedef struct POSTPONED_EVENT_LIST_DATA {
 static effect_t g_effects[MAX_INSTANCES];
 static midi_cc_t g_midi_cc_list[MAX_MIDI_CC_ASSIGN], *g_midi_learning;
 
-static struct list_head g_rtsafe_list = LIST_HEAD_INIT(g_rtsafe_list);
+static struct list_head g_rtsafe_list;
 static RtMemPool_Handle g_rtsafe_mem_pool;
-static pthread_mutex_t  g_rtsafe_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t  g_rtsafe_mutex;
 
 static volatile int g_postevents_running; // 0: stopped, 1: running, -1: stopped & about to close mod-host
 static sem_t        g_postevents_semaphore;
@@ -357,8 +357,8 @@ static LV2_Feature g_buf_size_features[3] = {
     { LV2_BUF_SIZE__boundedBlockLength, NULL }
     };
 
-static bool g_smooth_controls = false;
-static pthread_mutex_t g_midi_learning_mutex = PTHREAD_MUTEX_INITIALIZER;
+static bool g_smooth_controls;
+static pthread_mutex_t g_midi_learning_mutex;
 
 static const char* const g_bypass_port_symbol = BYPASS_PORT_SYMBOL;
 
@@ -1093,6 +1093,15 @@ int effects_init(void* client)
         return ERR_MEMORY_ALLOCATION;
     }
 
+    pthread_mutexattr_t atts;
+    pthread_mutexattr_init(&atts);
+    pthread_mutexattr_setprotocol(&atts, PTHREAD_PRIO_INHERIT);
+
+    pthread_mutex_init(&g_rtsafe_mutex, &atts);
+    pthread_mutex_init(&g_midi_learning_mutex, &atts);
+
+    pthread_mutexattr_destroy(&atts);
+
     sem_init(&g_postevents_semaphore, 0, 0);
     /*
     if (!)
@@ -1290,6 +1299,8 @@ int effects_finish(int close_client)
     lilv_world_free(g_lv2_data);
     rtsafe_memory_pool_destroy(g_rtsafe_mem_pool);
     sem_destroy(&g_postevents_semaphore);
+    pthread_mutex_destroy(&g_rtsafe_mutex);
+    pthread_mutex_destroy(&g_midi_learning_mutex);
 
     return SUCCESS;
 }
