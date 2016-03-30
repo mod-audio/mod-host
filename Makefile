@@ -17,7 +17,7 @@ SHAREDIR = $(PREFIX)/share
 MANDIR = $(SHAREDIR)/man/man1/
 
 # default compiler and linker flags
-CFLAGS += -O3 -Wall -Wextra -c -std=gnu99 -fPIC
+CFLAGS += -O3 -Wall -Wextra -c -std=gnu99 -fPIC -D_GNU_SOURCE
 LDFLAGS += -Wl,--no-undefined
 
 # debug mode compiler and linker flags
