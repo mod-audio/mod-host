@@ -247,7 +247,8 @@ typedef struct EFFECT_T {
 
     jack_ringbuffer_t *events_buffer;
 
-    int bypass;
+    bool bypass;
+    bool was_bypassed;
     bool has_triggers; // avoids itenerating controls each cycle
 } effect_t;
 
@@ -523,8 +524,39 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
     {
         lv2_evbuf_reset(effect->input_event_ports[i]->evbuf, true);
 
-        if (!effect->bypass)
+        if (effect->bypass)
         {
+            // effect is now bypassed, but wasn't before
+            if (!effect->was_bypassed)
+            {
+                LV2_Evbuf_Iterator iter = lv2_evbuf_begin(effect->input_event_ports[i]->evbuf);
+
+                uint8_t bufNotesOff[3] = {
+                    0xB0, // CC
+                    0x7B, // all-notes-off
+                    0
+                };
+                uint8_t bufSoundOff[3] = {
+                    0xB0, // CC
+                    0x78, // all-sound-off
+                    0
+                };
+
+                int j=0;
+
+                do {
+                    if (!lv2_evbuf_write(&iter, 0, 0, g_urids.midi_MidiEvent, 3, bufNotesOff))
+                        break;
+                    if (!lv2_evbuf_write(&iter, 0, 0, g_urids.midi_MidiEvent, 3, bufSoundOff))
+                        break;
+                    bufNotesOff[0] += 1;
+                    bufSoundOff[0] += 1;
+                } while (++j < 16);
+            }
+        }
+        else
+        {
+            // non-bypassed, processing
             LV2_Evbuf_Iterator iter = lv2_evbuf_begin(effect->input_event_ports[i]->evbuf);
 
             /* Write Jack MIDI input */
@@ -751,6 +783,8 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
                 *(effect->input_control_ports[i]->buffer) = effect->input_control_ports[i]->def_value;
         }
     }
+
+    effect->was_bypassed = effect->bypass;
 
     return 0;
 }
@@ -1875,7 +1909,8 @@ int effects_add(const char *uid, int instance)
     lilv_nodes_free(properties);
 
     /* Default value of bypass */
-    effect->bypass = 0;
+    effect->bypass = false;
+    effect->was_bypassed = false;
 
     lilv_node_free(lilv_audio);
     lilv_node_free(lilv_control);
