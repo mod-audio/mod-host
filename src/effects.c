@@ -1129,7 +1129,9 @@ int effects_init(void* client)
 
     pthread_mutexattr_t atts;
     pthread_mutexattr_init(&atts);
+#ifdef __ARM_ARCH_7A__
     pthread_mutexattr_setprotocol(&atts, PTHREAD_PRIO_INHERIT);
+#endif
 
     pthread_mutex_init(&g_rtsafe_mutex, &atts);
     pthread_mutex_init(&g_midi_learning_mutex, &atts);
