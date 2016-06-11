@@ -1948,6 +1948,21 @@ int effects_add(const char *uid, int instance)
         jack_ringbuffer_mlock(effect->events_buffer);
     }
 
+    /* simulate a jack process callback, needed for plugins that do non-rt-safe stuff on their 1st run */
+    for (i = 0; i < effect->input_event_ports_count; i++)
+        lv2_evbuf_reset(effect->input_event_ports[i]->evbuf, true);
+
+    for (i = 0; i < effect->output_event_ports_count; i++)
+        lv2_evbuf_reset(effect->output_event_ports[i]->evbuf, false);
+
+    for (i = 0; i < effect->input_audio_ports_count; i++)
+        memset(effect->input_audio_ports[i]->buffer, 0, (sizeof(float) * g_block_length));
+
+    for (i = 0; i < effect->input_cv_ports_count; i++)
+        memset(effect->input_cv_ports[i]->buffer, 0, (sizeof(float) * g_block_length));
+
+    lilv_instance_run(effect->lilv_instance, g_block_length);
+
     /* Try activate the Jack client */
     if (jack_activate(jack_client) != 0)
     {
