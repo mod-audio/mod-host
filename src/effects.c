@@ -379,6 +379,7 @@ static void* PostPonedEventsThread(void* arg);
 static int ProcessPlugin(jack_nframes_t nframes, void *arg);
 static float UpdateValueFromMidi(midi_cc_t* mcc, jack_midi_data_t mvalue);
 static int ProcessMonitorMidi(jack_nframes_t nframes, void *arg);
+static void JackThreadInit(void *arg);
 static void GetFeatures(effect_t *effect);
 static void FreeFeatures(effect_t *effect);
 
@@ -947,6 +948,40 @@ static int ProcessMonitorMidi(jack_nframes_t nframes, void *arg)
     UNUSED_PARAM(arg);
 }
 
+static void JackThreadInit(void* arg)
+{
+/* Disable denormal numbers in floating point calculation.
+ * Denormal numbers happen often in IIR filters, and it can be very slow.
+ */
+/* Taken from cras/src/dsp/dsp_util.c in Chromium OS code.
+ * Copyright (c) 2013 The Chromium OS Authors. */
+#if defined(__i386__) || defined(__x86_64__)
+        unsigned int mxcsr;
+        mxcsr = __builtin_ia32_stmxcsr();
+        __builtin_ia32_ldmxcsr(mxcsr | 0x8040);
+#elif defined(__aarch64__)
+        uint64_t cw;
+        __asm__ __volatile__ (
+                "mrs    %0, fpcr                            \n"
+                "orr    %0, %0, #0x1000000                  \n"
+                "msr    fpcr, %0                            \n"
+                "isb                                        \n"
+                : "=r"(cw) :: "memory");
+#elif defined(__arm__)
+        uint32_t cw;
+        __asm__ __volatile__ (
+                "vmrs   %0, fpscr                           \n"
+                "orr    %0, %0, #0x1000000                  \n"
+                "vmsr   fpscr, %0                           \n"
+                : "=r"(cw) :: "memory");
+#else
+#warning "Don't know how to disable denormals. Performace may suffer."
+#endif
+    return;
+
+    UNUSED_PARAM(arg);
+}
+
 static void GetFeatures(effect_t *effect)
 {
     const LV2_Feature **features = (const LV2_Feature**) calloc(FEATURE_TERMINATOR+1, sizeof(LV2_Feature*));
@@ -1162,6 +1197,7 @@ int effects_init(void* client)
     g_midi_buffer_size = jack_port_type_get_buffer_size(g_jack_global_client, JACK_DEFAULT_MIDI_TYPE);
 
     /* Set jack callbacks */
+    jack_set_thread_init_callback(g_jack_global_client, JackThreadInit, NULL);
     jack_set_process_callback(g_jack_global_client, ProcessMonitorMidi, NULL);
 
     /* Register jack ports */
@@ -1936,6 +1972,7 @@ int effects_add(const char *uid, int instance)
     lilv_node_free(lilv_worker_interface);
 
     /* Jack callbacks */
+    jack_set_thread_init_callback(jack_client, JackThreadInit, effect);
     jack_set_process_callback(jack_client, ProcessPlugin, effect);
     jack_set_buffer_size_callback(jack_client, BufferSize, effect);
 
