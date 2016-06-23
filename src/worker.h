@@ -18,14 +18,14 @@
 #include <lv2/lv2plug.in/ns/ext/worker/worker.h>
 #include <jack/ringbuffer.h>
 
-#include "zix/sem.h"
+#include "mod-semaphore.h"
 #include "zix/thread.h"
 
 typedef struct WORKER_T {
     jack_ringbuffer_t * requests;
     jack_ringbuffer_t * responses;
     void *response;
-    ZixSem sem;
+    sem_t sem;
     ZixThread thread;
     const LV2_Worker_Interface *iface;
     LilvInstance *instance;

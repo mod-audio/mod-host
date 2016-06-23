@@ -18,31 +18,31 @@
 
 #include "uridmap.h"
 #include "symap.h"
-#include "zix/sem.h"
+#include "mod-semaphore.h"
 #include "zix/thread.h"
 
 #define UNUSED_PARAM(var) do { (void)(var); } while (0)
 
-static ZixSem symap_lock;
+static sem_t symap_lock;
 
 void urid_sem_init(void)
 {
-    zix_sem_init(&symap_lock, 1);
+    sem_init(&symap_lock, 0, 1);
 }
 
 LV2_URID map_urid(LV2_URID_Map_Handle handle, const char* uri)
 {
-    zix_sem_wait(&symap_lock);
+    sem_wait(&symap_lock);
     const LV2_URID id = symap_map(handle, uri);
-    zix_sem_post(&symap_lock);
+    sem_post(&symap_lock);
     return id;
 }
 
 const char* unmap_urid(LV2_URID_Unmap_Handle handle, LV2_URID urid)
 {
-    zix_sem_wait(&symap_lock);
+    sem_wait(&symap_lock);
     const char *uri = symap_unmap(handle, urid);
-    zix_sem_post(&symap_lock);
+    sem_post(&symap_lock);
     return uri;
 }
 

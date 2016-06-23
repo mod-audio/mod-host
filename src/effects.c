@@ -491,14 +491,9 @@ void RunPostPonedEvents(int ignored_effect_id)
 
 static void* PostPonedEventsThread(void* arg)
 {
-    struct timespec timeout;
-
     while (g_postevents_running == 1)
     {
-        clock_gettime(CLOCK_REALTIME, &timeout);
-        timeout.tv_sec += 1;
-
-        if (sem_timedwait(&g_postevents_semaphore, &timeout) != 0)
+        if (sem_timedwait_secs(&g_postevents_semaphore, 1) != 0)
             continue;
 
         if (g_postevents_running == 1)
@@ -1511,7 +1506,7 @@ int effects_add(const char *uid, int instance)
 
     /* Worker */
     effect->worker.instance = lilv_instance;
-    zix_sem_init(&effect->worker.sem, 0);
+    sem_init(&effect->worker.sem, 0, 0);
     effect->worker.iface = NULL;
     effect->worker.requests  = NULL;
     effect->worker.responses = NULL;
