@@ -43,6 +43,10 @@
 #include <fftw3.h>
 #endif
 
+#ifdef HAVE_NE10
+#include <NE10.h>
+#endif
+
 #ifdef HAVE_NEW_LILV
 #include <lilv/lilv.h>
 #else
@@ -425,6 +429,10 @@ static int mod_host_init(jack_client_t* client, int socket_port)
     /* Make fftw thread-safe */
     fftw_make_planner_thread_safe();
     fftwf_make_planner_thread_safe();
+#endif
+#ifdef HAVE_NE10
+    /* Initialize ne10 */
+    ne10_init();
 #endif
 
     /* Setup the protocol */
