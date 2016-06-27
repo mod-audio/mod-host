@@ -95,8 +95,8 @@
 #define MIDI_LEARN_UNUSED -1
 #define MIDI_LEARN_NULL   -2
 
-#define BYPASS_PORT_SYMBOL ":bypass"
-#define PRESET_PORT_SYMBOL ":preset"
+#define BYPASS_PORT_SYMBOL  ":bypass"
+#define PRESETS_PORT_SYMBOL ":presets"
 
 
 /*
@@ -426,8 +426,8 @@ static void AllocatePortBuffers(effect_t* effect)
         effect->event_ports[i]->evbuf = lv2_evbuf_new(
             g_midi_buffer_size,
             (effect->event_ports[i]->hints & HINT_OLD_EVENT_API) ? LV2_EVBUF_EVENT : LV2_EVBUF_ATOM,
-            g_urid_map.map(g_urid_map.handle, lilv_node_as_string(lilv_new_uri(g_lv2_data, LV2_ATOM__Chunk))),
-            g_urid_map.map(g_urid_map.handle, lilv_node_as_string(lilv_new_uri(g_lv2_data, LV2_ATOM__Sequence))));
+            g_urid_map.map(g_urid_map.handle, LV2_ATOM__Chunk),
+            g_urid_map.map(g_urid_map.handle, LV2_ATOM__Sequence));
 
         LV2_Atom_Sequence *buf;
         buf = lv2_evbuf_get_buffer(effect->event_ports[i]->evbuf);
@@ -439,7 +439,6 @@ static int BufferSize(jack_nframes_t nframes, void* data)
 {
     effect_t *effect = data;
     g_block_length = nframes;
-    g_midi_buffer_size = jack_port_type_get_buffer_size(effect->jack_client, JACK_DEFAULT_MIDI_TYPE);
     AllocatePortBuffers(effect);
     return SUCCESS;
 }
