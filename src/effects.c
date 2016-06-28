@@ -301,7 +301,7 @@ typedef struct POSTPONED_EVENT_LIST_DATA {
 
 typedef struct POSTPONED_CACHED_SYMBOL_LIST_DATA {
     int effect_id;
-    char symbol[256];
+    char symbol[MAX_CHAR_BUF_SIZE+1];
     struct list_head siblings;
 } postponed_cached_symbol_list_data;
 
@@ -459,15 +459,15 @@ void RunPostPonedEvents(int ignored_effect_id)
     INIT_LIST_HEAD(&g_rtsafe_list);
     pthread_mutex_unlock(&g_rtsafe_mutex);
 
-    char buf[256];
-    buf[255] = '\0';
+    char buf[MAX_CHAR_BUF_SIZE+1];
+    buf[MAX_CHAR_BUF_SIZE] = '\0';
 
     struct list_head *it, *it2;
     postponed_event_list_data* eventptr;
 
     int last_effect_id = -1;
-    char last_port_symbol[256];
-    last_port_symbol[255] = '\0';
+    char last_port_symbol[MAX_CHAR_BUF_SIZE+1];
+    last_port_symbol[MAX_CHAR_BUF_SIZE] = '\0';
 
     struct list_head cached_symbols;
     INIT_LIST_HEAD(&cached_symbols);
@@ -511,28 +511,28 @@ void RunPostPonedEvents(int ignored_effect_id)
                     if (cached_symbol)
                     {
                         cached_symbol->effect_id = eventptr->event.effect_id;
-                        strncpy(cached_symbol->symbol, eventptr->event.symbol, 255);
-                        cached_symbol->symbol[255] = '\0';
+                        strncpy(cached_symbol->symbol, eventptr->event.symbol, MAX_CHAR_BUF_SIZE);
+                        cached_symbol->symbol[MAX_CHAR_BUF_SIZE] = '\0';
                         list_add_tail(&cached_symbol->siblings, &cached_symbols);
                     }
                 }
 
-                snprintf(buf, 255, "param_set %i %s %f", eventptr->event.effect_id,
-                                                         eventptr->event.symbol,
-                                                         eventptr->event.value);
+                snprintf(buf, MAX_CHAR_BUF_SIZE, "param_set %i %s %f", eventptr->event.effect_id,
+                                                                       eventptr->event.symbol,
+                                                                       eventptr->event.value);
                 socket_send_feedback(buf);
 
                 // save for fast checkup next time
                 last_effect_id = eventptr->event.effect_id;
-                strncpy(last_port_symbol, eventptr->event.symbol, 255);
+                strncpy(last_port_symbol, eventptr->event.symbol, MAX_CHAR_BUF_SIZE);
                 break;
 
             case POSTPONED_MIDI_MAP:
-                snprintf(buf, 255, "midi_mapped %i %s %i %i %f", eventptr->event.effect_id,
-                                                                 eventptr->event.symbol,
-                                                                 eventptr->event.channel,
-                                                                 eventptr->event.controller,
-                                                                 eventptr->event.value);
+                snprintf(buf, MAX_CHAR_BUF_SIZE, "midi_mapped %i %s %i %i %f", eventptr->event.effect_id,
+                                                                               eventptr->event.symbol,
+                                                                               eventptr->event.channel,
+                                                                               eventptr->event.controller,
+                                                                               eventptr->event.value);
                 socket_send_feedback(buf);
                 break;
             }
@@ -1278,16 +1278,18 @@ int effects_init(void* client)
     }
 
     /* connect monitor output ports */
-    char ourportname[255];
+    char ourportname[MAX_CHAR_BUF_SIZE+1];
+    ourportname[MAX_CHAR_BUF_SIZE] = '\0';
+
     const char* const ourclientname = jack_get_client_name(g_jack_global_client);
 
-    sprintf(ourportname, "%s:monitor-out_1", ourclientname);
+    snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:monitor-out_1", ourclientname);
     jack_connect(g_jack_global_client, ourportname, "system:playback_1");
 
     if (jack_port_by_name(g_jack_global_client, "mod-peakmeter:in_3") != NULL)
         jack_connect(g_jack_global_client, ourportname, "mod-peakmeter:in_3");
 
-    sprintf(ourportname, "%s:monitor-out_2", ourclientname);
+    snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:monitor-out_2", ourclientname);
     jack_connect(g_jack_global_client, ourportname, "system:playback_2");
 
     if (jack_port_by_name(g_jack_global_client, "mod-peakmeter:in_4") != NULL)
@@ -1296,7 +1298,7 @@ int effects_init(void* client)
     /* Connect serial midi port if it exists */
     if (jack_port_by_name(g_jack_global_client, "ttymidi:MIDI_in") != NULL)
     {
-        sprintf(ourportname, "%s:midi_in", ourclientname);
+        snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:midi_in", ourclientname);
         jack_connect(g_jack_global_client, "ttymidi:MIDI_in", ourportname);
     }
 
@@ -1433,7 +1435,7 @@ int effects_finish(int close_client)
 int effects_add(const char *uid, int instance)
 {
     unsigned int i, ports_count;
-    char effect_name[32], port_name[256];
+    char effect_name[32], port_name[MAX_CHAR_BUF_SIZE+1];
     float *audio_buffer, *cv_buffer, *control_buffer;
     jack_port_t *jack_port;
     uint32_t audio_ports_count, input_audio_ports_count, output_audio_ports_count;
@@ -1442,6 +1444,9 @@ int effects_add(const char *uid, int instance)
     uint32_t event_ports_count, input_event_ports_count, output_event_ports_count;
     effect_t *effect;
     int32_t error;
+
+    effect_name[31] = '\0';
+    port_name[MAX_CHAR_BUF_SIZE] = '\0';
 
     /* Jack */
     jack_client_t *jack_client;
@@ -1507,7 +1512,7 @@ int effects_add(const char *uid, int instance)
     lilv_worker_interface = NULL;
 
     /* Create a client to Jack */
-    sprintf(effect_name, "effect_%i", instance);
+    snprintf(effect_name, 31, "effect_%i", instance);
     jack_client = jack_client_open(effect_name, JackNoStartServer, &jack_status);
 
     if (!jack_client)
@@ -1639,7 +1644,7 @@ int effects_add(const char *uid, int instance)
         effect->ports[i]->symbol = lilv_node_as_string(symbol_node);
         effect->ports[i]->scale_points = NULL;
 
-        sprintf(port_name, "%s", lilv_node_as_string(symbol_node));
+        snprintf(port_name, MAX_CHAR_BUF_SIZE, "%s", lilv_node_as_string(symbol_node));
 
         /* Port flow */
         effect->ports[i]->flow = FLOW_UNKNOWN;

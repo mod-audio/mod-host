@@ -75,6 +75,9 @@ enum {
 #define MAX_INSTANCES           10000
 #define MAX_MIDI_CC_ASSIGN      1024
 
+// used for local stack variables
+#define MAX_CHAR_BUF_SIZE       255
+
 
 /*
 ************************************************************************************************************************
