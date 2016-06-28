@@ -299,6 +299,12 @@ typedef struct POSTPONED_EVENT_LIST_DATA {
     struct list_head siblings;
 } postponed_event_list_data;
 
+typedef struct POSTPONED_CACHED_SYMBOL_LIST_DATA {
+    int effect_id;
+    char symbol[256];
+    struct list_head siblings;
+} postponed_cached_symbol_list_data;
+
 
 /*
 ************************************************************************************************************************
@@ -456,9 +462,18 @@ void RunPostPonedEvents(int ignored_effect_id)
     char buf[256];
     buf[255] = '\0';
 
-    struct list_head* it;
+    struct list_head *it, *it2;
     postponed_event_list_data* eventptr;
-    list_for_each(it, &queue)
+
+    int last_effect_id = -1;
+    char last_port_symbol[256];
+    last_port_symbol[255] = '\0';
+
+    struct list_head cached_symbols;
+    INIT_LIST_HEAD(&cached_symbols);
+
+    // itenerate backwards
+    list_for_each_prev(it, &queue)
     {
         eventptr = list_entry(it, postponed_event_list_data, siblings);
 
@@ -467,10 +482,49 @@ void RunPostPonedEvents(int ignored_effect_id)
             switch (eventptr->event.etype)
             {
             case POSTPONED_PARAM_SET:
+                if (last_effect_id != -1)
+                {
+                    if (eventptr->event.effect_id == last_effect_id &&
+                        strcmp(eventptr->event.symbol, last_port_symbol) == 0)
+                    {
+                        // already received this event, like just now
+                        continue;
+                    }
+
+                    // we received some events, but last one was different
+                    // we might be getting interleaved events, so let's check if it's there
+                    list_for_each(it2, &cached_symbols)
+                    {
+                        postponed_cached_symbol_list_data* const cached_symbol = list_entry(it2, postponed_cached_symbol_list_data, siblings);
+
+                        if (cached_symbol->effect_id == eventptr->event.effect_id &&
+                            strcmp(cached_symbol->symbol, eventptr->event.symbol) == 0)
+                        {
+                            // haha! found you little bastard!
+                            continue;
+                        }
+                    }
+
+                    // we'll process this event because it's the "last" of its type
+                    // also add it to the list of received events
+                    postponed_cached_symbol_list_data* const cached_symbol = malloc(sizeof(postponed_cached_symbol_list_data));
+                    if (cached_symbol)
+                    {
+                        cached_symbol->effect_id = eventptr->event.effect_id;
+                        strncpy(cached_symbol->symbol, eventptr->event.symbol, 255);
+                        cached_symbol->symbol[255] = '\0';
+                        list_add_tail(&cached_symbol->siblings, &cached_symbols);
+                    }
+                }
+
                 snprintf(buf, 255, "param_set %i %s %f", eventptr->event.effect_id,
                                                          eventptr->event.symbol,
                                                          eventptr->event.value);
                 socket_send_feedback(buf);
+
+                // save for fast checkup next time
+                last_effect_id = eventptr->event.effect_id;
+                strncpy(last_port_symbol, eventptr->event.symbol, 255);
                 break;
 
             case POSTPONED_MIDI_MAP:
