@@ -890,7 +890,7 @@ static int ProcessMonitorMidi(jack_nframes_t nframes, void *arg)
     jack_midi_event_t event;
     int8_t channel, controller;
     float value;
-    bool handled;
+    bool handled, needs_post = false;
 
     void *const port_buf = jack_port_get_buffer(g_jack_ports[4], nframes);
     const jack_nframes_t event_count = jack_midi_get_event_count(port_buf);
@@ -942,7 +942,7 @@ static int ProcessMonitorMidi(jack_nframes_t nframes, void *arg)
                     list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
                     pthread_mutex_unlock(&g_rtsafe_mutex);
 
-                    sem_post(&g_postevents_semaphore);
+                    needs_post = true;
                 }
 
                 break;
@@ -990,11 +990,14 @@ static int ProcessMonitorMidi(jack_nframes_t nframes, void *arg)
                     list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
                     pthread_mutex_unlock(&g_rtsafe_mutex);
 
-                    sem_post(&g_postevents_semaphore);
+                    needs_post = true;
                 }
             }
         }
     }
+
+    if (needs_post)
+        sem_post(&g_postevents_semaphore);
 
     return 0;
 
