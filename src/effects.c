@@ -855,23 +855,38 @@ static float UpdateValueFromMidi(midi_cc_t* mcc, jack_midi_data_t mvalue)
         const port_t* port;
         float value;
 
-        port  = mcc->port;
-        value = (float)mvalue;
+        port = mcc->port;
 
-        // get percentage by dividing by max MIDI value
-        value /= 127.0f;
+        // TODO: support custom ranges
 
-        // make sure bounds are correct
-        if (value < 0.0f)
-            value = 0.0f;
-        else if (value > 1.0f)
-            value = 1.0f;
+        if (port->hints & HINT_TRIGGER)
+        {
+            // now triggered, always maximum
+            value = port->max_value;
+        }
+        else if (port->hints & HINT_TOGGLE)
+        {
+            // toggle, always min or max
+            value = mvalue >= 64 ? port->max_value : port->min_value;
+        }
+        else
+        {
+            // get percentage by dividing by max MIDI value
+            value  = (float)mvalue;
+            value /= 127.0f;
 
-        // real value
-        value = port->min_value + (port->max_value - port->min_value) * value;
+            // make sure bounds are correct
+            if (value < 0.0f)
+                value = 0.0f;
+            else if (value > 1.0f)
+                value = 1.0f;
 
-        // set param
-        effects_set_parameter(mcc->effect_id, mcc->symbol, value);
+            // real value
+            value = port->min_value + (port->max_value - port->min_value) * value;
+        }
+
+        // set param value
+        *(port->buffer) = value;
         return value;
     }
 }
