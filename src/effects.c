@@ -126,7 +126,6 @@ enum PortHints {
     HINT_TOGGLE        = 1 << 2,
     HINT_TRIGGER       = 1 << 3,
     HINT_LOGARITHMIC   = 1 << 4,
-    HINT_NEEDS_SMOOTH  = 1 << 5,
     // events
     HINT_OLD_EVENT_API = 1 << 0,
 };
@@ -168,7 +167,6 @@ typedef struct PORT_T {
     float min_value;
     float max_value;
     float def_value;
-    float target_value; // used for smoothing
     LilvScalePoints* scale_points;
 } port_t;
 
@@ -364,7 +362,6 @@ static LV2_Feature g_buf_size_features[3] = {
     { LV2_BUF_SIZE__boundedBlockLength, NULL }
     };
 
-static bool g_smooth_controls;
 static pthread_mutex_t g_midi_learning_mutex;
 
 static const char* const g_bypass_port_symbol = BYPASS_PORT_SYMBOL;
@@ -649,18 +646,6 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
             const LV2_Atom* const ratom = (const LV2_Atom*)fatom;
             lv2_evbuf_write(&e, nframes, 0, ratom->type, ratom->size,
                                 LV2_ATOM_BODY_CONST(ratom));
-        }
-    }
-
-    if (g_smooth_controls)
-    {
-        for (i = 0; i < effect->input_control_ports_count; i++)
-        {
-            if (effect->input_control_ports[i]->hints & HINT_NEEDS_SMOOTH)
-            {
-                *(effect->input_control_ports[i]->buffer) =
-                    (*(effect->input_control_ports[i]->buffer) * 5.0f + effect->input_control_ports[i]->target_value) / 6.0f;
-            }
         }
     }
 
@@ -1150,8 +1135,6 @@ static const void* GetPortValueForState(const char* symbol, void* user_data,
     {
         *size = sizeof(float);
         *type = g_urids.atom_Float;
-        if (port->hints & HINT_NEEDS_SMOOTH)
-            return &port->target_value;
         return port->buffer;
     }
     return NULL;
@@ -1251,10 +1234,6 @@ int effects_init(void* client)
         return ERR_MEMORY_ALLOCATION;
     }
     */
-
-    /* check if we want parameter smoothing */
-    const char* const smooth_var = getenv("MOD_HOST_SMOOTH_CONTROLS");
-    g_smooth_controls = smooth_var != NULL && !strcmp(smooth_var, "1");
 
     /* Get the system ports */
     g_capture_ports = jack_get_ports(g_jack_global_client, "system", JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput);
@@ -1792,14 +1771,6 @@ int effects_add(const char *uid, int instance)
             if (lilv_port_has_property(plugin, lilv_port, lilv_logarithmic))
             {
                 effect->ports[i]->hints |= HINT_LOGARITHMIC;
-            }
-
-            if (g_smooth_controls &&
-                lilv_port_is_a(plugin, lilv_port, lilv_input) &&
-                (effect->ports[i]->hints & (HINT_ENUMERATION|HINT_INTEGER|HINT_TOGGLE|HINT_TRIGGER)) == 0)
-            {
-                effect->ports[i]->hints |= HINT_NEEDS_SMOOTH;
-                effect->ports[i]->target_value = def_value;
             }
 
             effect->ports[i]->jack_port = NULL;
@@ -2366,12 +2337,8 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
     port_t *port;
 
     static int last_effect_id = -1;
-    static const char *last_symbol = 0;
-    static float *last_buffer = 0, last_min, last_max;
-
-    // parameter smoothing for float inputs
-    static bool last_needs_smoothing = false;
-    static float *last_target_value = 0;
+    static const char *last_symbol = NULL;
+    static float *last_buffer = NULL, last_min, last_max;
 
     if (InstanceExist(effect_id))
     {
@@ -2385,13 +2352,7 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
                 else if (value > last_max)
                     value = last_max;
 
-                last_effect_id = effect_id;
-
-                if (last_needs_smoothing)
-                    *last_target_value = value;
-                else
-                    *last_buffer = value;
-
+                *last_buffer = value;
                 return SUCCESS;
             }
         }
@@ -2399,34 +2360,18 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
         port = FindEffectPortBySymbol(&(g_effects[effect_id]), control_symbol);
         if (port)
         {
-            last_min = port->min_value;
-            last_max = port->max_value;
-
-            if (value < port->min_value)
-                value = port->min_value;
-            else if (value > port->max_value)
-                value = port->max_value;
-
-            if (port->hints & HINT_NEEDS_SMOOTH)
-            {
-                port->target_value = value;
-                last_needs_smoothing = true;
-                last_buffer = NULL;
-                last_target_value = &port->target_value;
-            }
-            else
-            {
-                *(port->buffer) = value;
-                last_needs_smoothing = false;
-                last_buffer = port->buffer;
-                last_target_value = NULL;
-            }
-
             // stores the data of the current control
-            last_symbol = port->symbol;
             last_min = port->min_value;
             last_max = port->max_value;
+            last_buffer = port->buffer;
+            last_symbol = port->symbol;
 
+            if (value < last_min)
+                value = last_min;
+            else if (value > last_max)
+                value = last_max;
+
+            *last_buffer = value;
             return SUCCESS;
         }
 
@@ -2474,11 +2419,7 @@ int effects_get_parameter(int effect_id, const char *control_symbol, float *valu
         port = FindEffectPortBySymbol(&(g_effects[effect_id]), control_symbol);
         if (port)
         {
-           if (port->hints & HINT_NEEDS_SMOOTH)
-               (*value) = port->target_value;
-           else
-               (*value) = *(port->buffer);
-
+           (*value) = *(port->buffer);
            return SUCCESS;
         }
 
@@ -2601,11 +2542,7 @@ int effects_get_parameter_info(int effect_id, const char *control_symbol, float 
             (*range[0]) = effect->control_ports[i]->def_value;
             (*range[1]) = effect->control_ports[i]->min_value;
             (*range[2]) = effect->control_ports[i]->max_value;
-
-            if (effect->control_ports[i]->hints & HINT_NEEDS_SMOOTH)
-                (*range[3]) = effect->control_ports[i]->target_value;
-            else
-                (*range[3]) = *(effect->control_ports[i]->buffer);
+            (*range[3]) = *(effect->control_ports[i]->buffer);
 
             /* Get the scale points */
             LilvScalePoints *points = effect->control_ports[i]->scale_points;
