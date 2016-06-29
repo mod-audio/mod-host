@@ -35,9 +35,11 @@ LIBS = $(shell pkg-config --libs jack lilv-0) -lreadline -lpthread -lrt
 # include paths
 INCS = $(shell pkg-config --cflags jack lilv-0)
 
+ifneq ($(SKIP_FFTW335), 1)
 ifeq ($(shell pkg-config --atleast-version=3.3.5 fftw3 fftw3f && echo true), true)
 LIBS += $(shell pkg-config --libs fftw3 fftw3f) -lfftw3_threads -lfftw3f_threads
 INCS += $(shell pkg-config --cflags fftw3 fftw3f) -DHAVE_FFTW335
+endif
 endif
 
 ifeq ($(shell pkg-config --atleast-version=0.22.0 lilv-0 && echo true), true)
