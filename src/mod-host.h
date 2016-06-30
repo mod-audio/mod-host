@@ -66,6 +66,7 @@
 #define MIDI_LEARN          "midi_learn %i %s"
 #define MIDI_MAP            "midi_map %i %s %i %i"
 #define MIDI_UNMAP          "midi_unmap %i %s"
+#define MIDI_PROGRAM_LISTEN "midi_program_listen %i %i"
 #define CPU_LOAD            "cpu_load"
 #define LOAD_COMMANDS       "load %s"
 #define SAVE_COMMANDS       "save %s"
