@@ -99,6 +99,18 @@ static int g_clientfd, g_fbclientfd;
 ************************************************************************************************************************
 */
 
+/* FIXME: SO_REUSEADDR with 0 'backlog' (2nd argument in listen) does not work on modern distros.
+ *        We don't have time to investigate this further right now, so leave a note here for later.
+ *        Using SO_REUSEPORT with -1 as 'backlog' seems to work, needs testing on MOD Duo later on.
+ */
+#ifdef __ARM_ARCH_7A__
+#define MOD_SOCKET_FLAGS   SO_REUSEADDR
+#define MOD_SOCKET_BACKLOG 0
+#else
+#define MOD_SOCKET_FLAGS   SO_REUSEPORT
+#define MOD_SOCKET_BACKLOG -1
+#endif
+
 int socket_start(int port, int buffer_size)
 {
     g_serverfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -113,8 +125,8 @@ int socket_start(int port, int buffer_size)
 
     /* Allow the reuse of the socket address */
     int value = 1;
-    setsockopt(g_serverfd, SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value));
-    setsockopt(g_fbserverfd, SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value));
+    setsockopt(g_serverfd, SOL_SOCKET, MOD_SOCKET_FLAGS, &value, sizeof(value));
+    setsockopt(g_fbserverfd, SOL_SOCKET, MOD_SOCKET_FLAGS, &value, sizeof(value));
 
     /* Startup the socket struct */
     struct sockaddr_in serv_addr;
@@ -139,7 +151,7 @@ int socket_start(int port, int buffer_size)
     }
 
     /* Start listen the sockets */
-    if (listen(g_serverfd, 0) < 0 || listen(g_fbserverfd, 0) < 0)
+    if (listen(g_serverfd, MOD_SOCKET_BACKLOG) < 0 || listen(g_fbserverfd, MOD_SOCKET_BACKLOG) < 0)
     {
         perror("listen error");
         return -1;
