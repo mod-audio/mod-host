@@ -1471,18 +1471,8 @@ int effects_add(const char *uid, int instance)
     effect = &g_effects[instance];
 
     /* Init the struct */
+    memset(effect, 0, sizeof(effect_t));
     effect->instance = instance;
-    effect->jack_client = NULL;
-    effect->lilv_instance = NULL;
-    effect->properties = NULL;
-    effect->ports = NULL;
-    effect->audio_ports = NULL;
-    effect->input_audio_ports = NULL;
-    effect->output_audio_ports = NULL;
-    effect->control_ports = NULL;
-    effect->presets = NULL;
-    effect->events_buffer = NULL;
-    effect->has_triggers = false;
 
     /* Init the pointers */
     lilv_instance = NULL;
