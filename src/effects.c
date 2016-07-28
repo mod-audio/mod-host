@@ -2174,20 +2174,23 @@ int effects_remove(int effect_id)
     if (effect_id == REMOVE_ALL)
     {
         /* Disconnect the system connections */
-        for (i = 0; g_capture_ports[i]; i++)
+        if (g_capture_ports != NULL)
         {
-            const char **capture_connections =
-                jack_port_get_connections(jack_port_by_name(g_jack_global_client, g_capture_ports[i]));
-
-            if (capture_connections)
+            for (i = 0; g_capture_ports[i]; i++)
             {
-                for (j = 0; capture_connections[j]; j++)
-                {
-                    if (strstr(capture_connections[j], "system"))
-                        jack_disconnect(g_jack_global_client, g_capture_ports[i], capture_connections[j]);
-                }
+                const char **capture_connections =
+                    jack_port_get_connections(jack_port_by_name(g_jack_global_client, g_capture_ports[i]));
 
-                jack_free(capture_connections);
+                if (capture_connections)
+                {
+                    for (j = 0; capture_connections[j]; j++)
+                    {
+                        if (strstr(capture_connections[j], "system"))
+                            jack_disconnect(g_jack_global_client, g_capture_ports[i], capture_connections[j]);
+                    }
+
+                    jack_free(capture_connections);
+                }
             }
         }
 
