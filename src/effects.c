@@ -29,6 +29,7 @@
 #include <dlfcn.h>
 #include <errno.h>
 #include <limits.h>
+#include <math.h>
 #include <pthread.h>
 
 /* Jack */
@@ -867,7 +868,10 @@ static float UpdateValueFromMidi(midi_cc_t* mcc, jack_midi_data_t mvalue)
                 value = 1.0f;
 
             // real value
-            value = port->min_value + (port->max_value - port->min_value) * value;
+            if (port->hints & HINT_LOGARITHMIC)
+                value = port->min_value * powf(port->max_value/port->min_value, value);
+            else
+                value = port->min_value + (port->max_value - port->min_value) * value;
         }
 
         // set param value
