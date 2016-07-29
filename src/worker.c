@@ -31,7 +31,7 @@ static void* worker_func(void* data)
     worker_t* worker = (worker_t*)data;
     void* buf  = NULL;
     while (true) {
-        zix_sem_wait(&worker->sem);
+        sem_wait(&worker->sem);
         if (worker->exit) break;
 
         uint32_t size = 0;
@@ -67,7 +67,7 @@ void worker_finish(worker_t *worker)
 {
     worker->exit = true;
     if (worker->requests) {
-        zix_sem_post(&worker->sem);
+        sem_post(&worker->sem);
         zix_thread_join(worker->thread, NULL);
         jack_ringbuffer_free(worker->requests);
         jack_ringbuffer_free(worker->responses);
@@ -80,7 +80,7 @@ LV2_Worker_Status worker_schedule(LV2_Worker_Schedule_Handle handle, uint32_t si
     worker_t* worker = (worker_t*) handle;
     jack_ringbuffer_write(worker->requests, (const char*)&size, sizeof(size));
     jack_ringbuffer_write(worker->requests, (const char*)data, size);
-    zix_sem_post(&worker->sem);
+    sem_post(&worker->sem);
     return LV2_WORKER_SUCCESS;
 }
 

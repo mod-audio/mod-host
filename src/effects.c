@@ -145,6 +145,7 @@ enum {
 
 enum PostPonedEventType {
     POSTPONED_PARAM_SET,
+    POSTPONED_PROGRAM_LISTEN,
     POSTPONED_MIDI_MAP
 };
 
@@ -363,6 +364,7 @@ static LV2_Feature g_buf_size_features[3] = {
     { LV2_BUF_SIZE__boundedBlockLength, NULL }
     };
 
+static int g_midi_program_listen;
 static pthread_mutex_t g_midi_learning_mutex;
 
 static const char* const g_bypass_port_symbol = BYPASS_PORT_SYMBOL;
@@ -463,6 +465,7 @@ void RunPostPonedEvents(int ignored_effect_id)
     struct list_head *it, *it2;
     postponed_event_list_data* eventptr;
 
+    bool got_program = false;
     int last_effect_id = -1;
     char last_port_symbol[MAX_CHAR_BUF_SIZE+1];
     last_port_symbol[MAX_CHAR_BUF_SIZE] = '\0';
@@ -525,6 +528,14 @@ void RunPostPonedEvents(int ignored_effect_id)
                 strncpy(last_port_symbol, eventptr->event.symbol, MAX_CHAR_BUF_SIZE);
                 break;
 
+            case POSTPONED_PROGRAM_LISTEN:
+                if (got_program)
+                    continue;
+                got_program = true;
+                snprintf(buf, MAX_CHAR_BUF_SIZE, "midi_program %i", eventptr->event.controller);
+                socket_send_feedback(buf);
+                break;
+
             case POSTPONED_MIDI_MAP:
                 snprintf(buf, MAX_CHAR_BUF_SIZE, "midi_mapped %i %s %i %i %f", eventptr->event.effect_id,
                                                                                eventptr->event.symbol,
@@ -542,14 +553,9 @@ void RunPostPonedEvents(int ignored_effect_id)
 
 static void* PostPonedEventsThread(void* arg)
 {
-    struct timespec timeout;
-
     while (g_postevents_running == 1)
     {
-        clock_gettime(CLOCK_REALTIME, &timeout);
-        timeout.tv_sec += 1;
-
-        if (sem_timedwait(&g_postevents_semaphore, &timeout) != 0)
+        if (sem_timedwait_secs(&g_postevents_semaphore, 1) != 0)
             continue;
 
         if (g_postevents_running == 1)
@@ -904,6 +910,32 @@ static int ProcessMonitorMidi(jack_nframes_t nframes, void *arg)
         if (jack_midi_event_get(&event, port_buf, i) != 0)
             break;
 
+        // check if it's a program event
+        if ((event.buffer[0] & 0xF0) == 0xC0)
+        {
+            if (event.size != 2 || g_midi_program_listen != (event.buffer[0] & 0x0F))
+                continue;
+
+            postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
+
+            if (posteventptr)
+            {
+                const postponed_event_t pevent = {
+                    POSTPONED_PROGRAM_LISTEN,
+                    -1, NULL, -1,
+                    event.buffer[1],
+                    0.0f
+                };
+                memcpy(&posteventptr->event, &pevent, sizeof(postponed_event_t));
+
+                pthread_mutex_lock(&g_rtsafe_mutex);
+                list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
+                pthread_mutex_unlock(&g_rtsafe_mutex);
+
+                needs_post = true;
+            }
+        }
+
         // check if it's a CC event
         if (event.buffer[0] < 0xB0)
             continue;
@@ -933,14 +965,14 @@ static int ProcessMonitorMidi(jack_nframes_t nframes, void *arg)
 
                 if (posteventptr)
                 {
-                    const postponed_event_t event = {
+                    const postponed_event_t pevent = {
                         POSTPONED_PARAM_SET,
                         g_midi_cc_list[i].effect_id,
                         g_midi_cc_list[i].symbol,
                         -1, -1,
                         value
                     };
-                    memcpy(&posteventptr->event, &event, sizeof(postponed_event_t));
+                    memcpy(&posteventptr->event, &pevent, sizeof(postponed_event_t));
 
                     pthread_mutex_lock(&g_rtsafe_mutex);
                     list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
@@ -1405,6 +1437,7 @@ int effects_init(void* client)
         g_midi_cc_list[i].port = NULL;
     }
     g_midi_learning = NULL;
+    g_midi_program_listen = 0;
 
     g_postevents_running = 1;
     pthread_create(&g_postevents_thread, NULL, PostPonedEventsThread, NULL);
@@ -1560,7 +1593,7 @@ int effects_add(const char *uid, int instance)
 
     /* Worker */
     effect->worker.instance = lilv_instance;
-    zix_sem_init(&effect->worker.sem, 0);
+    sem_init(&effect->worker.sem, 0, 0);
     effect->worker.iface = NULL;
     effect->worker.requests  = NULL;
     effect->worker.responses = NULL;
@@ -2733,6 +2766,14 @@ int effects_midi_unmap(int effect_id, const char *control_symbol)
     }
 
     return ERR_MIDI_PARAM_NOT_FOUND;
+}
+
+void effects_midi_program_listen(int enable, int channel)
+{
+    if (enable == 0 || channel < 0 || channel > 15)
+        channel = -1;
+
+    g_midi_program_listen = channel;
 }
 
 float effects_jack_cpu_load(void)

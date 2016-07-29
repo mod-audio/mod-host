@@ -297,6 +297,15 @@ static void midi_unmap_cb(proto_t *proto)
     protocol_response(buffer, proto);
 }
 
+static void midi_program_listen_cb(proto_t *proto)
+{
+    effects_midi_program_listen(atoi(proto->list[1]), atoi(proto->list[2]));
+
+    char buffer[128];
+    sprintf(buffer, "resp 0");
+    protocol_response(buffer, proto);
+}
+
 static void cpu_load_cb(proto_t *proto)
 {
     float value = effects_jack_cpu_load();
@@ -451,6 +460,7 @@ static int mod_host_init(jack_client_t* client, int socket_port)
     protocol_add_command(MIDI_LEARN, midi_learn_cb);
     protocol_add_command(MIDI_MAP, midi_map_cb);
     protocol_add_command(MIDI_UNMAP, midi_unmap_cb);
+    protocol_add_command(MIDI_PROGRAM_LISTEN, midi_program_listen_cb);
     protocol_add_command(CPU_LOAD, cpu_load_cb);
     protocol_add_command(LOAD_COMMANDS, load_cb);
     protocol_add_command(SAVE_COMMANDS, save_cb);
