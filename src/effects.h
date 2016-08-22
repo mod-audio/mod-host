@@ -127,6 +127,8 @@ int effects_midi_learn(int effect_id, const char *control_symbol);
 int effects_midi_map(int effect_id, const char *control_symbol, int channel, int controller);
 int effects_midi_unmap(int effect_id, const char *control_symbol);
 void effects_midi_program_listen(int enable, int channel);
+int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int actuator_id);
+int effects_cc_unmap(int effect_id, const char *control_symbol);
 float effects_jack_cpu_load(void);
 void effects_bundle_add(const char* bundlepath);
 void effects_bundle_remove(const char* bundlepath);

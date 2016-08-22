@@ -67,6 +67,8 @@
 #define MIDI_MAP            "midi_map %i %s %i %i"
 #define MIDI_UNMAP          "midi_unmap %i %s"
 #define MIDI_PROGRAM_LISTEN "midi_program_listen %i %i"
+#define CC_MAP              "cc_map %i %s %i %i"
+#define CC_UNMAP            "cc_unmap %i %s"
 #define CPU_LOAD            "cpu_load"
 #define LOAD_COMMANDS       "load %s"
 #define SAVE_COMMANDS       "save %s"

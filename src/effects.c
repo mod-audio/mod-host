@@ -31,6 +31,7 @@
 #include <limits.h>
 #include <math.h>
 #include <pthread.h>
+#include <cc/control_chain.h>
 
 /* Jack */
 #include <jack/jack.h>
@@ -98,6 +99,8 @@
 
 #define BYPASS_PORT_SYMBOL  ":bypass"
 #define PRESETS_PORT_SYMBOL ":presets"
+
+#define MAX_CC_ASSIGNMENTS  1000
 
 
 /*
@@ -285,6 +288,12 @@ typedef struct MIDI_CC_T {
     const port_t* port;
 } midi_cc_t;
 
+typedef struct CC_T {
+    int effect_id;
+    const char* symbol;
+    const port_t* port;
+} cc_t;
+
 typedef struct POSTPONED_EVENT_T {
     enum PostPonedEventType etype;
     int effect_id;
@@ -324,6 +333,10 @@ typedef struct POSTPONED_CACHED_SYMBOL_LIST_DATA {
 
 static effect_t g_effects[MAX_INSTANCES];
 static midi_cc_t g_midi_cc_list[MAX_MIDI_CC_ASSIGN], *g_midi_learning;
+
+/* Control Chain */
+static cc_handle_t *g_cc_handle;
+static cc_t g_cc_assignments[MAX_CC_ASSIGNMENTS];
 
 static struct list_head g_rtsafe_list;
 static RtMemPool_Handle g_rtsafe_mem_pool;
@@ -1218,6 +1231,19 @@ static void FreeFeatures(effect_t *effect)
     }
 }
 
+static void CCDataUpdate(void *arg)
+{
+    cc_data_update_t *updates = arg;
+
+    for (int i = 0; i < updates->count; ++i)
+    {
+        cc_data_t *update = &updates->updates_list[i];
+
+        const port_t* port = g_cc_assignments[update->assignment_id].port;
+        *(port->buffer) = update->value;
+    }
+}
+
 
 /*
 ************************************************************************************************************************
@@ -1441,6 +1467,11 @@ int effects_init(void* client)
 
     g_postevents_running = 1;
     pthread_create(&g_postevents_thread, NULL, PostPonedEventsThread, NULL);
+
+    /* Init control chain */
+    // FIXME: read serial port and baudrate from env var
+    g_cc_handle = cc_init("/dev/ttyACM0", 115200);
+    cc_data_update_cb(g_cc_handle, CCDataUpdate);
 
     return SUCCESS;
 }
@@ -2774,6 +2805,78 @@ void effects_midi_program_listen(int enable, int channel)
         channel = -1;
 
     g_midi_program_listen = channel;
+}
+
+int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int actuator_id)
+{
+    const port_t *port;
+
+    if (!InstanceExist(effect_id))
+    {
+        return ERR_INSTANCE_NON_EXISTS;
+    }
+
+    port = FindEffectPortBySymbol(&(g_effects[effect_id]), control_symbol);
+
+    cc_assignment_t assignment;
+    assignment.device_id = device_id;
+    assignment.actuator_id = actuator_id;
+    assignment.mode = 1; // FIXME: hardcoded (toggle)
+
+    if (port)
+    {
+        assignment.value = *port->buffer;
+        assignment.min = port->min_value;
+        assignment.max = port->max_value;
+        assignment.def = port->def_value;
+    }
+    else
+    {
+        assignment.value = (g_effects[effect_id].bypass ? 0.0 : 1.0);
+        assignment.min = 0.0;
+        assignment.max = 1.0;
+        assignment.def = 0.0;
+    }
+
+    int assignment_id = cc_assignment(g_cc_handle, &assignment);
+
+    g_cc_assignments[assignment_id].effect_id = effect_id;
+
+    if (!strcmp(control_symbol, g_bypass_port_symbol))
+    {
+        g_cc_assignments[assignment_id].symbol = g_bypass_port_symbol;
+        g_cc_assignments[assignment_id].port = NULL;
+    }
+    else
+    {
+        if (port == NULL)
+            return ERR_LV2_INVALID_PARAM_SYMBOL;
+
+        g_cc_assignments[assignment_id].symbol = port->symbol;
+        g_cc_assignments[assignment_id].port = port;
+    }
+
+    return SUCCESS;
+}
+
+int effects_cc_unmap(int effect_id, const char *control_symbol)
+{
+    if (!InstanceExist(effect_id))
+    {
+        return ERR_INSTANCE_NON_EXISTS;
+    }
+
+    for (int i = 0; i < MAX_CC_ASSIGNMENTS; i++)
+    {
+        if (g_cc_assignments[i].effect_id == effect_id &&
+            strcmp(g_cc_assignments[i].symbol, control_symbol) == 0)
+        {
+            cc_unassignment(g_cc_handle, i);
+            break;
+        }
+    }
+
+    return SUCCESS;
 }
 
 float effects_jack_cpu_load(void)
