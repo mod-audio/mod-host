@@ -955,6 +955,7 @@ static int ProcessMonitorMidi(jack_nframes_t nframes, void *arg)
             if (g_midi_cc_list[i].effect_id == MIDI_LEARN_UNUSED)
                 continue;
 
+            // TODO: avoid race condition against effects_midi_unmap
             if (g_midi_cc_list[i].channel    == channel &&
                 g_midi_cc_list[i].controller == controller)
             {
@@ -2284,7 +2285,6 @@ int effects_remove(int effect_id)
                 free(effect->presets);
             }
 
-
             InstanceDelete(j);
         }
     }
@@ -2297,9 +2297,9 @@ int effects_remove(int effect_id)
     {
         for (int i = 0; i < MAX_MIDI_CC_ASSIGN; i++)
         {
-            g_midi_cc_list[i].effect_id = MIDI_LEARN_NULL;
             g_midi_cc_list[i].channel = -1;
             g_midi_cc_list[i].controller = -1;
+            g_midi_cc_list[i].effect_id = MIDI_LEARN_NULL;
             g_midi_cc_list[i].symbol = NULL;
             g_midi_cc_list[i].port = NULL;
         }
@@ -2484,7 +2484,7 @@ int effects_monitor_parameter(int effect_id, const char *control_symbol, const c
     else if (strcmp(op, "!=") == 0)
         iop = 5;
     else
-        return -1;
+        return ERR_ASSIGNMENT_INVALID_OP;
 
 
     const LilvNode *symbol = lilv_new_string(g_lv2_data, control_symbol);
@@ -2502,7 +2502,7 @@ int effects_monitor_parameter(int effect_id, const char *control_symbol, const c
     g_effects[effect_id].monitors[idx]->op = iop;
     g_effects[effect_id].monitors[idx]->value = value;
     g_effects[effect_id].monitors[idx]->last_notified_value = 0.0;
-    return 0;
+    return SUCCESS;
 }
 
 int effects_bypass(int effect_id, int value)
@@ -2648,10 +2648,6 @@ int effects_midi_learn(int effect_id, const char *control_symbol)
         if (INSTANCE_IS_VALID(g_midi_cc_list[i].effect_id))
             continue;
 
-        g_midi_cc_list[i].channel = -1;
-        g_midi_cc_list[i].controller = -1;
-        g_midi_cc_list[i].effect_id = effect_id;
-
         if (!strcmp(control_symbol, g_bypass_port_symbol))
         {
             g_midi_cc_list[i].symbol = g_bypass_port_symbol;
@@ -2668,13 +2664,17 @@ int effects_midi_learn(int effect_id, const char *control_symbol)
             g_midi_cc_list[i].port = port;
         }
 
+        g_midi_cc_list[i].channel = -1;
+        g_midi_cc_list[i].controller = -1;
+        g_midi_cc_list[i].effect_id = effect_id;
+
         pthread_mutex_lock(&g_midi_learning_mutex);
         g_midi_learning = &g_midi_cc_list[i];
         pthread_mutex_unlock(&g_midi_learning_mutex);
         return SUCCESS;
     }
 
-    return ERR_MIDI_ASSIGNMENT_LIST_IS_FULL;
+    return ERR_ASSIGNMENT_LIST_FULL;
 }
 
 int effects_midi_map(int effect_id, const char *control_symbol, int channel, int controller)
@@ -2709,10 +2709,6 @@ int effects_midi_map(int effect_id, const char *control_symbol, int channel, int
         if (INSTANCE_IS_VALID(g_midi_cc_list[i].effect_id))
             continue;
 
-        g_midi_cc_list[i].channel = channel;
-        g_midi_cc_list[i].controller = controller;
-        g_midi_cc_list[i].effect_id = effect_id;
-
         if (!strcmp(control_symbol, g_bypass_port_symbol))
         {
             g_midi_cc_list[i].symbol = g_bypass_port_symbol;
@@ -2728,10 +2724,14 @@ int effects_midi_map(int effect_id, const char *control_symbol, int channel, int
             g_midi_cc_list[i].symbol = port->symbol;
             g_midi_cc_list[i].port = port;
         }
+
+        g_midi_cc_list[i].channel = channel;
+        g_midi_cc_list[i].controller = controller;
+        g_midi_cc_list[i].effect_id = effect_id;
         return SUCCESS;
     }
 
-    return ERR_MIDI_ASSIGNMENT_LIST_IS_FULL;
+    return ERR_ASSIGNMENT_LIST_FULL;
 }
 
 int effects_midi_unmap(int effect_id, const char *control_symbol)
@@ -2765,7 +2765,7 @@ int effects_midi_unmap(int effect_id, const char *control_symbol)
         return SUCCESS;
     }
 
-    return ERR_MIDI_PARAM_NOT_FOUND;
+    return ERR_LV2_INVALID_PARAM_SYMBOL;
 }
 
 void effects_midi_program_listen(int enable, int channel)
