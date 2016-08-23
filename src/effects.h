@@ -120,6 +120,7 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
 int effects_set_property(int effect_id, const char *label, const char *value);
 int effects_get_parameter(int effect_id, const char *control_symbol, float *value);
 int effects_monitor_parameter(int effect_id, const char *control_symbol, const char *op, float value);
+int effects_monitor_output_parameter(int effect_id, const char *control_symbol);
 int effects_bypass(int effect_id, int value);
 int effects_get_parameter_symbols(int effect_id, char** symbols);
 int effects_get_presets_uris(int effect_id, char **uris);

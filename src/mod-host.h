@@ -63,6 +63,7 @@
 #define EFFECT_PARAM_GET    "param_get %i %s"
 #define EFFECT_PARAM_MON    "param_monitor %i %s %s %f"
 #define MONITOR_ADDR_SET    "monitor %s %i %i"
+#define MONITOR_OUTPUT      "monitor_output %i %s"
 #define MIDI_LEARN          "midi_learn %i %s"
 #define MIDI_MAP            "midi_map %i %s %i %i"
 #define MIDI_UNMAP          "midi_unmap %i %s"

@@ -127,6 +127,7 @@ enum PortHints {
     HINT_TOGGLE        = 1 << 2,
     HINT_TRIGGER       = 1 << 3,
     HINT_LOGARITHMIC   = 1 << 4,
+    HINT_MONITORED     = 1 << 5, // outputs only
     // events
     HINT_OLD_EVENT_API = 1 << 0,
 };
@@ -146,7 +147,8 @@ enum {
 enum PostPonedEventType {
     POSTPONED_PARAM_SET,
     POSTPONED_PROGRAM_LISTEN,
-    POSTPONED_MIDI_MAP
+    POSTPONED_MIDI_MAP,
+    POSTPONED_OUTPUT_MONITOR
 };
 
 
@@ -169,6 +171,7 @@ typedef struct PORT_T {
     float min_value;
     float max_value;
     float def_value;
+    float prev_value;
     LilvScalePoints* scale_points;
 } port_t;
 
@@ -247,9 +250,13 @@ typedef struct EFFECT_T {
 
     jack_ringbuffer_t *events_buffer;
 
+    // current and previous bypass state
     bool bypass;
     bool was_bypassed;
-    bool has_triggers; // avoids itenerating controls each cycle
+
+    // avoids itenerating controls each cycle
+    bool has_triggers;
+    bool has_output_monitors;
 } effect_t;
 
 typedef struct URIDS_T {
@@ -544,6 +551,13 @@ void RunPostPonedEvents(int ignored_effect_id)
                                                                                eventptr->event.value);
                 socket_send_feedback(buf);
                 break;
+
+            case POSTPONED_OUTPUT_MONITOR:
+                snprintf(buf, MAX_CHAR_BUF_SIZE, "monitor_out %i %s %f", eventptr->event.effect_id,
+                                                                         eventptr->event.symbol,
+                                                                         eventptr->event.value);
+                socket_send_feedback(buf);
+                break;
             }
         }
 
@@ -828,6 +842,49 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
             if (effect->input_control_ports[i]->hints & HINT_TRIGGER)
                 *(effect->input_control_ports[i]->buffer) = effect->input_control_ports[i]->def_value;
         }
+    }
+
+    if (effect->has_output_monitors)
+    {
+        bool needs_post = false;
+        float value;
+
+        for (i = 0; i < effect->output_control_ports_count; i++)
+        {
+            if ((effect->output_control_ports[i]->hints & HINT_MONITORED) == 0)
+                continue;
+
+            value = *(effect->output_control_ports[i]->buffer);
+
+            if (effect->output_control_ports[i]->prev_value == value)
+                continue;
+
+            effect->output_control_ports[i]->prev_value = value;
+
+            postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
+
+            if (posteventptr == NULL)
+                continue;
+
+            const postponed_event_t pevent = {
+                POSTPONED_OUTPUT_MONITOR,
+                effect->instance,
+                effect->output_control_ports[i]->symbol,
+                -1, -1,
+                value
+            };
+
+            memcpy(&posteventptr->event, &pevent, sizeof(postponed_event_t));
+
+            pthread_mutex_lock(&g_rtsafe_mutex);
+            list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
+            pthread_mutex_unlock(&g_rtsafe_mutex);
+
+            needs_post = true;
+        }
+
+        if (needs_post)
+            sem_post(&g_postevents_semaphore);
     }
 
     effect->was_bypassed = effect->bypass;
@@ -1808,6 +1865,7 @@ int effects_add(const char *uid, int instance)
             effect->ports[i]->def_value = def_value;
             effect->ports[i]->min_value = min_value;
             effect->ports[i]->max_value = max_value;
+            effect->ports[i]->prev_value = def_value;
 
             control_ports_count++;
             if (lilv_port_is_a(plugin, lilv_port, lilv_input)) input_control_ports_count++;
@@ -2502,6 +2560,32 @@ int effects_monitor_parameter(int effect_id, const char *control_symbol, const c
     g_effects[effect_id].monitors[idx]->op = iop;
     g_effects[effect_id].monitors[idx]->value = value;
     g_effects[effect_id].monitors[idx]->last_notified_value = 0.0;
+    return SUCCESS;
+}
+
+int effects_monitor_output_parameter(int effect_id, const char *control_symbol)
+{
+    port_t *port;
+
+    if (!InstanceExist(effect_id))
+        return ERR_INSTANCE_NON_EXISTS;
+
+    port = FindEffectPortBySymbol(&(g_effects[effect_id]), control_symbol);
+
+    if (port == NULL)
+        return ERR_LV2_INVALID_PARAM_SYMBOL;
+
+    // check if already monitored
+    if (port->hints & HINT_MONITORED)
+        return SUCCESS;
+
+    // set prev_value
+    port->prev_value = (*port->buffer);
+    port->hints |= HINT_MONITORED;
+
+    // activate output monitor
+    g_effects[effect_id].has_output_monitors = true;
+
     return SUCCESS;
 }
 
