@@ -1185,12 +1185,22 @@ property_t *FindEffectPropertyByLabel(effect_t *effect, const char *label)
     return NULL;
 }
 
-port_t *FindEffectPortBySymbol(effect_t *effect, const char *control_symbol)
+port_t *FindEffectInputPortBySymbol(effect_t *effect, const char *control_symbol)
 {
     for (uint32_t i = 0; i < effect->input_control_ports_count; i++)
     {
         if (strcmp(effect->input_control_ports[i]->symbol, control_symbol) == 0)
             return effect->input_control_ports[i];
+    }
+    return NULL;
+}
+
+port_t *FindEffectOutputPortBySymbol(effect_t *effect, const char *control_symbol)
+{
+    for (uint32_t i = 0; i < effect->output_control_ports_count; i++)
+    {
+        if (strcmp(effect->output_control_ports[i]->symbol, control_symbol) == 0)
+            return effect->output_control_ports[i];
     }
     return NULL;
 }
@@ -1227,7 +1237,7 @@ static const void* GetPortValueForState(const char* symbol, void* user_data,
                                   uint32_t* size, uint32_t* type)
 {
     effect_t *effect = (effect_t*)user_data;
-    port_t *port = FindEffectPortBySymbol(effect, symbol);
+    port_t *port = FindEffectInputPortBySymbol(effect, symbol);
     if (port)
     {
         *size = sizeof(float);
@@ -2448,7 +2458,7 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
             }
         }
 
-        port = FindEffectPortBySymbol(&(g_effects[effect_id]), control_symbol);
+        port = FindEffectInputPortBySymbol(&(g_effects[effect_id]), control_symbol);
         if (port)
         {
             // stores the data of the current control
@@ -2507,7 +2517,7 @@ int effects_get_parameter(int effect_id, const char *control_symbol, float *valu
 
     if (InstanceExist(effect_id))
     {
-        port = FindEffectPortBySymbol(&(g_effects[effect_id]), control_symbol);
+        port = FindEffectInputPortBySymbol(&(g_effects[effect_id]), control_symbol);
         if (port)
         {
            (*value) = *(port->buffer);
@@ -2570,7 +2580,7 @@ int effects_monitor_output_parameter(int effect_id, const char *control_symbol)
     if (!InstanceExist(effect_id))
         return ERR_INSTANCE_NON_EXISTS;
 
-    port = FindEffectPortBySymbol(&(g_effects[effect_id]), control_symbol);
+    port = FindEffectOutputPortBySymbol(&(g_effects[effect_id]), control_symbol);
 
     if (port == NULL)
         return ERR_LV2_INVALID_PARAM_SYMBOL;
@@ -2739,7 +2749,7 @@ int effects_midi_learn(int effect_id, const char *control_symbol)
         }
         else
         {
-            port = FindEffectPortBySymbol(&(g_effects[effect_id]), control_symbol);
+            port = FindEffectInputPortBySymbol(&(g_effects[effect_id]), control_symbol);
 
             if (port == NULL)
                 return ERR_LV2_INVALID_PARAM_SYMBOL;
@@ -2800,7 +2810,7 @@ int effects_midi_map(int effect_id, const char *control_symbol, int channel, int
         }
         else
         {
-            port = FindEffectPortBySymbol(&(g_effects[effect_id]), control_symbol);
+            port = FindEffectInputPortBySymbol(&(g_effects[effect_id]), control_symbol);
 
             if (port == NULL)
                 return ERR_LV2_INVALID_PARAM_SYMBOL;
