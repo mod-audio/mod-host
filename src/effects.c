@@ -262,6 +262,7 @@ typedef struct EFFECT_T {
 typedef struct URIDS_T {
     LV2_URID atom_Float;
     LV2_URID atom_Int;
+    LV2_URID atom_Long;
     LV2_URID atom_eventTransfer;
     LV2_URID bufsz_maxBlockLength;
     LV2_URID bufsz_minBlockLength;
@@ -1224,6 +1225,12 @@ static void SetParameterFromState(const char* symbol, void* user_data,
             return;
         realvalue = *((int32_t*)value);
     }
+    else if (type == g_urids.atom_Long)
+    {
+        if (size != sizeof(int64_t))
+            return;
+        realvalue = *((int64_t*)value);
+    }
     else
     {
         printf("mod-host SetParameterFromState called with unknown type: %u %u\n", type, size);
@@ -1426,6 +1433,7 @@ int effects_init(void* client)
 
     g_urids.atom_Float           = urid_to_id(g_symap, LV2_ATOM__Float);
     g_urids.atom_Int             = urid_to_id(g_symap, LV2_ATOM__Int);
+    g_urids.atom_Long            = urid_to_id(g_symap, LV2_ATOM__Long);
     g_urids.atom_eventTransfer   = urid_to_id(g_symap, LV2_ATOM__eventTransfer);
 
     g_urids.bufsz_maxBlockLength     = urid_to_id(g_symap, LV2_BUF_SIZE__maxBlockLength);
