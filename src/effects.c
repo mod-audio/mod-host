@@ -146,9 +146,9 @@ enum {
 
 enum PostPonedEventType {
     POSTPONED_PARAM_SET,
+    POSTPONED_OUTPUT_MONITOR,
     POSTPONED_PROGRAM_LISTEN,
-    POSTPONED_MIDI_MAP,
-    POSTPONED_OUTPUT_MONITOR
+    POSTPONED_MIDI_MAP
 };
 
 
@@ -457,109 +457,136 @@ static int BufferSize(jack_nframes_t nframes, void* data)
     return SUCCESS;
 }
 
+static bool ShouldIgnorePostPonedEvent(postponed_event_list_data* ev, postponed_cached_symbol_list_data* cached_events)
+{
+    if (ev->event.effect_id == cached_events->effect_id &&
+        strcmp(ev->event.symbol, cached_events->symbol) == 0)
+    {
+        // already received this event, like just now
+        return true;
+    }
+
+    // we received some events, but last one was different
+    // we might be getting interleaved events, so let's check if it's there
+    struct list_head *it;
+    list_for_each(it, &cached_events->siblings)
+    {
+        postponed_cached_symbol_list_data* const psymbol = list_entry(it, postponed_cached_symbol_list_data, siblings);
+
+        if (psymbol->effect_id == ev->event.effect_id &&
+            strcmp(psymbol->symbol, ev->event.symbol) == 0)
+        {
+            // haha! found you little bastard!
+            return true;
+        }
+    }
+
+    // we'll process this event because it's the "last" of its type
+    // also add it to the list of received events
+    postponed_cached_symbol_list_data* const psymbol = malloc(sizeof(postponed_cached_symbol_list_data));
+
+    if (psymbol)
+    {
+        psymbol->effect_id = ev->event.effect_id;
+        strncpy(psymbol->symbol, ev->event.symbol, MAX_CHAR_BUF_SIZE);
+        psymbol->symbol[MAX_CHAR_BUF_SIZE] = '\0';
+        list_add_tail(&psymbol->siblings, &cached_events->siblings);
+    }
+
+    return false;
+}
+
 void RunPostPonedEvents(int ignored_effect_id)
 {
+    // local queue to where we'll save rtsafe list
     struct list_head queue;
     INIT_LIST_HEAD(&queue);
 
+    // move rtsafe list to our local queue, and clear it
     pthread_mutex_lock(&g_rtsafe_mutex);
     list_splice_tail(&g_rtsafe_list, &queue);
     INIT_LIST_HEAD(&g_rtsafe_list);
     pthread_mutex_unlock(&g_rtsafe_mutex);
 
+    // local buffer
     char buf[MAX_CHAR_BUF_SIZE+1];
     buf[MAX_CHAR_BUF_SIZE] = '\0';
 
-    struct list_head *it, *it2;
-    postponed_event_list_data* eventptr;
+    // cached data, to make sure we only handle similar events once
+    bool got_midi_program = false;
+    postponed_cached_symbol_list_data cached_param_set, cached_output_mon;
 
-    bool got_program = false;
-    int last_effect_id = -1;
-    char last_port_symbol[MAX_CHAR_BUF_SIZE+1];
-    last_port_symbol[MAX_CHAR_BUF_SIZE] = '\0';
-
-    struct list_head cached_symbols;
-    INIT_LIST_HEAD(&cached_symbols);
+    cached_param_set.effect_id = -1;
+    cached_output_mon.effect_id = -1;
+    cached_param_set.symbol[MAX_CHAR_BUF_SIZE] = '\0';
+    cached_output_mon.symbol[MAX_CHAR_BUF_SIZE] = '\0';
+    INIT_LIST_HEAD(&cached_param_set.siblings);
+    INIT_LIST_HEAD(&cached_output_mon.siblings);
 
     // itenerate backwards
+    struct list_head *it;
+    postponed_event_list_data* eventptr;
+
     list_for_each_prev(it, &queue)
     {
         eventptr = list_entry(it, postponed_event_list_data, siblings);
 
-        if (eventptr->event.effect_id != ignored_effect_id)
+        // do not handle events for a plugin that is about to be removed
+        if (eventptr->event.effect_id == ignored_effect_id)
         {
-            switch (eventptr->event.etype)
-            {
-            case POSTPONED_PARAM_SET:
-                if (last_effect_id != -1)
-                {
-                    if (eventptr->event.effect_id == last_effect_id &&
-                        strcmp(eventptr->event.symbol, last_port_symbol) == 0)
-                    {
-                        // already received this event, like just now
-                        continue;
-                    }
+            rtsafe_memory_pool_deallocate(g_rtsafe_mem_pool, eventptr);
+            continue;
+        }
 
-                    // we received some events, but last one was different
-                    // we might be getting interleaved events, so let's check if it's there
-                    list_for_each(it2, &cached_symbols)
-                    {
-                        postponed_cached_symbol_list_data* const cached_symbol = list_entry(it2, postponed_cached_symbol_list_data, siblings);
+        switch (eventptr->event.etype)
+        {
+        case POSTPONED_PARAM_SET:
+            if (ShouldIgnorePostPonedEvent(eventptr, &cached_param_set))
+                continue;
 
-                        if (cached_symbol->effect_id == eventptr->event.effect_id &&
-                            strcmp(cached_symbol->symbol, eventptr->event.symbol) == 0)
-                        {
-                            // haha! found you little bastard!
-                            continue;
-                        }
-                    }
+            snprintf(buf, MAX_CHAR_BUF_SIZE, "param_set %i %s %f", eventptr->event.effect_id,
+                                                                   eventptr->event.symbol,
+                                                                   eventptr->event.value);
+            socket_send_feedback(buf);
 
-                    // we'll process this event because it's the "last" of its type
-                    // also add it to the list of received events
-                    postponed_cached_symbol_list_data* const cached_symbol = malloc(sizeof(postponed_cached_symbol_list_data));
-                    if (cached_symbol)
-                    {
-                        cached_symbol->effect_id = eventptr->event.effect_id;
-                        strncpy(cached_symbol->symbol, eventptr->event.symbol, MAX_CHAR_BUF_SIZE);
-                        cached_symbol->symbol[MAX_CHAR_BUF_SIZE] = '\0';
-                        list_add_tail(&cached_symbol->siblings, &cached_symbols);
-                    }
-                }
+            // save for fast checkup next time
+            cached_param_set.effect_id = eventptr->event.effect_id;
+            strncpy(cached_param_set.symbol, eventptr->event.symbol, MAX_CHAR_BUF_SIZE);
+            break;
 
-                snprintf(buf, MAX_CHAR_BUF_SIZE, "param_set %i %s %f", eventptr->event.effect_id,
-                                                                       eventptr->event.symbol,
-                                                                       eventptr->event.value);
-                socket_send_feedback(buf);
+        case POSTPONED_OUTPUT_MONITOR:
+            if (ShouldIgnorePostPonedEvent(eventptr, &cached_output_mon))
+                continue;
 
-                // save for fast checkup next time
-                last_effect_id = eventptr->event.effect_id;
-                strncpy(last_port_symbol, eventptr->event.symbol, MAX_CHAR_BUF_SIZE);
-                break;
+            snprintf(buf, MAX_CHAR_BUF_SIZE, "output_set %i %s %f", eventptr->event.effect_id,
+                                                                    eventptr->event.symbol,
+                                                                    eventptr->event.value);
+            socket_send_feedback(buf);
 
-            case POSTPONED_PROGRAM_LISTEN:
-                if (got_program)
-                    continue;
-                got_program = true;
-                snprintf(buf, MAX_CHAR_BUF_SIZE, "midi_program %i", eventptr->event.controller);
-                socket_send_feedback(buf);
-                break;
+            // save for fast checkup next time
+            cached_output_mon.effect_id = eventptr->event.effect_id;
+            strncpy(cached_output_mon.symbol, eventptr->event.symbol, MAX_CHAR_BUF_SIZE);
+            break;
 
-            case POSTPONED_MIDI_MAP:
-                snprintf(buf, MAX_CHAR_BUF_SIZE, "midi_mapped %i %s %i %i %f", eventptr->event.effect_id,
-                                                                               eventptr->event.symbol,
-                                                                               eventptr->event.channel,
-                                                                               eventptr->event.controller,
-                                                                               eventptr->event.value);
-                socket_send_feedback(buf);
-                break;
+        case POSTPONED_PROGRAM_LISTEN:
+            if (got_midi_program)
+                continue;
 
-            case POSTPONED_OUTPUT_MONITOR:
-                snprintf(buf, MAX_CHAR_BUF_SIZE, "monitor_out %i %s %f", eventptr->event.effect_id,
-                                                                         eventptr->event.symbol,
-                                                                         eventptr->event.value);
-                socket_send_feedback(buf);
-                break;
-            }
+            snprintf(buf, MAX_CHAR_BUF_SIZE, "midi_program %i", eventptr->event.controller);
+            socket_send_feedback(buf);
+
+            // ignore next midi programs
+            got_midi_program = true;
+            break;
+
+        case POSTPONED_MIDI_MAP:
+            snprintf(buf, MAX_CHAR_BUF_SIZE, "midi_mapped %i %s %i %i %f", eventptr->event.effect_id,
+                                                                           eventptr->event.symbol,
+                                                                           eventptr->event.channel,
+                                                                           eventptr->event.controller,
+                                                                           eventptr->event.value);
+            socket_send_feedback(buf);
+            break;
         }
 
         rtsafe_memory_pool_deallocate(g_rtsafe_mem_pool, eventptr);
