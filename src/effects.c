@@ -290,6 +290,7 @@ typedef struct MIDI_CC_T {
 
 typedef struct CC_T {
     int effect_id;
+    int bypass;
     const char* symbol;
     const port_t* port;
 } cc_t;
@@ -1239,8 +1240,18 @@ static void CCDataUpdate(void *arg)
     {
         cc_data_t *update = &updates->updates_list[i];
 
-        const port_t* port = g_cc_assignments[update->assignment_id].port;
-        *(port->buffer) = update->value;
+        cc_t *cc = &g_cc_assignments[update->assignment_id];
+
+        if (cc->bypass)
+        {
+            g_effects[cc->effect_id].bypass = update->value;
+        }
+        else
+        {
+            const port_t* port = g_cc_assignments[update->assignment_id].port;
+            *(port->buffer) = update->value;
+        }
+
     }
 }
 
@@ -2809,52 +2820,52 @@ void effects_midi_program_listen(int enable, int channel)
 
 int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int actuator_id)
 {
-    const port_t *port;
+    const port_t *port = NULL;
+    const char *symbol;
+    int bypass = 0;
 
     if (!InstanceExist(effect_id))
     {
         return ERR_INSTANCE_NON_EXISTS;
     }
 
-    port = FindEffectPortBySymbol(&(g_effects[effect_id]), control_symbol);
-
     cc_assignment_t assignment;
     assignment.device_id = device_id;
     assignment.actuator_id = actuator_id;
-    assignment.mode = 1; // FIXME: hardcoded (toggle)
+    assignment.mode = CC_MODE_TOGGLE; // FIXME: hardcoded (toggle)
 
-    if (port)
+    if (!strcmp(control_symbol, g_bypass_port_symbol))
     {
-        assignment.value = *port->buffer;
-        assignment.min = port->min_value;
-        assignment.max = port->max_value;
-        assignment.def = port->def_value;
-    }
-    else
-    {
+        symbol = g_bypass_port_symbol;
+        bypass = 1;
+
         assignment.value = (g_effects[effect_id].bypass ? 0.0 : 1.0);
         assignment.min = 0.0;
         assignment.max = 1.0;
         assignment.def = 0.0;
     }
-
-    int assignment_id = cc_assignment(g_cc_handle, &assignment);
-
-    g_cc_assignments[assignment_id].effect_id = effect_id;
-
-    if (!strcmp(control_symbol, g_bypass_port_symbol))
-    {
-        g_cc_assignments[assignment_id].symbol = g_bypass_port_symbol;
-        g_cc_assignments[assignment_id].port = NULL;
-    }
     else
     {
+        port = FindEffectPortBySymbol(&(g_effects[effect_id]), control_symbol);
+
         if (port == NULL)
             return ERR_LV2_INVALID_PARAM_SYMBOL;
 
-        g_cc_assignments[assignment_id].symbol = port->symbol;
-        g_cc_assignments[assignment_id].port = port;
+        symbol = port->symbol;
+
+        assignment.value = *port->buffer;
+        assignment.min = port->min_value;
+        assignment.max = port->max_value;
+        assignment.def = port->def_value;
     }
+
+
+    int assignment_id = cc_assignment(g_cc_handle, &assignment);
+    cc_t *cc = &g_cc_assignments[assignment_id];
+    cc->effect_id = effect_id;
+    cc->bypass = bypass;
+    cc->symbol = symbol;
+    cc->port = port;
 
     return SUCCESS;
 }
@@ -2868,6 +2879,9 @@ int effects_cc_unmap(int effect_id, const char *control_symbol)
 
     for (int i = 0; i < MAX_CC_ASSIGNMENTS; i++)
     {
+        if (!g_cc_assignments[i].symbol)
+            continue;
+
         if (g_cc_assignments[i].effect_id == effect_id &&
             strcmp(g_cc_assignments[i].symbol, control_symbol) == 0)
         {

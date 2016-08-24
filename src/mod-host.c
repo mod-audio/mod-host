@@ -309,7 +309,7 @@ static void midi_program_listen_cb(proto_t *proto)
 static void cc_map_cb(proto_t *proto)
 {
     int resp;
-    resp = !effects_cc_map(atoi(proto->list[1]), proto->list[2], atoi(proto->list[3]), atoi(proto->list[4]));
+    resp = effects_cc_map(atoi(proto->list[1]), proto->list[2], atoi(proto->list[3]), atoi(proto->list[4]));
 
     char buffer[128];
     sprintf(buffer, "resp %i", resp);
@@ -319,7 +319,7 @@ static void cc_map_cb(proto_t *proto)
 static void cc_unmap_cb(proto_t *proto)
 {
     int resp;
-    resp = !effects_cc_unmap(atoi(proto->list[1]), proto->list[2]);
+    resp = effects_cc_unmap(atoi(proto->list[1]), proto->list[2]);
 
     char buffer[128];
     sprintf(buffer, "resp %i", resp);
