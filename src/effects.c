@@ -524,7 +524,7 @@ void RunPostPonedEvents(int ignored_effect_id)
     INIT_LIST_HEAD(&cached_output_mon.siblings);
 
     // itenerate backwards
-    struct list_head *it;
+    struct list_head *it, *it2;
     postponed_event_list_data* eventptr;
 
     list_for_each_prev(it, &queue)
@@ -575,7 +575,7 @@ void RunPostPonedEvents(int ignored_effect_id)
             snprintf(buf, MAX_CHAR_BUF_SIZE, "midi_program %i", eventptr->event.controller);
             socket_send_feedback(buf);
 
-            // ignore next midi programs
+            // ignore next midi program
             got_midi_program = true;
             break;
 
@@ -590,6 +590,18 @@ void RunPostPonedEvents(int ignored_effect_id)
         }
 
         rtsafe_memory_pool_deallocate(g_rtsafe_mem_pool, eventptr);
+    }
+
+    // cleanup memory
+    list_for_each_safe(it, it2, &cached_param_set.siblings)
+    {
+        eventptr = list_entry(it, postponed_event_list_data, siblings);
+        free(eventptr);
+    }
+    list_for_each_safe(it, it2, &cached_output_mon.siblings)
+    {
+        eventptr = list_entry(it, postponed_event_list_data, siblings);
+        free(eventptr);
     }
 }
 
