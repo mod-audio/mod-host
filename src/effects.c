@@ -514,7 +514,7 @@ void RunPostPonedEvents(int ignored_effect_id)
 
     // cached data, to make sure we only handle similar events once
     bool got_midi_program = false;
-    postponed_cached_symbol_list_data cached_param_set, cached_output_mon;
+    postponed_cached_symbol_list_data cached_param_set, cached_output_mon, *psymbol;
 
     cached_param_set.effect_id = -1;
     cached_output_mon.effect_id = -1;
@@ -595,13 +595,13 @@ void RunPostPonedEvents(int ignored_effect_id)
     // cleanup memory
     list_for_each_safe(it, it2, &cached_param_set.siblings)
     {
-        eventptr = list_entry(it, postponed_event_list_data, siblings);
-        free(eventptr);
+        psymbol = list_entry(it, postponed_cached_symbol_list_data, siblings);
+        free(psymbol);
     }
     list_for_each_safe(it, it2, &cached_output_mon.siblings)
     {
-        eventptr = list_entry(it, postponed_event_list_data, siblings);
-        free(eventptr);
+        psymbol = list_entry(it, postponed_cached_symbol_list_data, siblings);
+        free(psymbol);
     }
 }
 
