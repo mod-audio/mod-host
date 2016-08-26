@@ -2832,14 +2832,16 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
     cc_assignment_t assignment;
     assignment.device_id = device_id;
     assignment.actuator_id = actuator_id;
-    assignment.mode = CC_MODE_TOGGLE; // FIXME: hardcoded (toggle)
+
+    // default mode
+    assignment.mode = CC_MODE_TOGGLE;
 
     if (!strcmp(control_symbol, g_bypass_port_symbol))
     {
         symbol = g_bypass_port_symbol;
         bypass = 1;
 
-        assignment.value = (g_effects[effect_id].bypass ? 0.0 : 1.0);
+        assignment.value = (g_effects[effect_id].bypass ? 1.0 : 0.0);
         assignment.min = 0.0;
         assignment.max = 1.0;
         assignment.def = 0.0;
@@ -2852,6 +2854,9 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
             return ERR_LV2_INVALID_PARAM_SYMBOL;
 
         symbol = port->symbol;
+
+        if (port->hints & HINT_TRIGGER)
+            assignment.mode = CC_MODE_TRIGGER;
 
         assignment.value = *port->buffer;
         assignment.min = port->min_value;
