@@ -261,6 +261,7 @@ typedef struct EFFECT_T {
 
 typedef struct URIDS_T {
     LV2_URID atom_Float;
+    LV2_URID atom_Double;
     LV2_URID atom_Int;
     LV2_URID atom_Long;
     LV2_URID atom_eventTransfer;
@@ -1258,6 +1259,12 @@ static void SetParameterFromState(const char* symbol, void* user_data,
             return;
         realvalue = *((float*)value);
     }
+    else if (type == g_urids.atom_Double)
+    {
+        if (size != sizeof(double))
+            return;
+        realvalue = *((double*)value);
+    }
     else if (type == g_urids.atom_Int)
     {
         if (size != sizeof(int32_t))
@@ -1471,6 +1478,7 @@ int effects_init(void* client)
     g_urid_unmap.unmap = id_to_urid;
 
     g_urids.atom_Float           = urid_to_id(g_symap, LV2_ATOM__Float);
+    g_urids.atom_Double          = urid_to_id(g_symap, LV2_ATOM__Double);
     g_urids.atom_Int             = urid_to_id(g_symap, LV2_ATOM__Int);
     g_urids.atom_Long            = urid_to_id(g_symap, LV2_ATOM__Long);
     g_urids.atom_eventTransfer   = urid_to_id(g_symap, LV2_ATOM__eventTransfer);
