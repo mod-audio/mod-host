@@ -1480,9 +1480,13 @@ int effects_init(void* client)
     pthread_create(&g_postevents_thread, NULL, PostPonedEventsThread, NULL);
 
     /* Init control chain */
-    // FIXME: read serial port and baudrate from env var
-    g_cc_handle = cc_init("/dev/ttyACM0", 115200);
-    cc_data_update_cb(g_cc_handle, CCDataUpdate);
+    const char *cc_serial_port = getenv("CC_SERIAL_PORT");
+    if (cc_serial_port)
+    {
+        uint32_t cc_baud_rate = atoi(getenv("CC_BAUD_RATE"));
+        g_cc_handle = cc_init(cc_serial_port, cc_baud_rate);
+        cc_data_update_cb(g_cc_handle, CCDataUpdate);
+    }
 
     return SUCCESS;
 }
