@@ -211,6 +211,44 @@ static void effects_bypass_cb(proto_t *proto)
     protocol_response(buffer, proto);
 }
 
+static void effects_list_param_cb(proto_t *proto)
+{
+	char ** symbols = (char **) calloc(128, sizeof(char *));
+
+	int resp = effects_get_parameter_symbols(atoi(proto->list[1]), symbols);
+
+	if (resp != SUCCESS)
+	{
+		char buffer[128];
+		sprintf(buffer, "resp %i ", resp);
+		protocol_response(buffer, proto);
+	}
+	else
+	{
+		int length = 0;
+		char *name = NULL;
+		for (int i = 0; (name = symbols[i]) != NULL; i++)
+		{
+			length += strlen(name) + 1;
+		}
+
+		char buffer[length];
+		char *bufferIndex = &buffer[0];
+		for (int i = 0; (name = symbols[i]) != NULL; i++)
+		{
+			strcpy(bufferIndex, name);
+			bufferIndex += strlen(name);
+
+			*bufferIndex = ' ';
+			bufferIndex++;
+		}
+		*(bufferIndex - 1) = '\0';
+		protocol_response(buffer, proto);
+	}
+
+	free (symbols);
+}
+
 static void effects_set_param_cb(proto_t *proto)
 {
     int resp;
@@ -463,6 +501,7 @@ static int mod_host_init(jack_client_t* client, int socket_port)
     protocol_add_command(EFFECT_CONNECT, effects_connect_cb);
     protocol_add_command(EFFECT_DISCONNECT, effects_disconnect_cb);
     protocol_add_command(EFFECT_BYPASS, effects_bypass_cb);
+    protocol_add_command(EFFECT_PARAM_LIST, effects_list_param_cb);
     protocol_add_command(EFFECT_PARAM_SET, effects_set_param_cb);
     protocol_add_command(EFFECT_PARAM_GET, effects_get_param_cb);
     protocol_add_command(EFFECT_PARAM_MON, effects_monitor_param_cb);
