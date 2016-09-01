@@ -897,6 +897,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
 
             value = *(effect->output_control_ports[i]->buffer);
 
+            // FIXME: do not compare floats
             if (effect->output_control_ports[i]->prev_value == value)
                 continue;
 
@@ -2429,6 +2430,7 @@ int effects_remove(int effect_id)
 
         // reset all events
         pthread_mutex_lock(&g_rtsafe_mutex);
+        // TODO: clear memory
         INIT_LIST_HEAD(&g_rtsafe_list);
         pthread_mutex_unlock(&g_rtsafe_mutex);
     }
