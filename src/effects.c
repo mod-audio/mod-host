@@ -315,6 +315,12 @@ typedef struct POSTPONED_CACHED_SYMBOL_LIST_DATA {
     struct list_head siblings;
 } postponed_cached_symbol_list_data;
 
+typedef struct POSTPONED_CACHED_EVENTS {
+    int last_effect_id;
+    char last_symbol[MAX_CHAR_BUF_SIZE+1];
+    postponed_cached_symbol_list_data symbols;
+} postponed_cached_events;
+
 
 /*
 ************************************************************************************************************************
@@ -465,10 +471,14 @@ static int BufferSize(jack_nframes_t nframes, void* data)
     return SUCCESS;
 }
 
-static bool ShouldIgnorePostPonedEvent(postponed_event_list_data* ev, postponed_cached_symbol_list_data* cached_events)
+static bool ShouldIgnorePostPonedEvent(postponed_event_list_data* ev, postponed_cached_events* cached_events)
 {
-    if (ev->event.effect_id == cached_events->effect_id &&
-        strcmp(ev->event.symbol, cached_events->symbol) == 0)
+    // we don't have symbol-less events that need caching
+    if (ev->event.symbol == NULL)
+        return false;
+
+    if (ev->event.effect_id == cached_events->last_effect_id &&
+        strncmp(ev->event.symbol, cached_events->last_symbol, MAX_CHAR_BUF_SIZE) == 0)
     {
         // already received this event, like just now
         return true;
@@ -477,12 +487,12 @@ static bool ShouldIgnorePostPonedEvent(postponed_event_list_data* ev, postponed_
     // we received some events, but last one was different
     // we might be getting interleaved events, so let's check if it's there
     struct list_head *it;
-    list_for_each(it, &cached_events->siblings)
+    list_for_each(it, &cached_events->symbols.siblings)
     {
         postponed_cached_symbol_list_data* const psymbol = list_entry(it, postponed_cached_symbol_list_data, siblings);
 
-        if (psymbol->effect_id == ev->event.effect_id &&
-            strcmp(psymbol->symbol, ev->event.symbol) == 0)
+        if (ev->event.effect_id == psymbol->effect_id &&
+            strncmp(ev->event.symbol, psymbol->symbol, MAX_CHAR_BUF_SIZE) == 0)
         {
             // haha! found you little bastard!
             return true;
@@ -498,7 +508,7 @@ static bool ShouldIgnorePostPonedEvent(postponed_event_list_data* ev, postponed_
         psymbol->effect_id = ev->event.effect_id;
         strncpy(psymbol->symbol, ev->event.symbol, MAX_CHAR_BUF_SIZE);
         psymbol->symbol[MAX_CHAR_BUF_SIZE] = '\0';
-        list_add_tail(&psymbol->siblings, &cached_events->siblings);
+        list_add_tail(&psymbol->siblings, &cached_events->symbols.siblings);
     }
 
     return false;
@@ -522,14 +532,15 @@ void RunPostPonedEvents(int ignored_effect_id)
 
     // cached data, to make sure we only handle similar events once
     bool got_midi_program = false;
-    postponed_cached_symbol_list_data cached_param_set, cached_output_mon, *psymbol;
+    postponed_cached_events cached_param_set, cached_output_mon;
+    postponed_event_list_data *psymbol;
 
-    cached_param_set.effect_id = -1;
-    cached_output_mon.effect_id = -1;
-    cached_param_set.symbol[MAX_CHAR_BUF_SIZE] = '\0';
-    cached_output_mon.symbol[MAX_CHAR_BUF_SIZE] = '\0';
-    INIT_LIST_HEAD(&cached_param_set.siblings);
-    INIT_LIST_HEAD(&cached_output_mon.siblings);
+    cached_param_set.last_effect_id = -1;
+    cached_output_mon.last_effect_id = -1;
+    cached_param_set.last_symbol[MAX_CHAR_BUF_SIZE] = '\0';
+    cached_output_mon.last_symbol[MAX_CHAR_BUF_SIZE] = '\0';
+    INIT_LIST_HEAD(&cached_param_set.symbols.siblings);
+    INIT_LIST_HEAD(&cached_output_mon.symbols.siblings);
 
     // itenerate backwards
     struct list_head *it, *it2;
@@ -558,8 +569,8 @@ void RunPostPonedEvents(int ignored_effect_id)
             socket_send_feedback(buf);
 
             // save for fast checkup next time
-            cached_param_set.effect_id = eventptr->event.effect_id;
-            strncpy(cached_param_set.symbol, eventptr->event.symbol, MAX_CHAR_BUF_SIZE);
+            cached_param_set.last_effect_id = eventptr->event.effect_id;
+            strncpy(cached_param_set.last_symbol, eventptr->event.symbol, MAX_CHAR_BUF_SIZE);
             break;
 
         case POSTPONED_OUTPUT_MONITOR:
@@ -572,8 +583,8 @@ void RunPostPonedEvents(int ignored_effect_id)
             socket_send_feedback(buf);
 
             // save for fast checkup next time
-            cached_output_mon.effect_id = eventptr->event.effect_id;
-            strncpy(cached_output_mon.symbol, eventptr->event.symbol, MAX_CHAR_BUF_SIZE);
+            cached_output_mon.last_effect_id = eventptr->event.effect_id;
+            strncpy(cached_output_mon.last_symbol, eventptr->event.symbol, MAX_CHAR_BUF_SIZE);
             break;
 
         case POSTPONED_PROGRAM_LISTEN:
@@ -601,12 +612,12 @@ void RunPostPonedEvents(int ignored_effect_id)
     }
 
     // cleanup memory
-    list_for_each_safe(it, it2, &cached_param_set.siblings)
+    list_for_each_safe(it, it2, &cached_param_set.symbols.siblings)
     {
         psymbol = list_entry(it, postponed_cached_symbol_list_data, siblings);
         free(psymbol);
     }
-    list_for_each_safe(it, it2, &cached_output_mon.siblings)
+    list_for_each_safe(it, it2, &cached_output_mon.symbols.siblings)
     {
         psymbol = list_entry(it, postponed_cached_symbol_list_data, siblings);
         free(psymbol);
