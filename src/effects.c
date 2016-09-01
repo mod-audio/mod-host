@@ -30,6 +30,7 @@
 #include <errno.h>
 #include <limits.h>
 #include <math.h>
+#include <float.h>
 #include <pthread.h>
 
 /* Jack */
@@ -411,6 +412,12 @@ static void FreeFeatures(effect_t *effect);
 *           LOCAL FUNCTIONS
 ************************************************************************************************************************
 */
+
+// safely compare 2 float values
+static bool FloatsDifferEnough(float a, float b)
+{
+    return fabsf(a - b) >= FLT_EPSILON;
+}
 
 static void InstanceDelete(int effect_id)
 {
@@ -897,8 +904,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
 
             value = *(effect->output_control_ports[i]->buffer);
 
-            // FIXME: do not compare floats
-            if (effect->output_control_ports[i]->prev_value == value)
+            if (! FloatsDifferEnough(effect->output_control_ports[i]->prev_value, value))
                 continue;
 
             effect->output_control_ports[i]->prev_value = value;
