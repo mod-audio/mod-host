@@ -1320,6 +1320,7 @@ int LoadPresets(effect_t *effect)
         j++;
     }
     lilv_nodes_free(presets);
+    lilv_node_free(preset_uri);
 
     return 0;
 }
@@ -1330,12 +1331,8 @@ static void FreeFeatures(effect_t *effect)
 
     if (effect->features)
     {
-        if (effect->features[WORKER_FEATURE]->data)
-            free(effect->features[WORKER_FEATURE]->data);
-
-        if (effect->features[WORKER_FEATURE])
-            free((void*)effect->features[WORKER_FEATURE]);
-
+        free(effect->features[WORKER_FEATURE]->data);
+        free((void*)effect->features[WORKER_FEATURE]);
         free(effect->features);
     }
 }
@@ -1936,6 +1933,10 @@ int effects_add(const char *uid, int instance)
             control_ports_count++;
             if (lilv_port_is_a(plugin, lilv_port, lilv_input)) input_control_ports_count++;
             else if (lilv_port_is_a(plugin, lilv_port, lilv_output)) output_control_ports_count++;
+
+            lilv_nodes_free(lilvvalue_maximum);
+            lilv_nodes_free(lilvvalue_minimum);
+            lilv_nodes_free(lilvvalue_default);
         }
         else if (lilv_port_is_a(plugin, lilv_port, lilv_cv))
         {
@@ -2158,6 +2159,7 @@ int effects_add(const char *uid, int instance)
     lilv_node_free(lilv_integer);
     lilv_node_free(lilv_toggled);
     lilv_node_free(lilv_trigger);
+    lilv_node_free(lilv_logarithmic);
     lilv_node_free(lilv_output);
     lilv_node_free(lilv_event);
     lilv_node_free(lilv_midi);
@@ -2377,11 +2379,16 @@ int effects_remove(int effect_id)
 
             if (effect->ports)
             {
+                for (i = 0; i < effect->event_ports_count; i++)
+                {
+                    lv2_evbuf_free(effect->event_ports[i]->evbuf);
+                }
                 for (i = 0; i < effect->ports_count; i++)
                 {
                     if (effect->ports[i])
                     {
-                        if (effect->ports[i]->buffer) free(effect->ports[i]->buffer);
+                        free(effect->ports[i]->buffer);
+                        lilv_scale_points_free(effect->ports[i]->scale_points);
                         free(effect->ports[i]);
                     }
                 }
@@ -2392,19 +2399,16 @@ int effects_remove(int effect_id)
             lilv_instance_free(effect->lilv_instance);
             if (effect->jack_client) jack_client_close(effect->jack_client);
 
-            if (effect->audio_ports) free(effect->audio_ports);
-            if (effect->input_audio_ports) free(effect->input_audio_ports);
-            if (effect->output_audio_ports) free(effect->output_audio_ports);
-            if (effect->control_ports) free(effect->control_ports);
+            free(effect->audio_ports);
+            free(effect->input_audio_ports);
+            free(effect->output_audio_ports);
+            free(effect->control_ports);
 
             if (effect->presets)
             {
                 for (i = 0; i < effect->presets_count; i++)
                 {
-                    if (effect->presets[i])
-                    {
-                        free(effect->presets[i]);
-                    }
+                    free(effect->presets[i]);
                 }
                 free(effect->presets);
             }
@@ -2430,7 +2434,17 @@ int effects_remove(int effect_id)
 
         // reset all events
         pthread_mutex_lock(&g_rtsafe_mutex);
-        // TODO: clear memory
+
+        // cleanup pending events memory
+        struct list_head *it;
+        postponed_event_list_data* eventptr;
+
+        list_for_each(it, &g_rtsafe_list)
+        {
+            eventptr = list_entry(it, postponed_event_list_data, siblings);
+            rtsafe_memory_pool_deallocate(g_rtsafe_mem_pool, eventptr);
+        }
+
         INIT_LIST_HEAD(&g_rtsafe_list);
         pthread_mutex_unlock(&g_rtsafe_mutex);
     }
