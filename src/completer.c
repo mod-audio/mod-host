@@ -55,6 +55,7 @@ static char *g_commands[] = {
     "connect",
     "disconnect",
     "bypass",
+    "param_list",
     "param_set",
     "param_get",
     "param_monitor",
@@ -250,6 +251,13 @@ static char **completion(const char *text, int start, int end)
                 }
             }
             else if (strcmp(cmd[0], "preset_save") == 0)
+            {
+                if (count == 1)
+                {
+                    get_instances = 1;
+                }
+            }
+            else if (strcmp(cmd[0], "param_list") == 0)
             {
                 if (count == 1)
                 {
