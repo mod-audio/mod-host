@@ -345,9 +345,10 @@ static struct list_head g_rtsafe_list;
 static RtMemPool_Handle g_rtsafe_mem_pool;
 static pthread_mutex_t  g_rtsafe_mutex;
 
-static volatile int g_postevents_running; // 0: stopped, 1: running, -1: stopped & about to close mod-host
-static sem_t        g_postevents_semaphore;
-static pthread_t    g_postevents_thread;
+static volatile int  g_postevents_running; // 0: stopped, 1: running, -1: stopped & about to close mod-host
+static volatile bool g_postevents_throttling;
+static sem_t         g_postevents_semaphore;
+static pthread_t     g_postevents_thread;
 
 /* Jack */
 static jack_client_t *g_jack_global_client;
@@ -522,8 +523,7 @@ void RunPostPonedEvents(int ignored_effect_id)
 
     // move rtsafe list to our local queue, and clear it
     pthread_mutex_lock(&g_rtsafe_mutex);
-    list_splice_tail(&g_rtsafe_list, &queue);
-    INIT_LIST_HEAD(&g_rtsafe_list);
+    list_splice_init(&g_rtsafe_list, &queue);
     pthread_mutex_unlock(&g_rtsafe_mutex);
 
     // local buffer
@@ -533,7 +533,7 @@ void RunPostPonedEvents(int ignored_effect_id)
     // cached data, to make sure we only handle similar events once
     bool got_midi_program = false;
     postponed_cached_events cached_param_set, cached_output_mon;
-    postponed_event_list_data *psymbol;
+    postponed_cached_symbol_list_data *psymbol;
 
     cached_param_set.last_effect_id = -1;
     cached_output_mon.last_effect_id = -1;
@@ -622,6 +622,33 @@ void RunPostPonedEvents(int ignored_effect_id)
         psymbol = list_entry(it, postponed_cached_symbol_list_data, siblings);
         free(psymbol);
     }
+
+    // report data finished to server
+    g_postevents_throttling = true;
+    socket_send_feedback("data_finish");
+
+#if 0
+    // throttle events
+    if (g_postevents_running == 1)
+    {
+        static struct timespec prev_time = { 0, 0 };
+
+        if (prev_time.tv_sec == 0 && prev_time.tv_nsec == 0)
+        {
+            clock_gettime(CLOCK_REALTIME, &prev_time);
+            return;
+        }
+
+        struct timespec new_time;
+        clock_gettime(CLOCK_REALTIME, &new_time);
+
+        if (prev_time.tv_sec >= new_time.tv_sec && prev_time.tv_nsec >= prev_time.tv_nsec)
+        {
+        }
+
+        memcpy(&prev_time, &new_time, sizeof(new_time));
+    }
+#endif
 }
 
 static void* PostPonedEventsThread(void* arg)
@@ -631,7 +658,7 @@ static void* PostPonedEventsThread(void* arg)
         if (sem_timedwait_secs(&g_postevents_semaphore, 1) != 0)
             continue;
 
-        if (g_postevents_running == 1)
+        if (g_postevents_running == 1 && ! g_postevents_throttling)
             RunPostPonedEvents(-3); // as all effects are valid we set ignored_effect_id to -3
     }
 
@@ -1578,6 +1605,7 @@ int effects_init(void* client)
     g_midi_program_listen = 0;
 
     g_postevents_running = 1;
+    g_postevents_throttling = false;
     pthread_create(&g_postevents_thread, NULL, PostPonedEventsThread, NULL);
 
     return SUCCESS;
@@ -3035,4 +3063,9 @@ void effects_bundle_remove(const char* bpath)
     // refresh plugins
     g_plugins = lilv_world_get_all_plugins(g_lv2_data);
 #endif
+}
+
+void effects_data_handled(void)
+{
+    g_postevents_throttling = false;
 }
