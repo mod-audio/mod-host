@@ -623,9 +623,12 @@ void RunPostPonedEvents(int ignored_effect_id)
         free(psymbol);
     }
 
-    // report data finished to server
-    g_postevents_throttling = true;
-    socket_send_feedback("data_finish");
+    if (! g_postevents_throttling)
+    {
+        // report data finished to server
+        g_postevents_throttling = true;
+        socket_send_feedback("data_finish");
+    }
 
 #if 0
     // throttle events
@@ -3067,5 +3070,9 @@ void effects_bundle_remove(const char* bpath)
 
 void effects_data_handled(void)
 {
-    g_postevents_throttling = false;
+    if (g_postevents_throttling)
+    {
+        g_postevents_throttling = false;
+        sem_post(&g_postevents_semaphore);
+    }
 }
