@@ -346,7 +346,7 @@ static RtMemPool_Handle g_rtsafe_mem_pool;
 static pthread_mutex_t  g_rtsafe_mutex;
 
 static volatile int  g_postevents_running; // 0: stopped, 1: running, -1: stopped & about to close mod-host
-static volatile bool g_postevents_throttling;
+static volatile bool g_postevents_ready;
 static sem_t         g_postevents_semaphore;
 static pthread_t     g_postevents_thread;
 
@@ -623,35 +623,12 @@ void RunPostPonedEvents(int ignored_effect_id)
         free(psymbol);
     }
 
-    if (! g_postevents_throttling)
+    if (g_postevents_ready)
     {
         // report data finished to server
-        g_postevents_throttling = true;
+        g_postevents_ready = false;
         socket_send_feedback("data_finish");
     }
-
-#if 0
-    // throttle events
-    if (g_postevents_running == 1)
-    {
-        static struct timespec prev_time = { 0, 0 };
-
-        if (prev_time.tv_sec == 0 && prev_time.tv_nsec == 0)
-        {
-            clock_gettime(CLOCK_REALTIME, &prev_time);
-            return;
-        }
-
-        struct timespec new_time;
-        clock_gettime(CLOCK_REALTIME, &new_time);
-
-        if (prev_time.tv_sec >= new_time.tv_sec && prev_time.tv_nsec >= prev_time.tv_nsec)
-        {
-        }
-
-        memcpy(&prev_time, &new_time, sizeof(new_time));
-    }
-#endif
 }
 
 static void* PostPonedEventsThread(void* arg)
@@ -661,7 +638,7 @@ static void* PostPonedEventsThread(void* arg)
         if (sem_timedwait_secs(&g_postevents_semaphore, 1) != 0)
             continue;
 
-        if (g_postevents_running == 1 && ! g_postevents_throttling)
+        if (g_postevents_running == 1 && g_postevents_ready)
             RunPostPonedEvents(-3); // as all effects are valid we set ignored_effect_id to -3
     }
 
@@ -1608,7 +1585,7 @@ int effects_init(void* client)
     g_midi_program_listen = 0;
 
     g_postevents_running = 1;
-    g_postevents_throttling = false;
+    g_postevents_ready = true;
     pthread_create(&g_postevents_thread, NULL, PostPonedEventsThread, NULL);
 
     return SUCCESS;
@@ -3068,11 +3045,11 @@ void effects_bundle_remove(const char* bpath)
 #endif
 }
 
-void effects_data_handled(void)
+void effects_output_data_ready(void)
 {
-    if (g_postevents_throttling)
+    if (! g_postevents_ready)
     {
-        g_postevents_throttling = false;
+        g_postevents_ready = true;
         sem_post(&g_postevents_semaphore);
     }
 }

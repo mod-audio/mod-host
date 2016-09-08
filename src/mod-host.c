@@ -389,9 +389,9 @@ static void bundle_remove(proto_t *proto)
     protocol_response("resp 0", proto);
 }
 
-static void data_handled(proto_t *proto)
+static void output_data_ready(proto_t *proto)
 {
-    effects_data_handled();
+    effects_output_data_ready();
     protocol_response("resp 0", proto);
 }
 
@@ -494,7 +494,7 @@ static int mod_host_init(jack_client_t* client, int socket_port)
     protocol_add_command(SAVE_COMMANDS, save_cb);
     protocol_add_command(BUNDLE_ADD, bundle_add);
     protocol_add_command(BUNDLE_REMOVE, bundle_remove);
-    protocol_add_command(DATA_HANDLED, data_handled);
+    protocol_add_command(OUTPUT_DATA_HANDLED, output_data_ready);
 
     /* skip help and quit for internal client */
     if (client == NULL)

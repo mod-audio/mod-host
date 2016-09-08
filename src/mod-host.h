@@ -73,7 +73,7 @@
 #define SAVE_COMMANDS       "save %s"
 #define BUNDLE_ADD          "bundle_add %s"
 #define BUNDLE_REMOVE       "bundle_remove %s"
-#define DATA_HANDLED        "data_handled"
+#define OUTPUT_DATA_HANDLED "output_data_handled"
 #define HELP                "help"
 #define QUIT                "quit"
 
