@@ -494,7 +494,7 @@ static int mod_host_init(jack_client_t* client, int socket_port)
     protocol_add_command(SAVE_COMMANDS, save_cb);
     protocol_add_command(BUNDLE_ADD, bundle_add);
     protocol_add_command(BUNDLE_REMOVE, bundle_remove);
-    protocol_add_command(OUTPUT_DATA_HANDLED, output_data_ready);
+    protocol_add_command(OUTPUT_DATA_READY, output_data_ready);
 
     /* skip help and quit for internal client */
     if (client == NULL)
