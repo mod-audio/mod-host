@@ -1471,11 +1471,25 @@ int effects_init(void* client)
     if (jack_port_by_name(g_jack_global_client, "mod-peakmeter:in_4") != NULL)
         jack_connect(g_jack_global_client, ourportname, "mod-peakmeter:in_4");
 
-    /* Connect serial midi port if it exists */
-    if (jack_port_by_name(g_jack_global_client, "ttymidi:MIDI_in") != NULL)
+    /* Connect to all good hw ports (system, ttymidi and nooice) */
+    const char** const midihwports = jack_get_ports(g_jack_global_client, "", JACK_DEFAULT_MIDI_TYPE,
+                                                                              JackPortIsOutput|JackPortIsPhysical);
+    if (midihwports != NULL)
     {
         snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:midi_in", ourclientname);
-        jack_connect(g_jack_global_client, "ttymidi:MIDI_in", ourportname);
+
+        for (int i=0; midihwports[i] != NULL; ++i)
+        {
+            const char* const portname = midihwports[i];
+            if (strncmp(portname, "ttymidi:", 8) != 0 &&
+                strncmp(portname, "system:", 7) != 0 &&
+                strncmp(portname, "nooice", 5) != 0)
+                continue;
+
+            jack_connect(g_jack_global_client, portname, ourportname);
+        }
+
+        jack_free(midihwports);
     }
 
     /* Load all LV2 data */
