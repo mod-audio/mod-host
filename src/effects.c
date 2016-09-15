@@ -526,6 +526,12 @@ void RunPostPonedEvents(int ignored_effect_id)
     list_splice_init(&g_rtsafe_list, &queue);
     pthread_mutex_unlock(&g_rtsafe_mutex);
 
+    if (list_empty(&queue))
+    {
+        // nothing to do
+        return;
+    }
+
     // local buffer
     char buf[MAX_CHAR_BUF_SIZE+1];
     buf[MAX_CHAR_BUF_SIZE] = '\0';
