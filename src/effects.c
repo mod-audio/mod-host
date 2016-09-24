@@ -1393,7 +1393,8 @@ int effects_init(void* client)
 
     INIT_LIST_HEAD(&g_rtsafe_list);
 
-    if (!rtsafe_memory_pool_create(&g_rtsafe_mem_pool, "mod-host", sizeof(postponed_event_list_data), MAX_MIDI_CC_ASSIGN, MAX_MIDI_CC_ASSIGN))
+    if (!rtsafe_memory_pool_create(&g_rtsafe_mem_pool, "mod-host", sizeof(postponed_event_list_data),
+                                   MAX_POST_PONNED_EVENTS, MAX_POST_PONNED_EVENTS))
     {
         fprintf(stderr, "can't allocate realtime-safe memory pool\n");
         if (client == NULL)
