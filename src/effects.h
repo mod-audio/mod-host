@@ -75,7 +75,7 @@ enum {
 
 #define MAX_INSTANCES           10000
 #define MAX_MIDI_CC_ASSIGN      1024
-#define MAX_POST_PONNED_EVENTS  8192
+#define MAX_POSTPONED_EVENTS    8192
 
 // used for local stack variables
 #define MAX_CHAR_BUF_SIZE       255
