@@ -931,12 +931,12 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
             if (! FloatsDifferEnough(effect->output_control_ports[i]->prev_value, value))
                 continue;
 
-            effect->output_control_ports[i]->prev_value = value;
-
             postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
 
             if (posteventptr == NULL)
                 continue;
+
+            effect->output_control_ports[i]->prev_value = value;
 
             const postponed_event_t pevent = {
                 POSTPONED_OUTPUT_MONITOR,
