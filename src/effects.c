@@ -558,10 +558,7 @@ void RunPostPonedEvents(int ignored_effect_id)
 
         // do not handle events for a plugin that is about to be removed
         if (eventptr->event.effect_id == ignored_effect_id)
-        {
-            rtsafe_memory_pool_deallocate(g_rtsafe_mem_pool, eventptr);
             continue;
-        }
 
         switch (eventptr->event.etype)
         {
@@ -613,8 +610,6 @@ void RunPostPonedEvents(int ignored_effect_id)
             socket_send_feedback(buf);
             break;
         }
-
-        rtsafe_memory_pool_deallocate(g_rtsafe_mem_pool, eventptr);
     }
 
     // cleanup memory
@@ -627,6 +622,13 @@ void RunPostPonedEvents(int ignored_effect_id)
     {
         psymbol = list_entry(it, postponed_cached_symbol_list_data, siblings);
         free(psymbol);
+    }
+
+    // cleanup memory of rt queue, safely
+    list_for_each_safe(it, it2, &queue)
+    {
+        eventptr = list_entry(it, postponed_event_list_data, siblings);
+        rtsafe_memory_pool_deallocate(g_rtsafe_mem_pool, eventptr);
     }
 
     if (g_postevents_ready)
