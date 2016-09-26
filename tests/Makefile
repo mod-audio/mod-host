@@ -15,10 +15,10 @@ PROG = effectlib_test
 
 # compiler and linker flags
 ifeq ($(MODE), release)
-   CFLAGS = -O2 -Wall -Wextra -c
+   CFLAGS = -O2 -Wall -Wextra
    LDFLAGS = -s
 else
-   CFLAGS = -O0 -g -Wall -Wextra -c -DDEBUG
+   CFLAGS = -O0 -g -Wall -Wextra -DDEBUG
    LDFLAGS =
 endif
 
@@ -39,9 +39,15 @@ OBJ = $(SRC:.$(EXT)=.o) $(shell ls ../src/*.o | grep -v mod-host.o)
 $(PROG): $(OBJ)
 	$(LD) $(LDFLAGS) $(OBJ) -o $(PROG) $(LIBS)
 
+rtmempool-test: rtmempool-test.c ../src/rtmempool/*
+	$(CC) $< $(CFLAGS) $(LDFLAGS) -lrt -lpthread -o $@
+
+rtmempool-run: rtmempool-test
+	valgrind --leak-check=full --show-reachable=yes ./$<
+
 # meta-rule to generate the object files
 %.o: %.$(EXT)
-	$(CC) $(CFLAGS) $(INCS) -o $@ $<
+	$(CC) $(CFLAGS) -c $(INCS) -o $@ $<
 
 # clean rule
 clean:
