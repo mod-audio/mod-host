@@ -46,6 +46,11 @@ ifeq ($(shell pkg-config --atleast-version=0.22.0 lilv-0 && echo true), true)
 INCS += -DHAVE_NEW_LILV
 endif
 
+ifeq ($(HAVE_NE10),true)
+LIBS += -lNE10
+INCS += -DHAVE_NE10
+endif
+
 # source and object files
 SRC = $(wildcard $(SRC_DIR)/*.$(EXT)) $(SRC_DIR)/rtmempool/rtmempool.c
 OBJ = $(SRC:.$(EXT)=.o)
