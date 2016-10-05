@@ -289,7 +289,8 @@ typedef struct URIDS_T {
 typedef struct MIDI_CC_T {
     int8_t channel;
     int8_t controller;
-
+    float maximum;
+    float minimum;
     int effect_id;
     const char* symbol;
     const port_t* port;
@@ -980,8 +981,6 @@ static float UpdateValueFromMidi(midi_cc_t* mcc, jack_midi_data_t mvalue)
 
         port = mcc->port;
 
-        // TODO: support custom ranges
-
         if (port->hints & HINT_TRIGGER)
         {
             // now triggered, always maximum
@@ -1006,9 +1005,14 @@ static float UpdateValueFromMidi(midi_cc_t* mcc, jack_midi_data_t mvalue)
 
             // real value
             if (port->hints & HINT_LOGARITHMIC)
-                value = port->min_value * powf(port->max_value/port->min_value, value);
+            {
+                // FIXME: calculate value properly (don't do log on custom scale, use port min/max then adjust)
+                value = mcc->minimum * powf(mcc->maximum/mcc->minimum, value);
+            }
             else
-                value = port->min_value + (port->max_value - port->min_value) * value;
+            {
+                value = mcc->minimum + (mcc->maximum - mcc->minimum) * value;
+            }
         }
 
         // set param value
@@ -1600,6 +1604,8 @@ int effects_init(void* client)
     {
         g_midi_cc_list[i].channel = -1;
         g_midi_cc_list[i].controller = -1;
+        g_midi_cc_list[i].maximum = 1.0f;
+        g_midi_cc_list[i].minimum = 0.0f;
         g_midi_cc_list[i].effect_id = MIDI_LEARN_NULL;
         g_midi_cc_list[i].symbol = NULL;
         g_midi_cc_list[i].port = NULL;
@@ -2450,16 +2456,18 @@ int effects_remove(int effect_id)
         }
     }
 
-    pthread_mutex_lock(&g_midi_learning_mutex);
-    g_midi_learning = NULL;
-    pthread_mutex_unlock(&g_midi_learning_mutex);
-
     if (effect_id == REMOVE_ALL)
     {
+        pthread_mutex_lock(&g_midi_learning_mutex);
+        g_midi_learning = NULL;
+        pthread_mutex_unlock(&g_midi_learning_mutex);
+
         for (int i = 0; i < MAX_MIDI_CC_ASSIGN; i++)
         {
             g_midi_cc_list[i].channel = -1;
             g_midi_cc_list[i].controller = -1;
+            g_midi_cc_list[i].maximum = 1.0f;
+            g_midi_cc_list[i].minimum = 0.0f;
             g_midi_cc_list[i].effect_id = MIDI_LEARN_NULL;
             g_midi_cc_list[i].symbol = NULL;
             g_midi_cc_list[i].port = NULL;
@@ -2483,6 +2491,16 @@ int effects_remove(int effect_id)
     }
     else
     {
+        pthread_mutex_lock(&g_midi_learning_mutex);
+        if (g_midi_learning != NULL && g_midi_learning->effect_id == effect_id)
+        {
+            g_midi_learning->effect_id = MIDI_LEARN_UNUSED;
+            g_midi_learning->symbol = NULL;
+            g_midi_learning->port = NULL;
+            g_midi_learning = NULL;
+        }
+        pthread_mutex_unlock(&g_midi_learning_mutex);
+
         for (int i = 0; i < MAX_MIDI_CC_ASSIGN; i++)
         {
             if (g_midi_cc_list[i].effect_id == MIDI_LEARN_NULL)
@@ -2495,6 +2513,8 @@ int effects_remove(int effect_id)
             g_midi_cc_list[i].effect_id = MIDI_LEARN_UNUSED;
             g_midi_cc_list[i].channel = -1;
             g_midi_cc_list[i].controller = -1;
+            g_midi_cc_list[i].maximum = 1.0f;
+            g_midi_cc_list[i].minimum = 0.0f;
             g_midi_cc_list[i].symbol = NULL;
             g_midi_cc_list[i].port = NULL;
         }
@@ -2806,7 +2826,7 @@ int effects_get_parameter_info(int effect_id, const char *control_symbol, float 
     return ERR_LV2_INVALID_PARAM_SYMBOL;
 }
 
-int effects_midi_learn(int effect_id, const char *control_symbol)
+int effects_midi_learn(int effect_id, const char *control_symbol, float maximum, float minimum)
 {
     const port_t *port;
 
@@ -2815,8 +2835,16 @@ int effects_midi_learn(int effect_id, const char *control_symbol)
         return ERR_INSTANCE_NON_EXISTS;
     }
 
+    const bool is_bypass = !strcmp(control_symbol, g_bypass_port_symbol);
+
     pthread_mutex_lock(&g_midi_learning_mutex);
-    g_midi_learning = NULL;
+    if (g_midi_learning != NULL)
+    {
+        g_midi_learning->effect_id = MIDI_LEARN_UNUSED;
+        g_midi_learning->symbol = NULL;
+        g_midi_learning->port = NULL;
+        g_midi_learning = NULL;
+    }
     pthread_mutex_unlock(&g_midi_learning_mutex);
 
     // if already mapped set it to re-learn
@@ -2834,6 +2862,12 @@ int effects_midi_learn(int effect_id, const char *control_symbol)
         g_midi_cc_list[i].channel = -1;
         g_midi_cc_list[i].controller = -1;
 
+        if (!is_bypass)
+        {
+            g_midi_cc_list[i].maximum = maximum;
+            g_midi_cc_list[i].minimum = minimum;
+        }
+
         pthread_mutex_lock(&g_midi_learning_mutex);
         g_midi_learning = &g_midi_cc_list[i];
         pthread_mutex_unlock(&g_midi_learning_mutex);
@@ -2846,7 +2880,7 @@ int effects_midi_learn(int effect_id, const char *control_symbol)
         if (INSTANCE_IS_VALID(g_midi_cc_list[i].effect_id))
             continue;
 
-        if (!strcmp(control_symbol, g_bypass_port_symbol))
+        if (is_bypass)
         {
             g_midi_cc_list[i].symbol = g_bypass_port_symbol;
             g_midi_cc_list[i].port = NULL;
@@ -2858,6 +2892,8 @@ int effects_midi_learn(int effect_id, const char *control_symbol)
             if (port == NULL)
                 return ERR_LV2_INVALID_PARAM_SYMBOL;
 
+            g_midi_cc_list[i].maximum = maximum;
+            g_midi_cc_list[i].minimum = minimum;
             g_midi_cc_list[i].symbol = port->symbol;
             g_midi_cc_list[i].port = port;
         }
@@ -2875,7 +2911,7 @@ int effects_midi_learn(int effect_id, const char *control_symbol)
     return ERR_ASSIGNMENT_LIST_FULL;
 }
 
-int effects_midi_map(int effect_id, const char *control_symbol, int channel, int controller)
+int effects_midi_map(int effect_id, const char *control_symbol, int channel, int controller, float maximum, float minimum)
 {
     const port_t *port;
 
@@ -2883,6 +2919,8 @@ int effects_midi_map(int effect_id, const char *control_symbol, int channel, int
     {
         return ERR_INSTANCE_NON_EXISTS;
     }
+
+    const bool is_bypass = !strcmp(control_symbol, g_bypass_port_symbol);
 
     // update current mapping first if it exists
     for (int i = 0; i < MAX_MIDI_CC_ASSIGN; i++)
@@ -2898,6 +2936,13 @@ int effects_midi_map(int effect_id, const char *control_symbol, int channel, int
 
         g_midi_cc_list[i].channel = channel;
         g_midi_cc_list[i].controller = controller;
+
+        if (!is_bypass)
+        {
+            g_midi_cc_list[i].maximum = maximum;
+            g_midi_cc_list[i].minimum = minimum;
+        }
+
         return SUCCESS;
     }
 
@@ -2907,7 +2952,7 @@ int effects_midi_map(int effect_id, const char *control_symbol, int channel, int
         if (INSTANCE_IS_VALID(g_midi_cc_list[i].effect_id))
             continue;
 
-        if (!strcmp(control_symbol, g_bypass_port_symbol))
+        if (is_bypass)
         {
             g_midi_cc_list[i].symbol = g_bypass_port_symbol;
             g_midi_cc_list[i].port = NULL;
@@ -2919,6 +2964,8 @@ int effects_midi_map(int effect_id, const char *control_symbol, int channel, int
             if (port == NULL)
                 return ERR_LV2_INVALID_PARAM_SYMBOL;
 
+            g_midi_cc_list[i].maximum = maximum;
+            g_midi_cc_list[i].minimum = minimum;
             g_midi_cc_list[i].symbol = port->symbol;
             g_midi_cc_list[i].port = port;
         }
@@ -2957,6 +3004,8 @@ int effects_midi_unmap(int effect_id, const char *control_symbol)
 
         g_midi_cc_list[i].channel = -1;
         g_midi_cc_list[i].controller = -1;
+        g_midi_cc_list[i].maximum = 1.0f;
+        g_midi_cc_list[i].minimum = 0.0f;
         g_midi_cc_list[i].effect_id = MIDI_LEARN_UNUSED;
         g_midi_cc_list[i].symbol = NULL;
         g_midi_cc_list[i].port = NULL;
