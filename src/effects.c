@@ -303,6 +303,8 @@ typedef struct POSTPONED_EVENT_T {
     int8_t channel;
     int8_t controller;
     float value;
+    float maximum;
+    float minimum;
 } postponed_event_t;
 
 typedef struct POSTPONED_EVENT_LIST_DATA {
@@ -603,11 +605,13 @@ void RunPostPonedEvents(int ignored_effect_id)
             break;
 
         case POSTPONED_MIDI_MAP:
-            snprintf(buf, MAX_CHAR_BUF_SIZE, "midi_mapped %i %s %i %i %f", eventptr->event.effect_id,
-                                                                           eventptr->event.symbol,
-                                                                           eventptr->event.channel,
-                                                                           eventptr->event.controller,
-                                                                           eventptr->event.value);
+            snprintf(buf, MAX_CHAR_BUF_SIZE, "midi_mapped %i %s %i %i %f %f %f", eventptr->event.effect_id,
+                                                                                 eventptr->event.symbol,
+                                                                                 eventptr->event.channel,
+                                                                                 eventptr->event.controller,
+                                                                                 eventptr->event.value,
+                                                                                 eventptr->event.maximum,
+                                                                                 eventptr->event.minimum);
             socket_send_feedback(buf);
             break;
         }
@@ -946,7 +950,8 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
                 effect->instance,
                 effect->output_control_ports[i]->symbol,
                 -1, -1,
-                value
+                value,
+                0.0f, 0.0f
             };
 
             memcpy(&posteventptr->event, &pevent, sizeof(postponed_event_t));
@@ -1059,7 +1064,7 @@ static int ProcessMonitorMidi(jack_nframes_t nframes, void *arg)
                     POSTPONED_PROGRAM_LISTEN,
                     -1, NULL, -1,
                     event.buffer[1],
-                    0.0f
+                    0.0f, 0.0f, 0.0f
                 };
                 memcpy(&posteventptr->event, &pevent, sizeof(postponed_event_t));
 
@@ -1106,7 +1111,8 @@ static int ProcessMonitorMidi(jack_nframes_t nframes, void *arg)
                         g_midi_cc_list[i].effect_id,
                         g_midi_cc_list[i].symbol,
                         -1, -1,
-                        value
+                        value,
+                        0.0f, 0.0f
                     };
                     memcpy(&posteventptr->event, &pevent, sizeof(postponed_event_t));
 
@@ -1125,12 +1131,15 @@ static int ProcessMonitorMidi(jack_nframes_t nframes, void *arg)
         {
             int effect_id;
             const char* symbol;
+            float maximum, minimum;
 
             pthread_mutex_lock(&g_midi_learning_mutex);
             if (g_midi_learning != NULL)
             {
                 effect_id = g_midi_learning->effect_id;
                 symbol    = g_midi_learning->symbol;
+                maximum   = g_midi_learning->maximum;
+                minimum   = g_midi_learning->minimum;
                 value     = UpdateValueFromMidi(g_midi_learning, event.buffer[2]);
                 g_midi_learning->channel    = channel;
                 g_midi_learning->controller = controller;
@@ -1148,15 +1157,17 @@ static int ProcessMonitorMidi(jack_nframes_t nframes, void *arg)
 
                 if (posteventptr)
                 {
-                    const postponed_event_t event = {
+                    const postponed_event_t pevent = {
                         POSTPONED_MIDI_MAP,
                         effect_id,
                         symbol,
                         channel,
                         controller,
-                        value
+                        value,
+                        maximum,
+                        minimum
                     };
-                    memcpy(&posteventptr->event, &event, sizeof(postponed_event_t));
+                    memcpy(&posteventptr->event, &pevent, sizeof(postponed_event_t));
 
                     pthread_mutex_lock(&g_rtsafe_mutex);
                     list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
