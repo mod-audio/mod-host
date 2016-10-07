@@ -1,7 +1,7 @@
 /*
  * RealTime Memory Pool, heavily based on work by Nedko Arnaudov
  * Copyright (C) 2006-2009 Nedko Arnaudov <nedko@arnaudov.name>
- * Copyright (C) 2013-2014 Filipe Coelho <falktx@falktx.com>
+ * Copyright (C) 2013-2016 Filipe Coelho <falktx@falktx.com>
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -41,7 +41,6 @@ typedef void* RtMemPool_Handle;
  *
  * @param poolName pool name, for debug purposes, max RTSAFE_MEMORY_POOL_NAME_MAX chars, including terminating zero char. May be NULL.
  * @param dataSize memory chunk size
- * @param minPreallocated min chunks preallocated
  * @param maxPreallocated max chunks preallocated
  *
  * @return Success status, true if successful
@@ -49,26 +48,7 @@ typedef void* RtMemPool_Handle;
 bool rtsafe_memory_pool_create(RtMemPool_Handle* handlePtr,
                                const char* poolName,
                                size_t dataSize,
-                               size_t minPreallocated,
                                size_t maxPreallocated);
-
-/**
- * Create new memory pool, thread-safe version
- *
- * <b>may/will sleep</b>
- *
- * @param poolName pool name, for debug purposes, max RTSAFE_MEMORY_POOL_NAME_MAX chars, including terminating zero char. May be NULL.
- * @param dataSize memory chunk size
- * @param minPreallocated min chunks preallocated
- * @param maxPreallocated max chunks preallocated
- *
- * @return Success status, true if successful
- */
-bool rtsafe_memory_pool_create_safe(RtMemPool_Handle* handlePtr,
-                                    const char* poolName,
-                                    size_t dataSize,
-                                    size_t minPreallocated,
-                                    size_t maxPreallocated);
 
 /**
  * Destroy previously created memory pool
@@ -85,15 +65,6 @@ void rtsafe_memory_pool_destroy(RtMemPool_Handle handle);
  * @return Pointer to allocated memory or NULL if memory no memory is available
  */
 void* rtsafe_memory_pool_allocate_atomic(RtMemPool_Handle handle);
-
-/**
- * Allocate memory in context where sleeping is allowed
- *
- * <b>may/will sleep</b>
- *
- * @return Pointer to allocated memory or NULL if memory no memory is available (should not happen under normal conditions)
- */
-void* rtsafe_memory_pool_allocate_sleepy(RtMemPool_Handle handle);
 
 /**
  * Deallocate previously allocated memory

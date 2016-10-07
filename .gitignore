@@ -12,5 +12,6 @@ mod-host
 mod-host.install
 mod-host.service
 tests/effectlib_test
+tests/rtmempool-test
 src/info.h
 PKGBUILD

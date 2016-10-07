@@ -30,6 +30,7 @@
 #include <errno.h>
 #include <limits.h>
 #include <math.h>
+#include <float.h>
 #include <pthread.h>
 #include <cc/control_chain.h>
 
@@ -130,6 +131,7 @@ enum PortHints {
     HINT_TOGGLE        = 1 << 2,
     HINT_TRIGGER       = 1 << 3,
     HINT_LOGARITHMIC   = 1 << 4,
+    HINT_MONITORED     = 1 << 5, // outputs only
     // events
     HINT_OLD_EVENT_API = 1 << 0,
 };
@@ -148,6 +150,7 @@ enum {
 
 enum PostPonedEventType {
     POSTPONED_PARAM_SET,
+    POSTPONED_OUTPUT_MONITOR,
     POSTPONED_PROGRAM_LISTEN,
     POSTPONED_MIDI_MAP
 };
@@ -172,6 +175,7 @@ typedef struct PORT_T {
     float min_value;
     float max_value;
     float def_value;
+    float prev_value;
     LilvScalePoints* scale_points;
 } port_t;
 
@@ -250,14 +254,20 @@ typedef struct EFFECT_T {
 
     jack_ringbuffer_t *events_buffer;
 
+    // current and previous bypass state
     bool bypass;
     bool was_bypassed;
-    bool has_triggers; // avoids itenerating controls each cycle
+
+    // avoids itenerating controls each cycle
+    bool has_triggers;
+    bool has_output_monitors;
 } effect_t;
 
 typedef struct URIDS_T {
     LV2_URID atom_Float;
+    LV2_URID atom_Double;
     LV2_URID atom_Int;
+    LV2_URID atom_Long;
     LV2_URID atom_eventTransfer;
     LV2_URID bufsz_maxBlockLength;
     LV2_URID bufsz_minBlockLength;
@@ -282,7 +292,8 @@ typedef struct URIDS_T {
 typedef struct MIDI_CC_T {
     int8_t channel;
     int8_t controller;
-
+    float maximum;
+    float minimum;
     int effect_id;
     const char* symbol;
     const port_t* port;
@@ -302,6 +313,8 @@ typedef struct POSTPONED_EVENT_T {
     int8_t channel;
     int8_t controller;
     float value;
+    float maximum;
+    float minimum;
 } postponed_event_t;
 
 typedef struct POSTPONED_EVENT_LIST_DATA {
@@ -314,6 +327,12 @@ typedef struct POSTPONED_CACHED_SYMBOL_LIST_DATA {
     char symbol[MAX_CHAR_BUF_SIZE+1];
     struct list_head siblings;
 } postponed_cached_symbol_list_data;
+
+typedef struct POSTPONED_CACHED_EVENTS {
+    int last_effect_id;
+    char last_symbol[MAX_CHAR_BUF_SIZE+1];
+    postponed_cached_symbol_list_data symbols;
+} postponed_cached_events;
 
 
 /*
@@ -343,9 +362,10 @@ static struct list_head g_rtsafe_list;
 static RtMemPool_Handle g_rtsafe_mem_pool;
 static pthread_mutex_t  g_rtsafe_mutex;
 
-static volatile int g_postevents_running; // 0: stopped, 1: running, -1: stopped & about to close mod-host
-static sem_t        g_postevents_semaphore;
-static pthread_t    g_postevents_thread;
+static volatile int  g_postevents_running; // 0: stopped, 1: running, -1: stopped & about to close mod-host
+static volatile bool g_postevents_ready;
+static sem_t         g_postevents_semaphore;
+static pthread_t     g_postevents_thread;
 
 /* Jack */
 static jack_client_t *g_jack_global_client;
@@ -417,6 +437,12 @@ static void FreeFeatures(effect_t *effect);
 ************************************************************************************************************************
 */
 
+// safely compare 2 float values
+static bool FloatsDifferEnough(float a, float b)
+{
+    return fabsf(a - b) >= FLT_EPSILON;
+}
+
 static void InstanceDelete(int effect_id)
 {
     if (INSTANCE_IS_VALID(effect_id))
@@ -463,105 +489,172 @@ static int BufferSize(jack_nframes_t nframes, void* data)
     return SUCCESS;
 }
 
+static bool ShouldIgnorePostPonedEvent(postponed_event_list_data* ev, postponed_cached_events* cached_events)
+{
+    // we don't have symbol-less events that need caching
+    if (ev->event.symbol == NULL)
+        return false;
+
+    if (ev->event.effect_id == cached_events->last_effect_id &&
+        strncmp(ev->event.symbol, cached_events->last_symbol, MAX_CHAR_BUF_SIZE) == 0)
+    {
+        // already received this event, like just now
+        return true;
+    }
+
+    // we received some events, but last one was different
+    // we might be getting interleaved events, so let's check if it's there
+    struct list_head *it;
+    list_for_each(it, &cached_events->symbols.siblings)
+    {
+        postponed_cached_symbol_list_data* const psymbol = list_entry(it, postponed_cached_symbol_list_data, siblings);
+
+        if (ev->event.effect_id == psymbol->effect_id &&
+            strncmp(ev->event.symbol, psymbol->symbol, MAX_CHAR_BUF_SIZE) == 0)
+        {
+            // haha! found you little bastard!
+            return true;
+        }
+    }
+
+    // we'll process this event because it's the "last" of its type
+    // also add it to the list of received events
+    postponed_cached_symbol_list_data* const psymbol = malloc(sizeof(postponed_cached_symbol_list_data));
+
+    if (psymbol)
+    {
+        psymbol->effect_id = ev->event.effect_id;
+        strncpy(psymbol->symbol, ev->event.symbol, MAX_CHAR_BUF_SIZE);
+        psymbol->symbol[MAX_CHAR_BUF_SIZE] = '\0';
+        list_add_tail(&psymbol->siblings, &cached_events->symbols.siblings);
+    }
+
+    return false;
+}
+
 void RunPostPonedEvents(int ignored_effect_id)
 {
+    // local queue to where we'll save rtsafe list
     struct list_head queue;
     INIT_LIST_HEAD(&queue);
 
+    // move rtsafe list to our local queue, and clear it
     pthread_mutex_lock(&g_rtsafe_mutex);
-    list_splice_tail(&g_rtsafe_list, &queue);
-    INIT_LIST_HEAD(&g_rtsafe_list);
+    list_splice_init(&g_rtsafe_list, &queue);
     pthread_mutex_unlock(&g_rtsafe_mutex);
 
+    if (list_empty(&queue))
+    {
+        // nothing to do
+        return;
+    }
+
+    // local buffer
     char buf[MAX_CHAR_BUF_SIZE+1];
     buf[MAX_CHAR_BUF_SIZE] = '\0';
 
+    // cached data, to make sure we only handle similar events once
+    bool got_midi_program = false;
+    postponed_cached_events cached_param_set, cached_output_mon;
+    postponed_cached_symbol_list_data *psymbol;
+
+    cached_param_set.last_effect_id = -1;
+    cached_output_mon.last_effect_id = -1;
+    cached_param_set.last_symbol[MAX_CHAR_BUF_SIZE] = '\0';
+    cached_output_mon.last_symbol[MAX_CHAR_BUF_SIZE] = '\0';
+    INIT_LIST_HEAD(&cached_param_set.symbols.siblings);
+    INIT_LIST_HEAD(&cached_output_mon.symbols.siblings);
+
+    // itenerate backwards
     struct list_head *it, *it2;
     postponed_event_list_data* eventptr;
 
-    bool got_program = false;
-    int last_effect_id = -1;
-    char last_port_symbol[MAX_CHAR_BUF_SIZE+1];
-    last_port_symbol[MAX_CHAR_BUF_SIZE] = '\0';
-
-    struct list_head cached_symbols;
-    INIT_LIST_HEAD(&cached_symbols);
-
-    // itenerate backwards
     list_for_each_prev(it, &queue)
     {
         eventptr = list_entry(it, postponed_event_list_data, siblings);
 
-        if (eventptr->event.effect_id != ignored_effect_id)
+        // do not handle events for a plugin that is about to be removed
+        if (eventptr->event.effect_id == ignored_effect_id)
+            continue;
+
+        switch (eventptr->event.etype)
         {
-            switch (eventptr->event.etype)
-            {
-            case POSTPONED_PARAM_SET:
-                if (last_effect_id != -1)
-                {
-                    if (eventptr->event.effect_id == last_effect_id &&
-                        strcmp(eventptr->event.symbol, last_port_symbol) == 0)
-                    {
-                        // already received this event, like just now
-                        continue;
-                    }
+        case POSTPONED_PARAM_SET:
+            if (ShouldIgnorePostPonedEvent(eventptr, &cached_param_set))
+                continue;
 
-                    // we received some events, but last one was different
-                    // we might be getting interleaved events, so let's check if it's there
-                    list_for_each(it2, &cached_symbols)
-                    {
-                        postponed_cached_symbol_list_data* const cached_symbol = list_entry(it2, postponed_cached_symbol_list_data, siblings);
+            snprintf(buf, MAX_CHAR_BUF_SIZE, "param_set %i %s %f", eventptr->event.effect_id,
+                                                                   eventptr->event.symbol,
+                                                                   eventptr->event.value);
+            socket_send_feedback(buf);
 
-                        if (cached_symbol->effect_id == eventptr->event.effect_id &&
-                            strcmp(cached_symbol->symbol, eventptr->event.symbol) == 0)
-                        {
-                            // haha! found you little bastard!
-                            continue;
-                        }
-                    }
+            // save for fast checkup next time
+            cached_param_set.last_effect_id = eventptr->event.effect_id;
+            strncpy(cached_param_set.last_symbol, eventptr->event.symbol, MAX_CHAR_BUF_SIZE);
+            break;
 
-                    // we'll process this event because it's the "last" of its type
-                    // also add it to the list of received events
-                    postponed_cached_symbol_list_data* const cached_symbol = malloc(sizeof(postponed_cached_symbol_list_data));
-                    if (cached_symbol)
-                    {
-                        cached_symbol->effect_id = eventptr->event.effect_id;
-                        strncpy(cached_symbol->symbol, eventptr->event.symbol, MAX_CHAR_BUF_SIZE);
-                        cached_symbol->symbol[MAX_CHAR_BUF_SIZE] = '\0';
-                        list_add_tail(&cached_symbol->siblings, &cached_symbols);
-                    }
-                }
+        case POSTPONED_OUTPUT_MONITOR:
+            if (ShouldIgnorePostPonedEvent(eventptr, &cached_output_mon))
+                continue;
 
-                snprintf(buf, MAX_CHAR_BUF_SIZE, "param_set %i %s %f", eventptr->event.effect_id,
-                                                                       eventptr->event.symbol,
-                                                                       eventptr->event.value);
-                socket_send_feedback(buf);
+            snprintf(buf, MAX_CHAR_BUF_SIZE, "output_set %i %s %f", eventptr->event.effect_id,
+                                                                    eventptr->event.symbol,
+                                                                    eventptr->event.value);
+            socket_send_feedback(buf);
 
-                // save for fast checkup next time
-                last_effect_id = eventptr->event.effect_id;
-                strncpy(last_port_symbol, eventptr->event.symbol, MAX_CHAR_BUF_SIZE);
-                break;
+            // save for fast checkup next time
+            cached_output_mon.last_effect_id = eventptr->event.effect_id;
+            strncpy(cached_output_mon.last_symbol, eventptr->event.symbol, MAX_CHAR_BUF_SIZE);
+            break;
 
-            case POSTPONED_PROGRAM_LISTEN:
-                if (got_program)
-                    continue;
-                got_program = true;
-                snprintf(buf, MAX_CHAR_BUF_SIZE, "midi_program %i", eventptr->event.controller);
-                socket_send_feedback(buf);
-                break;
+        case POSTPONED_PROGRAM_LISTEN:
+            if (got_midi_program)
+                continue;
 
-            case POSTPONED_MIDI_MAP:
-                snprintf(buf, MAX_CHAR_BUF_SIZE, "midi_mapped %i %s %i %i %f", eventptr->event.effect_id,
-                                                                               eventptr->event.symbol,
-                                                                               eventptr->event.channel,
-                                                                               eventptr->event.controller,
-                                                                               eventptr->event.value);
-                socket_send_feedback(buf);
-                break;
-            }
+            snprintf(buf, MAX_CHAR_BUF_SIZE, "midi_program %i", eventptr->event.controller);
+            socket_send_feedback(buf);
+
+            // ignore next midi program
+            got_midi_program = true;
+            break;
+
+        case POSTPONED_MIDI_MAP:
+            snprintf(buf, MAX_CHAR_BUF_SIZE, "midi_mapped %i %s %i %i %f %f %f", eventptr->event.effect_id,
+                                                                                 eventptr->event.symbol,
+                                                                                 eventptr->event.channel,
+                                                                                 eventptr->event.controller,
+                                                                                 eventptr->event.value,
+                                                                                 eventptr->event.maximum,
+                                                                                 eventptr->event.minimum);
+            socket_send_feedback(buf);
+            break;
         }
+    }
 
+    // cleanup memory
+    list_for_each_safe(it, it2, &cached_param_set.symbols.siblings)
+    {
+        psymbol = list_entry(it, postponed_cached_symbol_list_data, siblings);
+        free(psymbol);
+    }
+    list_for_each_safe(it, it2, &cached_output_mon.symbols.siblings)
+    {
+        psymbol = list_entry(it, postponed_cached_symbol_list_data, siblings);
+        free(psymbol);
+    }
+
+    // cleanup memory of rt queue, safely
+    list_for_each_safe(it, it2, &queue)
+    {
+        eventptr = list_entry(it, postponed_event_list_data, siblings);
         rtsafe_memory_pool_deallocate(g_rtsafe_mem_pool, eventptr);
+    }
+
+    if (g_postevents_ready)
+    {
+        // report data finished to server
+        g_postevents_ready = false;
+        socket_send_feedback("data_finish");
     }
 }
 
@@ -572,7 +665,7 @@ static void* PostPonedEventsThread(void* arg)
         if (sem_timedwait_secs(&g_postevents_semaphore, 1) != 0)
             continue;
 
-        if (g_postevents_running == 1)
+        if (g_postevents_running == 1 && g_postevents_ready)
             RunPostPonedEvents(-3); // as all effects are valid we set ignored_effect_id to -3
     }
 
@@ -844,6 +937,50 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
         }
     }
 
+    if (effect->has_output_monitors)
+    {
+        bool needs_post = false;
+        float value;
+
+        for (i = 0; i < effect->output_control_ports_count; i++)
+        {
+            if ((effect->output_control_ports[i]->hints & HINT_MONITORED) == 0)
+                continue;
+
+            value = *(effect->output_control_ports[i]->buffer);
+
+            if (! FloatsDifferEnough(effect->output_control_ports[i]->prev_value, value))
+                continue;
+
+            postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
+
+            if (posteventptr == NULL)
+                continue;
+
+            effect->output_control_ports[i]->prev_value = value;
+
+            const postponed_event_t pevent = {
+                POSTPONED_OUTPUT_MONITOR,
+                effect->instance,
+                effect->output_control_ports[i]->symbol,
+                -1, -1,
+                value,
+                0.0f, 0.0f
+            };
+
+            memcpy(&posteventptr->event, &pevent, sizeof(postponed_event_t));
+
+            pthread_mutex_lock(&g_rtsafe_mutex);
+            list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
+            pthread_mutex_unlock(&g_rtsafe_mutex);
+
+            needs_post = true;
+        }
+
+        if (needs_post)
+            sem_post(&g_postevents_semaphore);
+    }
+
     effect->was_bypassed = effect->bypass;
 
     return 0;
@@ -862,8 +999,6 @@ static float UpdateValueFromMidi(midi_cc_t* mcc, jack_midi_data_t mvalue)
         float value;
 
         port = mcc->port;
-
-        // TODO: support custom ranges
 
         if (port->hints & HINT_TRIGGER)
         {
@@ -889,9 +1024,14 @@ static float UpdateValueFromMidi(midi_cc_t* mcc, jack_midi_data_t mvalue)
 
             // real value
             if (port->hints & HINT_LOGARITHMIC)
-                value = port->min_value * powf(port->max_value/port->min_value, value);
+            {
+                // FIXME: calculate value properly (don't do log on custom scale, use port min/max then adjust)
+                value = mcc->minimum * powf(mcc->maximum/mcc->minimum, value);
+            }
             else
-                value = port->min_value + (port->max_value - port->min_value) * value;
+            {
+                value = mcc->minimum + (mcc->maximum - mcc->minimum) * value;
+            }
         }
 
         // set param value
@@ -938,7 +1078,7 @@ static int ProcessMonitorMidi(jack_nframes_t nframes, void *arg)
                     POSTPONED_PROGRAM_LISTEN,
                     -1, NULL, -1,
                     event.buffer[1],
-                    0.0f
+                    0.0f, 0.0f, 0.0f
                 };
                 memcpy(&posteventptr->event, &pevent, sizeof(postponed_event_t));
 
@@ -969,6 +1109,7 @@ static int ProcessMonitorMidi(jack_nframes_t nframes, void *arg)
             if (g_midi_cc_list[i].effect_id == MIDI_LEARN_UNUSED)
                 continue;
 
+            // TODO: avoid race condition against effects_midi_unmap
             if (g_midi_cc_list[i].channel    == channel &&
                 g_midi_cc_list[i].controller == controller)
             {
@@ -984,7 +1125,8 @@ static int ProcessMonitorMidi(jack_nframes_t nframes, void *arg)
                         g_midi_cc_list[i].effect_id,
                         g_midi_cc_list[i].symbol,
                         -1, -1,
-                        value
+                        value,
+                        0.0f, 0.0f
                     };
                     memcpy(&posteventptr->event, &pevent, sizeof(postponed_event_t));
 
@@ -1003,12 +1145,15 @@ static int ProcessMonitorMidi(jack_nframes_t nframes, void *arg)
         {
             int effect_id;
             const char* symbol;
+            float maximum, minimum;
 
             pthread_mutex_lock(&g_midi_learning_mutex);
             if (g_midi_learning != NULL)
             {
                 effect_id = g_midi_learning->effect_id;
                 symbol    = g_midi_learning->symbol;
+                maximum   = g_midi_learning->maximum;
+                minimum   = g_midi_learning->minimum;
                 value     = UpdateValueFromMidi(g_midi_learning, event.buffer[2]);
                 g_midi_learning->channel    = channel;
                 g_midi_learning->controller = controller;
@@ -1026,15 +1171,17 @@ static int ProcessMonitorMidi(jack_nframes_t nframes, void *arg)
 
                 if (posteventptr)
                 {
-                    const postponed_event_t event = {
+                    const postponed_event_t pevent = {
                         POSTPONED_MIDI_MAP,
                         effect_id,
                         symbol,
                         channel,
                         controller,
-                        value
+                        value,
+                        maximum,
+                        minimum
                     };
-                    memcpy(&posteventptr->event, &event, sizeof(postponed_event_t));
+                    memcpy(&posteventptr->event, &pevent, sizeof(postponed_event_t));
 
                     pthread_mutex_lock(&g_rtsafe_mutex);
                     list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
@@ -1141,12 +1288,22 @@ property_t *FindEffectPropertyByLabel(effect_t *effect, const char *label)
     return NULL;
 }
 
-port_t *FindEffectPortBySymbol(effect_t *effect, const char *control_symbol)
+port_t *FindEffectInputPortBySymbol(effect_t *effect, const char *control_symbol)
 {
     for (uint32_t i = 0; i < effect->input_control_ports_count; i++)
     {
         if (strcmp(effect->input_control_ports[i]->symbol, control_symbol) == 0)
             return effect->input_control_ports[i];
+    }
+    return NULL;
+}
+
+port_t *FindEffectOutputPortBySymbol(effect_t *effect, const char *control_symbol)
+{
+    for (uint32_t i = 0; i < effect->output_control_ports_count; i++)
+    {
+        if (strcmp(effect->output_control_ports[i]->symbol, control_symbol) == 0)
+            return effect->output_control_ports[i];
     }
     return NULL;
 }
@@ -1164,11 +1321,23 @@ static void SetParameterFromState(const char* symbol, void* user_data,
             return;
         realvalue = *((float*)value);
     }
+    else if (type == g_urids.atom_Double)
+    {
+        if (size != sizeof(double))
+            return;
+        realvalue = *((double*)value);
+    }
     else if (type == g_urids.atom_Int)
     {
         if (size != sizeof(int32_t))
             return;
         realvalue = *((int32_t*)value);
+    }
+    else if (type == g_urids.atom_Long)
+    {
+        if (size != sizeof(int64_t))
+            return;
+        realvalue = *((int64_t*)value);
     }
     else
     {
@@ -1183,7 +1352,7 @@ static const void* GetPortValueForState(const char* symbol, void* user_data,
                                   uint32_t* size, uint32_t* type)
 {
     effect_t *effect = (effect_t*)user_data;
-    port_t *port = FindEffectPortBySymbol(effect, symbol);
+    port_t *port = FindEffectInputPortBySymbol(effect, symbol);
     if (port)
     {
         *size = sizeof(float);
@@ -1212,6 +1381,7 @@ int LoadPresets(effect_t *effect)
         j++;
     }
     lilv_nodes_free(presets);
+    lilv_node_free(preset_uri);
 
     return 0;
 }
@@ -1222,12 +1392,8 @@ static void FreeFeatures(effect_t *effect)
 
     if (effect->features)
     {
-        if (effect->features[WORKER_FEATURE]->data)
-            free(effect->features[WORKER_FEATURE]->data);
-
-        if (effect->features[WORKER_FEATURE])
-            free((void*)effect->features[WORKER_FEATURE]);
-
+        free(effect->features[WORKER_FEATURE]->data);
+        free((void*)effect->features[WORKER_FEATURE]);
         free(effect->features);
     }
 }
@@ -1281,7 +1447,8 @@ int effects_init(void* client)
 
     INIT_LIST_HEAD(&g_rtsafe_list);
 
-    if (!rtsafe_memory_pool_create(&g_rtsafe_mem_pool, "mod-host", sizeof(postponed_event_list_data), MAX_MIDI_CC_ASSIGN, MAX_MIDI_CC_ASSIGN))
+    if (!rtsafe_memory_pool_create(&g_rtsafe_mem_pool, "mod-host", sizeof(postponed_event_list_data),
+                                   MAX_POSTPONED_EVENTS))
     {
         fprintf(stderr, "can't allocate realtime-safe memory pool\n");
         if (client == NULL)
@@ -1365,11 +1532,25 @@ int effects_init(void* client)
     if (jack_port_by_name(g_jack_global_client, "mod-peakmeter:in_4") != NULL)
         jack_connect(g_jack_global_client, ourportname, "mod-peakmeter:in_4");
 
-    /* Connect serial midi port if it exists */
-    if (jack_port_by_name(g_jack_global_client, "ttymidi:MIDI_in") != NULL)
+    /* Connect to all good hw ports (system, ttymidi and nooice) */
+    const char** const midihwports = jack_get_ports(g_jack_global_client, "", JACK_DEFAULT_MIDI_TYPE,
+                                                                              JackPortIsOutput|JackPortIsPhysical);
+    if (midihwports != NULL)
     {
         snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:midi_in", ourclientname);
-        jack_connect(g_jack_global_client, "ttymidi:MIDI_in", ourportname);
+
+        for (int i=0; midihwports[i] != NULL; ++i)
+        {
+            const char* const portname = midihwports[i];
+            if (strncmp(portname, "ttymidi:", 8) != 0 &&
+                strncmp(portname, "system:", 7) != 0 &&
+                strncmp(portname, "nooice", 5) != 0)
+                continue;
+
+            jack_connect(g_jack_global_client, portname, ourportname);
+        }
+
+        jack_free(midihwports);
     }
 
     /* Load all LV2 data */
@@ -1394,7 +1575,9 @@ int effects_init(void* client)
     g_urid_unmap.unmap = id_to_urid;
 
     g_urids.atom_Float           = urid_to_id(g_symap, LV2_ATOM__Float);
+    g_urids.atom_Double          = urid_to_id(g_symap, LV2_ATOM__Double);
     g_urids.atom_Int             = urid_to_id(g_symap, LV2_ATOM__Int);
+    g_urids.atom_Long            = urid_to_id(g_symap, LV2_ATOM__Long);
     g_urids.atom_eventTransfer   = urid_to_id(g_symap, LV2_ATOM__eventTransfer);
 
     g_urids.bufsz_maxBlockLength     = urid_to_id(g_symap, LV2_BUF_SIZE__maxBlockLength);
@@ -1469,6 +1652,8 @@ int effects_init(void* client)
     {
         g_midi_cc_list[i].channel = -1;
         g_midi_cc_list[i].controller = -1;
+        g_midi_cc_list[i].maximum = 1.0f;
+        g_midi_cc_list[i].minimum = 0.0f;
         g_midi_cc_list[i].effect_id = MIDI_LEARN_NULL;
         g_midi_cc_list[i].symbol = NULL;
         g_midi_cc_list[i].port = NULL;
@@ -1477,6 +1662,7 @@ int effects_init(void* client)
     g_midi_program_listen = 0;
 
     g_postevents_running = 1;
+    g_postevents_ready = true;
     pthread_create(&g_postevents_thread, NULL, PostPonedEventsThread, NULL);
 
     /* Init control chain */
@@ -1853,10 +2039,15 @@ int effects_add(const char *uid, int instance)
             effect->ports[i]->def_value = def_value;
             effect->ports[i]->min_value = min_value;
             effect->ports[i]->max_value = max_value;
+            effect->ports[i]->prev_value = def_value;
 
             control_ports_count++;
             if (lilv_port_is_a(plugin, lilv_port, lilv_input)) input_control_ports_count++;
             else if (lilv_port_is_a(plugin, lilv_port, lilv_output)) output_control_ports_count++;
+
+            lilv_nodes_free(lilvvalue_maximum);
+            lilv_nodes_free(lilvvalue_minimum);
+            lilv_nodes_free(lilvvalue_default);
         }
         else if (lilv_port_is_a(plugin, lilv_port, lilv_cv))
         {
@@ -2079,6 +2270,7 @@ int effects_add(const char *uid, int instance)
     lilv_node_free(lilv_integer);
     lilv_node_free(lilv_toggled);
     lilv_node_free(lilv_trigger);
+    lilv_node_free(lilv_logarithmic);
     lilv_node_free(lilv_output);
     lilv_node_free(lilv_event);
     lilv_node_free(lilv_midi);
@@ -2104,21 +2296,6 @@ int effects_add(const char *uid, int instance)
         effect->events_buffer = jack_ringbuffer_create(g_midi_buffer_size * 16); // 16 taken from jalv source code
         jack_ringbuffer_mlock(effect->events_buffer);
     }
-
-    /* simulate a jack process callback, needed for plugins that do non-rt-safe stuff on their 1st run */
-    for (i = 0; i < effect->input_event_ports_count; i++)
-        lv2_evbuf_reset(effect->input_event_ports[i]->evbuf, true);
-
-    for (i = 0; i < effect->output_event_ports_count; i++)
-        lv2_evbuf_reset(effect->output_event_ports[i]->evbuf, false);
-
-    for (i = 0; i < effect->input_audio_ports_count; i++)
-        memset(effect->input_audio_ports[i]->buffer, 0, (sizeof(float) * g_block_length));
-
-    for (i = 0; i < effect->input_cv_ports_count; i++)
-        memset(effect->input_cv_ports[i]->buffer, 0, (sizeof(float) * g_block_length));
-
-    lilv_instance_run(effect->lilv_instance, g_block_length);
 
     /* Try activate the Jack client */
     if (jack_activate(jack_client) != 0)
@@ -2298,11 +2475,16 @@ int effects_remove(int effect_id)
 
             if (effect->ports)
             {
+                for (i = 0; i < effect->event_ports_count; i++)
+                {
+                    lv2_evbuf_free(effect->event_ports[i]->evbuf);
+                }
                 for (i = 0; i < effect->ports_count; i++)
                 {
                     if (effect->ports[i])
                     {
-                        if (effect->ports[i]->buffer) free(effect->ports[i]->buffer);
+                        free(effect->ports[i]->buffer);
+                        lilv_scale_points_free(effect->ports[i]->scale_points);
                         free(effect->ports[i]);
                     }
                 }
@@ -2313,50 +2495,69 @@ int effects_remove(int effect_id)
             lilv_instance_free(effect->lilv_instance);
             if (effect->jack_client) jack_client_close(effect->jack_client);
 
-            if (effect->audio_ports) free(effect->audio_ports);
-            if (effect->input_audio_ports) free(effect->input_audio_ports);
-            if (effect->output_audio_ports) free(effect->output_audio_ports);
-            if (effect->control_ports) free(effect->control_ports);
+            free(effect->audio_ports);
+            free(effect->input_audio_ports);
+            free(effect->output_audio_ports);
+            free(effect->control_ports);
 
             if (effect->presets)
             {
                 for (i = 0; i < effect->presets_count; i++)
                 {
-                    if (effect->presets[i])
-                    {
-                        free(effect->presets[i]);
-                    }
+                    free(effect->presets[i]);
                 }
                 free(effect->presets);
             }
-
 
             InstanceDelete(j);
         }
     }
 
-    pthread_mutex_lock(&g_midi_learning_mutex);
-    g_midi_learning = NULL;
-    pthread_mutex_unlock(&g_midi_learning_mutex);
-
     if (effect_id == REMOVE_ALL)
     {
+        pthread_mutex_lock(&g_midi_learning_mutex);
+        g_midi_learning = NULL;
+        pthread_mutex_unlock(&g_midi_learning_mutex);
+
         for (int i = 0; i < MAX_MIDI_CC_ASSIGN; i++)
         {
-            g_midi_cc_list[i].effect_id = MIDI_LEARN_NULL;
             g_midi_cc_list[i].channel = -1;
             g_midi_cc_list[i].controller = -1;
+            g_midi_cc_list[i].maximum = 1.0f;
+            g_midi_cc_list[i].minimum = 0.0f;
+            g_midi_cc_list[i].effect_id = MIDI_LEARN_NULL;
             g_midi_cc_list[i].symbol = NULL;
             g_midi_cc_list[i].port = NULL;
         }
 
         // reset all events
         pthread_mutex_lock(&g_rtsafe_mutex);
+
+        // cleanup pending events memory
+        struct list_head *it;
+        postponed_event_list_data* eventptr;
+
+        list_for_each(it, &g_rtsafe_list)
+        {
+            eventptr = list_entry(it, postponed_event_list_data, siblings);
+            rtsafe_memory_pool_deallocate(g_rtsafe_mem_pool, eventptr);
+        }
+
         INIT_LIST_HEAD(&g_rtsafe_list);
         pthread_mutex_unlock(&g_rtsafe_mutex);
     }
     else
     {
+        pthread_mutex_lock(&g_midi_learning_mutex);
+        if (g_midi_learning != NULL && g_midi_learning->effect_id == effect_id)
+        {
+            g_midi_learning->effect_id = MIDI_LEARN_UNUSED;
+            g_midi_learning->symbol = NULL;
+            g_midi_learning->port = NULL;
+            g_midi_learning = NULL;
+        }
+        pthread_mutex_unlock(&g_midi_learning_mutex);
+
         for (int i = 0; i < MAX_MIDI_CC_ASSIGN; i++)
         {
             if (g_midi_cc_list[i].effect_id == MIDI_LEARN_NULL)
@@ -2369,6 +2570,8 @@ int effects_remove(int effect_id)
             g_midi_cc_list[i].effect_id = MIDI_LEARN_UNUSED;
             g_midi_cc_list[i].channel = -1;
             g_midi_cc_list[i].controller = -1;
+            g_midi_cc_list[i].maximum = 1.0f;
+            g_midi_cc_list[i].minimum = 0.0f;
             g_midi_cc_list[i].symbol = NULL;
             g_midi_cc_list[i].port = NULL;
         }
@@ -2436,7 +2639,7 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
             }
         }
 
-        port = FindEffectPortBySymbol(&(g_effects[effect_id]), control_symbol);
+        port = FindEffectInputPortBySymbol(&(g_effects[effect_id]), control_symbol);
         if (port)
         {
             // stores the data of the current control
@@ -2495,7 +2698,7 @@ int effects_get_parameter(int effect_id, const char *control_symbol, float *valu
 
     if (InstanceExist(effect_id))
     {
-        port = FindEffectPortBySymbol(&(g_effects[effect_id]), control_symbol);
+        port = FindEffectInputPortBySymbol(&(g_effects[effect_id]), control_symbol);
         if (port)
         {
            (*value) = *(port->buffer);
@@ -2530,7 +2733,7 @@ int effects_monitor_parameter(int effect_id, const char *control_symbol, const c
     else if (strcmp(op, "!=") == 0)
         iop = 5;
     else
-        return -1;
+        return ERR_ASSIGNMENT_INVALID_OP;
 
 
     const LilvNode *symbol = lilv_new_string(g_lv2_data, control_symbol);
@@ -2548,7 +2751,33 @@ int effects_monitor_parameter(int effect_id, const char *control_symbol, const c
     g_effects[effect_id].monitors[idx]->op = iop;
     g_effects[effect_id].monitors[idx]->value = value;
     g_effects[effect_id].monitors[idx]->last_notified_value = 0.0;
-    return 0;
+    return SUCCESS;
+}
+
+int effects_monitor_output_parameter(int effect_id, const char *control_symbol)
+{
+    port_t *port;
+
+    if (!InstanceExist(effect_id))
+        return ERR_INSTANCE_NON_EXISTS;
+
+    port = FindEffectOutputPortBySymbol(&(g_effects[effect_id]), control_symbol);
+
+    if (port == NULL)
+        return ERR_LV2_INVALID_PARAM_SYMBOL;
+
+    // check if already monitored
+    if (port->hints & HINT_MONITORED)
+        return SUCCESS;
+
+    // set prev_value
+    port->prev_value = (*port->buffer);
+    port->hints |= HINT_MONITORED;
+
+    // activate output monitor
+    g_effects[effect_id].has_output_monitors = true;
+
+    return SUCCESS;
 }
 
 int effects_bypass(int effect_id, int value)
@@ -2654,7 +2883,7 @@ int effects_get_parameter_info(int effect_id, const char *control_symbol, float 
     return ERR_LV2_INVALID_PARAM_SYMBOL;
 }
 
-int effects_midi_learn(int effect_id, const char *control_symbol)
+int effects_midi_learn(int effect_id, const char *control_symbol, float maximum, float minimum)
 {
     const port_t *port;
 
@@ -2663,8 +2892,16 @@ int effects_midi_learn(int effect_id, const char *control_symbol)
         return ERR_INSTANCE_NON_EXISTS;
     }
 
+    const bool is_bypass = !strcmp(control_symbol, g_bypass_port_symbol);
+
     pthread_mutex_lock(&g_midi_learning_mutex);
-    g_midi_learning = NULL;
+    if (g_midi_learning != NULL)
+    {
+        g_midi_learning->effect_id = MIDI_LEARN_UNUSED;
+        g_midi_learning->symbol = NULL;
+        g_midi_learning->port = NULL;
+        g_midi_learning = NULL;
+    }
     pthread_mutex_unlock(&g_midi_learning_mutex);
 
     // if already mapped set it to re-learn
@@ -2682,6 +2919,12 @@ int effects_midi_learn(int effect_id, const char *control_symbol)
         g_midi_cc_list[i].channel = -1;
         g_midi_cc_list[i].controller = -1;
 
+        if (!is_bypass)
+        {
+            g_midi_cc_list[i].maximum = maximum;
+            g_midi_cc_list[i].minimum = minimum;
+        }
+
         pthread_mutex_lock(&g_midi_learning_mutex);
         g_midi_learning = &g_midi_cc_list[i];
         pthread_mutex_unlock(&g_midi_learning_mutex);
@@ -2694,25 +2937,27 @@ int effects_midi_learn(int effect_id, const char *control_symbol)
         if (INSTANCE_IS_VALID(g_midi_cc_list[i].effect_id))
             continue;
 
-        g_midi_cc_list[i].channel = -1;
-        g_midi_cc_list[i].controller = -1;
-        g_midi_cc_list[i].effect_id = effect_id;
-
-        if (!strcmp(control_symbol, g_bypass_port_symbol))
+        if (is_bypass)
         {
             g_midi_cc_list[i].symbol = g_bypass_port_symbol;
             g_midi_cc_list[i].port = NULL;
         }
         else
         {
-            port = FindEffectPortBySymbol(&(g_effects[effect_id]), control_symbol);
+            port = FindEffectInputPortBySymbol(&(g_effects[effect_id]), control_symbol);
 
             if (port == NULL)
                 return ERR_LV2_INVALID_PARAM_SYMBOL;
 
+            g_midi_cc_list[i].maximum = maximum;
+            g_midi_cc_list[i].minimum = minimum;
             g_midi_cc_list[i].symbol = port->symbol;
             g_midi_cc_list[i].port = port;
         }
+
+        g_midi_cc_list[i].channel = -1;
+        g_midi_cc_list[i].controller = -1;
+        g_midi_cc_list[i].effect_id = effect_id;
 
         pthread_mutex_lock(&g_midi_learning_mutex);
         g_midi_learning = &g_midi_cc_list[i];
@@ -2720,10 +2965,10 @@ int effects_midi_learn(int effect_id, const char *control_symbol)
         return SUCCESS;
     }
 
-    return ERR_MIDI_ASSIGNMENT_LIST_IS_FULL;
+    return ERR_ASSIGNMENT_LIST_FULL;
 }
 
-int effects_midi_map(int effect_id, const char *control_symbol, int channel, int controller)
+int effects_midi_map(int effect_id, const char *control_symbol, int channel, int controller, float maximum, float minimum)
 {
     const port_t *port;
 
@@ -2731,6 +2976,8 @@ int effects_midi_map(int effect_id, const char *control_symbol, int channel, int
     {
         return ERR_INSTANCE_NON_EXISTS;
     }
+
+    const bool is_bypass = !strcmp(control_symbol, g_bypass_port_symbol);
 
     // update current mapping first if it exists
     for (int i = 0; i < MAX_MIDI_CC_ASSIGN; i++)
@@ -2746,6 +2993,13 @@ int effects_midi_map(int effect_id, const char *control_symbol, int channel, int
 
         g_midi_cc_list[i].channel = channel;
         g_midi_cc_list[i].controller = controller;
+
+        if (!is_bypass)
+        {
+            g_midi_cc_list[i].maximum = maximum;
+            g_midi_cc_list[i].minimum = minimum;
+        }
+
         return SUCCESS;
     }
 
@@ -2755,29 +3009,31 @@ int effects_midi_map(int effect_id, const char *control_symbol, int channel, int
         if (INSTANCE_IS_VALID(g_midi_cc_list[i].effect_id))
             continue;
 
-        g_midi_cc_list[i].channel = channel;
-        g_midi_cc_list[i].controller = controller;
-        g_midi_cc_list[i].effect_id = effect_id;
-
-        if (!strcmp(control_symbol, g_bypass_port_symbol))
+        if (is_bypass)
         {
             g_midi_cc_list[i].symbol = g_bypass_port_symbol;
             g_midi_cc_list[i].port = NULL;
         }
         else
         {
-            port = FindEffectPortBySymbol(&(g_effects[effect_id]), control_symbol);
+            port = FindEffectInputPortBySymbol(&(g_effects[effect_id]), control_symbol);
 
             if (port == NULL)
                 return ERR_LV2_INVALID_PARAM_SYMBOL;
 
+            g_midi_cc_list[i].maximum = maximum;
+            g_midi_cc_list[i].minimum = minimum;
             g_midi_cc_list[i].symbol = port->symbol;
             g_midi_cc_list[i].port = port;
         }
+
+        g_midi_cc_list[i].channel = channel;
+        g_midi_cc_list[i].controller = controller;
+        g_midi_cc_list[i].effect_id = effect_id;
         return SUCCESS;
     }
 
-    return ERR_MIDI_ASSIGNMENT_LIST_IS_FULL;
+    return ERR_ASSIGNMENT_LIST_FULL;
 }
 
 int effects_midi_unmap(int effect_id, const char *control_symbol)
@@ -2805,13 +3061,15 @@ int effects_midi_unmap(int effect_id, const char *control_symbol)
 
         g_midi_cc_list[i].channel = -1;
         g_midi_cc_list[i].controller = -1;
+        g_midi_cc_list[i].maximum = 1.0f;
+        g_midi_cc_list[i].minimum = 0.0f;
         g_midi_cc_list[i].effect_id = MIDI_LEARN_UNUSED;
         g_midi_cc_list[i].symbol = NULL;
         g_midi_cc_list[i].port = NULL;
         return SUCCESS;
     }
 
-    return ERR_MIDI_PARAM_NOT_FOUND;
+    return ERR_LV2_INVALID_PARAM_SYMBOL;
 }
 
 void effects_midi_program_listen(int enable, int channel)
@@ -2979,4 +3237,13 @@ void effects_bundle_remove(const char* bpath)
     // refresh plugins
     g_plugins = lilv_world_get_all_plugins(g_lv2_data);
 #endif
+}
+
+void effects_output_data_ready(void)
+{
+    if (! g_postevents_ready)
+    {
+        g_postevents_ready = true;
+        sem_post(&g_postevents_semaphore);
+    }
 }

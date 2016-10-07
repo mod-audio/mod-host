@@ -128,6 +128,11 @@ int socket_start(int port, int buffer_size)
     setsockopt(g_serverfd, SOL_SOCKET, MOD_SOCKET_FLAGS, &value, sizeof(value));
     setsockopt(g_fbserverfd, SOL_SOCKET, MOD_SOCKET_FLAGS, &value, sizeof(value));
 
+    /* increase socket size */
+    value = 131071;
+    setsockopt(g_serverfd, SOL_SOCKET, SO_RCVBUF, &value, sizeof(value));
+    setsockopt(g_fbserverfd, SOL_SOCKET, SO_RCVBUF, &value, sizeof(value));
+
     /* Startup the socket struct */
     struct sockaddr_in serv_addr;
     memset((char *) &serv_addr, 0, sizeof(serv_addr));
@@ -166,6 +171,9 @@ int socket_start(int port, int buffer_size)
 
 void socket_finish(void)
 {
+    if (g_serverfd == -1)
+        return;
+
     // make local copies so that we can invalidate these vars first
     int serverfd   = g_serverfd;
     int fbserverfd = g_fbserverfd;

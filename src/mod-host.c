@@ -38,6 +38,7 @@
 #include <jack/jack.h>
 #include <readline/readline.h>
 #include <readline/history.h>
+#include <signal.h>
 
 #ifdef HAVE_FFTW335
 #include <fftw3.h>
@@ -81,9 +82,10 @@
 extern const char help_msg[];
 /* The version is extracted from git history */
 extern const char version[];
+/* Wherever we should be running */
+static volatile int running;
 /* Thread that calls socket_run() for the JACK internal client */
 static pthread_t intclient_socket_thread;
-static volatile int intclient_running;
 
 /*
 ************************************************************************************************************************
@@ -267,10 +269,20 @@ static void monitor_addr_set_cb(proto_t *proto)
     protocol_response(buffer, proto);
 }
 
+static void monitor_output_cb(proto_t *proto)
+{
+    int resp;
+    resp = !effects_monitor_output_parameter(atoi(proto->list[1]), proto->list[2]);
+
+    char buffer[128];
+    sprintf(buffer, "resp %i", resp);
+    protocol_response(buffer, proto);
+}
+
 static void midi_learn_cb(proto_t *proto)
 {
     int resp;
-    resp = !effects_midi_learn(atoi(proto->list[1]), proto->list[2]);
+    resp = !effects_midi_learn(atoi(proto->list[1]), proto->list[2], atof(proto->list[3]), atof(proto->list[4]));
 
     char buffer[128];
     sprintf(buffer, "resp %i", resp);
@@ -280,7 +292,9 @@ static void midi_learn_cb(proto_t *proto)
 static void midi_map_cb(proto_t *proto)
 {
     int resp;
-    resp = !effects_midi_map(atoi(proto->list[1]), proto->list[2], atoi(proto->list[3]), atoi(proto->list[4]));
+    resp = !effects_midi_map(atoi(proto->list[1]), proto->list[2],
+                             atoi(proto->list[3]), atoi(proto->list[4]),
+                             atof(proto->list[5]), atof(proto->list[6]));
 
     char buffer[128];
     sprintf(buffer, "resp %i", resp);
@@ -397,6 +411,12 @@ static void bundle_remove(proto_t *proto)
     protocol_response("resp 0", proto);
 }
 
+static void output_data_ready(proto_t *proto)
+{
+    effects_output_data_ready();
+    protocol_response("resp 0", proto);
+}
+
 static void help_cb(proto_t *proto)
 {
     proto->response = 0;
@@ -452,6 +472,15 @@ static void interactive_mode(void)
     }
 }
 
+static void term_signal(int sig)
+{
+    running = 0;
+    socket_finish();
+
+    /* unused */
+    return; (void)sig;
+}
+
 static int mod_host_init(jack_client_t* client, int socket_port)
 {
 #ifdef HAVE_FFTW335
@@ -477,6 +506,7 @@ static int mod_host_init(jack_client_t* client, int socket_port)
     protocol_add_command(EFFECT_PARAM_GET, effects_get_param_cb);
     protocol_add_command(EFFECT_PARAM_MON, effects_monitor_param_cb);
     protocol_add_command(MONITOR_ADDR_SET, monitor_addr_set_cb);
+    protocol_add_command(MONITOR_OUTPUT, monitor_output_cb);
     protocol_add_command(MIDI_LEARN, midi_learn_cb);
     protocol_add_command(MIDI_MAP, midi_map_cb);
     protocol_add_command(MIDI_UNMAP, midi_unmap_cb);
@@ -488,6 +518,7 @@ static int mod_host_init(jack_client_t* client, int socket_port)
     protocol_add_command(SAVE_COMMANDS, save_cb);
     protocol_add_command(BUNDLE_ADD, bundle_add);
     protocol_add_command(BUNDLE_REMOVE, bundle_remove);
+    protocol_add_command(OUTPUT_DATA_READY, output_data_ready);
 
     /* skip help and quit for internal client */
     if (client == NULL)
@@ -511,7 +542,7 @@ static int mod_host_init(jack_client_t* client, int socket_port)
 
 static void* intclient_socket_run(void* ptr)
 {
-    while (intclient_running)
+    while (running)
         socket_run(0);
 
     /* unused */
@@ -619,7 +650,20 @@ int main(int argc, char **argv)
 
     /* Interactice mode */
     if (interactive)
+    {
         interactive_mode();
+    }
+    else
+    {
+        struct sigaction sig;
+        memset(&sig, 0, sizeof(sig));
+
+        sig.sa_handler = term_signal;
+        sig.sa_flags   = SA_RESTART;
+        sigemptyset(&sig.sa_mask);
+        sigaction(SIGTERM, &sig, NULL);
+        sigaction(SIGINT, &sig, NULL);
+    }
 
     /* Verbose */
     protocol_verbose(verbose);
@@ -628,7 +672,8 @@ int main(int argc, char **argv)
     printf("mod-host ready!\n");
     fflush(stdout);
 
-    while (1) socket_run(1);
+    running = 1;
+    while (running) socket_run(interactive);
 
     socket_finish();
     effects_finish(1);
@@ -650,7 +695,7 @@ int jack_initialize(jack_client_t* client, const char* load_init)
     if (mod_host_init(client, socket_port) != 0)
         return 1;
 
-    intclient_running = 1;
+    running = 1;
     pthread_create(&intclient_socket_thread, NULL, intclient_socket_run, NULL);
 
     return 0;
@@ -661,7 +706,7 @@ void jack_finish(void);
 
 void jack_finish(void)
 {
-    intclient_running = 0;
+    running = 0;
     socket_finish();
     pthread_join(intclient_socket_thread, NULL);
     effects_finish(0);

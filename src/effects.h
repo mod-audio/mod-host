@@ -59,8 +59,9 @@ enum {
     ERR_JACK_PORT_CONNECTION = -205,
     ERR_JACK_PORT_DISCONNECTION = -206,
 
-    ERR_MIDI_ASSIGNMENT_LIST_IS_FULL = -301,
-    ERR_MIDI_PARAM_NOT_FOUND = -302,
+    ERR_ASSIGNMENT_ALREADY_EXISTS = -301,
+    ERR_ASSIGNMENT_INVALID_OP = -302,
+    ERR_ASSIGNMENT_LIST_FULL = -303,
 
     ERR_MEMORY_ALLOCATION = -901,
 };
@@ -74,6 +75,7 @@ enum {
 
 #define MAX_INSTANCES           10000
 #define MAX_MIDI_CC_ASSIGN      1024
+#define MAX_POSTPONED_EVENTS    8192
 
 // used for local stack variables
 #define MAX_CHAR_BUF_SIZE       255
@@ -119,12 +121,13 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
 int effects_set_property(int effect_id, const char *label, const char *value);
 int effects_get_parameter(int effect_id, const char *control_symbol, float *value);
 int effects_monitor_parameter(int effect_id, const char *control_symbol, const char *op, float value);
+int effects_monitor_output_parameter(int effect_id, const char *control_symbol);
 int effects_bypass(int effect_id, int value);
 int effects_get_parameter_symbols(int effect_id, char** symbols);
 int effects_get_presets_uris(int effect_id, char **uris);
 int effects_get_parameter_info(int effect_id, const char *control_symbol, float **range, const char **scale_points);
-int effects_midi_learn(int effect_id, const char *control_symbol);
-int effects_midi_map(int effect_id, const char *control_symbol, int channel, int controller);
+int effects_midi_learn(int effect_id, const char *control_symbol, float maximum, float minimum);
+int effects_midi_map(int effect_id, const char *control_symbol, int channel, int controller, float maximum, float minimum);
 int effects_midi_unmap(int effect_id, const char *control_symbol);
 void effects_midi_program_listen(int enable, int channel);
 int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int actuator_id);
@@ -132,6 +135,7 @@ int effects_cc_unmap(int effect_id, const char *control_symbol);
 float effects_jack_cpu_load(void);
 void effects_bundle_add(const char* bundlepath);
 void effects_bundle_remove(const char* bundlepath);
+void effects_output_data_ready(void);
 
 /*
 ************************************************************************************************************************
