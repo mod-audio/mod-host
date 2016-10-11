@@ -32,7 +32,6 @@
 #include <math.h>
 #include <float.h>
 #include <pthread.h>
-#include <cc/control_chain.h>
 
 /* Jack */
 #include <jack/jack.h>
@@ -55,6 +54,11 @@
 #include <lv2/lv2plug.in/ns/ext/port-props/port-props.h>
 #include <lv2/lv2plug.in/ns/ext/buf-size/buf-size.h>
 #include <lv2/lv2plug.in/ns/ext/parameters/parameters.h>
+
+#ifdef HAVE_CONTROLCHAIN
+/* Control Chain */
+#include <cc/control_chain.h>
+#endif
 
 #ifndef HAVE_NEW_LILV
 #define lilv_free(x) free(x)
@@ -354,9 +358,11 @@ typedef struct POSTPONED_CACHED_EVENTS {
 static effect_t g_effects[MAX_INSTANCES];
 static midi_cc_t g_midi_cc_list[MAX_MIDI_CC_ASSIGN], *g_midi_learning;
 
+#ifdef HAVE_CONTROLCHAIN
 /* Control Chain */
 static cc_handle_t *g_cc_handle;
 static cc_t g_cc_assignments[MAX_CC_ASSIGNMENTS];
+#endif
 
 static struct list_head g_rtsafe_list;
 static RtMemPool_Handle g_rtsafe_mem_pool;
@@ -1398,6 +1404,7 @@ static void FreeFeatures(effect_t *effect)
     }
 }
 
+#ifdef HAVE_CONTROLCHAIN
 static void CCDataUpdate(void *arg)
 {
     cc_data_update_t *updates = arg;
@@ -1420,6 +1427,7 @@ static void CCDataUpdate(void *arg)
 
     }
 }
+#endif
 
 
 /*
@@ -1665,6 +1673,7 @@ int effects_init(void* client)
     g_postevents_ready = true;
     pthread_create(&g_postevents_thread, NULL, PostPonedEventsThread, NULL);
 
+#ifdef HAVE_CONTROLCHAIN
     /* Init control chain */
     const char *cc_serial_port = getenv("CC_SERIAL_PORT");
     if (cc_serial_port)
@@ -1673,6 +1682,7 @@ int effects_init(void* client)
         g_cc_handle = cc_init(cc_serial_port, cc_baud_rate);
         cc_data_update_cb(g_cc_handle, CCDataUpdate);
     }
+#endif
 
     return SUCCESS;
 }
@@ -3082,6 +3092,7 @@ void effects_midi_program_listen(int enable, int channel)
 
 int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int actuator_id)
 {
+#ifdef HAVE_CONTROLCHAIN
     const port_t *port = NULL;
     const char *symbol;
     int bypass = 0;
@@ -3135,10 +3146,19 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
     cc->port = port;
 
     return SUCCESS;
+#else
+    return ERR_CONTROL_CHAIN_UNAVAILABLE;
+
+    UNUSED_PARAM(effect_id);
+    UNUSED_PARAM(control_symbol);
+    UNUSED_PARAM(device_id);
+    UNUSED_PARAM(actuator_id);
+#endif
 }
 
 int effects_cc_unmap(int effect_id, const char *control_symbol)
 {
+#ifdef HAVE_CONTROLCHAIN
     if (!InstanceExist(effect_id))
     {
         return ERR_INSTANCE_NON_EXISTS;
@@ -3158,6 +3178,12 @@ int effects_cc_unmap(int effect_id, const char *control_symbol)
     }
 
     return SUCCESS;
+#else
+    return ERR_CONTROL_CHAIN_UNAVAILABLE;
+
+    UNUSED_PARAM(effect_id);
+    UNUSED_PARAM(control_symbol);
+#endif
 }
 
 float effects_jack_cpu_load(void)

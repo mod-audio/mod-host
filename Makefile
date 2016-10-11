@@ -30,7 +30,7 @@ else
 endif
 
 # libraries
-LIBS = $(shell pkg-config --libs jack lilv-0) -lreadline -lpthread -lrt -lm -lcontrol_chain
+LIBS = $(shell pkg-config --libs jack lilv-0) -lreadline -lpthread -lrt -lm
 
 # include paths
 INCS = $(shell pkg-config --cflags jack lilv-0)
@@ -49,6 +49,12 @@ endif
 ifeq ($(HAVE_NE10),true)
 LIBS += -lNE10
 INCS += -DHAVE_NE10
+endif
+
+# control chain support
+ifeq ($(shell pkg-config --exists control_chain && echo true), true)
+LIBS += $(shell pkg-config --libs control_chain)
+INCS += $(shell pkg-config --cflags control_chain) -DHAVE_CONTROLCHAIN
 endif
 
 # source and object files
