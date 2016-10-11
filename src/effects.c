@@ -1408,24 +1408,50 @@ static void FreeFeatures(effect_t *effect)
 static void CCDataUpdate(void *arg)
 {
     cc_data_update_t *updates = arg;
+    bool needs_post = false;
 
     for (int i = 0; i < updates->count; ++i)
     {
         cc_data_t *update = &updates->updates_list[i];
-
         cc_t *cc = &g_cc_assignments[update->assignment_id];
+        const char *port_symbol;
 
         if (cc->bypass)
         {
-            g_effects[cc->effect_id].bypass = update->value;
+            g_effects[cc->effect_id].bypass = update->value > 0.5f;
+            port_symbol = g_bypass_port_symbol;
         }
         else
         {
             const port_t* port = g_cc_assignments[update->assignment_id].port;
             *(port->buffer) = update->value;
+            port_symbol = port->symbol;
         }
 
+        postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
+
+        if (posteventptr == NULL)
+            continue;
+
+        const postponed_event_t pevent = {
+            POSTPONED_PARAM_SET,
+            cc->effect_id,
+            port_symbol,
+            -1, -1,
+            update->value,
+            0.0f, 0.0f
+        };
+        memcpy(&posteventptr->event, &pevent, sizeof(postponed_event_t));
+
+        pthread_mutex_lock(&g_rtsafe_mutex);
+        list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
+        pthread_mutex_unlock(&g_rtsafe_mutex);
+
+        needs_post = true;
     }
+
+    if (needs_post)
+        sem_post(&g_postevents_semaphore);
 }
 #endif
 
