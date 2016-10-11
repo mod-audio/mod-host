@@ -3147,7 +3147,7 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
     }
     else
     {
-        port = FindEffectPortBySymbol(&(g_effects[effect_id]), control_symbol);
+        port = FindEffectInputPortBySymbol(&(g_effects[effect_id]), control_symbol);
 
         if (port == NULL)
             return ERR_LV2_INVALID_PARAM_SYMBOL;
