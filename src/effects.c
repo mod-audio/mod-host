@@ -289,8 +289,8 @@ typedef struct URIDS_T {
 typedef struct MIDI_CC_T {
     int8_t channel;
     int8_t controller;
-    float maximum;
     float minimum;
+    float maximum;
     int effect_id;
     const char* symbol;
     const port_t* port;
@@ -303,8 +303,8 @@ typedef struct POSTPONED_EVENT_T {
     int8_t channel;
     int8_t controller;
     float value;
-    float maximum;
     float minimum;
+    float maximum;
 } postponed_event_t;
 
 typedef struct POSTPONED_EVENT_LIST_DATA {
@@ -610,8 +610,8 @@ void RunPostPonedEvents(int ignored_effect_id)
                                                                                  eventptr->event.channel,
                                                                                  eventptr->event.controller,
                                                                                  eventptr->event.value,
-                                                                                 eventptr->event.maximum,
-                                                                                 eventptr->event.minimum);
+                                                                                 eventptr->event.minimum,
+                                                                                 eventptr->event.maximum);
             socket_send_feedback(buf);
             break;
         }
@@ -1131,15 +1131,15 @@ static int ProcessMonitorMidi(jack_nframes_t nframes, void *arg)
         {
             int effect_id;
             const char* symbol;
-            float maximum, minimum;
+            float minimum, maximum;
 
             pthread_mutex_lock(&g_midi_learning_mutex);
             if (g_midi_learning != NULL)
             {
                 effect_id = g_midi_learning->effect_id;
                 symbol    = g_midi_learning->symbol;
-                maximum   = g_midi_learning->maximum;
                 minimum   = g_midi_learning->minimum;
+                maximum   = g_midi_learning->maximum;
                 value     = UpdateValueFromMidi(g_midi_learning, event.buffer[2]);
                 g_midi_learning->channel    = channel;
                 g_midi_learning->controller = controller;
@@ -1164,8 +1164,8 @@ static int ProcessMonitorMidi(jack_nframes_t nframes, void *arg)
                         channel,
                         controller,
                         value,
-                        maximum,
-                        minimum
+                        minimum,
+                        maximum
                     };
                     memcpy(&posteventptr->event, &pevent, sizeof(postponed_event_t));
 
@@ -1615,8 +1615,8 @@ int effects_init(void* client)
     {
         g_midi_cc_list[i].channel = -1;
         g_midi_cc_list[i].controller = -1;
-        g_midi_cc_list[i].maximum = 1.0f;
         g_midi_cc_list[i].minimum = 0.0f;
+        g_midi_cc_list[i].maximum = 1.0f;
         g_midi_cc_list[i].effect_id = MIDI_LEARN_NULL;
         g_midi_cc_list[i].symbol = NULL;
         g_midi_cc_list[i].port = NULL;
@@ -2477,8 +2477,8 @@ int effects_remove(int effect_id)
         {
             g_midi_cc_list[i].channel = -1;
             g_midi_cc_list[i].controller = -1;
-            g_midi_cc_list[i].maximum = 1.0f;
             g_midi_cc_list[i].minimum = 0.0f;
+            g_midi_cc_list[i].maximum = 1.0f;
             g_midi_cc_list[i].effect_id = MIDI_LEARN_NULL;
             g_midi_cc_list[i].symbol = NULL;
             g_midi_cc_list[i].port = NULL;
@@ -2524,8 +2524,8 @@ int effects_remove(int effect_id)
             g_midi_cc_list[i].effect_id = MIDI_LEARN_UNUSED;
             g_midi_cc_list[i].channel = -1;
             g_midi_cc_list[i].controller = -1;
-            g_midi_cc_list[i].maximum = 1.0f;
             g_midi_cc_list[i].minimum = 0.0f;
+            g_midi_cc_list[i].maximum = 1.0f;
             g_midi_cc_list[i].symbol = NULL;
             g_midi_cc_list[i].port = NULL;
         }
@@ -2875,8 +2875,8 @@ int effects_midi_learn(int effect_id, const char *control_symbol, float minimum,
 
         if (!is_bypass)
         {
-            g_midi_cc_list[i].maximum = maximum;
             g_midi_cc_list[i].minimum = minimum;
+            g_midi_cc_list[i].maximum = maximum;
         }
 
         pthread_mutex_lock(&g_midi_learning_mutex);
@@ -2903,8 +2903,8 @@ int effects_midi_learn(int effect_id, const char *control_symbol, float minimum,
             if (port == NULL)
                 return ERR_LV2_INVALID_PARAM_SYMBOL;
 
-            g_midi_cc_list[i].maximum = maximum;
             g_midi_cc_list[i].minimum = minimum;
+            g_midi_cc_list[i].maximum = maximum;
             g_midi_cc_list[i].symbol = port->symbol;
             g_midi_cc_list[i].port = port;
         }
@@ -2950,8 +2950,8 @@ int effects_midi_map(int effect_id, const char *control_symbol, int channel, int
 
         if (!is_bypass)
         {
-            g_midi_cc_list[i].maximum = maximum;
             g_midi_cc_list[i].minimum = minimum;
+            g_midi_cc_list[i].maximum = maximum;
         }
 
         return SUCCESS;
@@ -2975,8 +2975,8 @@ int effects_midi_map(int effect_id, const char *control_symbol, int channel, int
             if (port == NULL)
                 return ERR_LV2_INVALID_PARAM_SYMBOL;
 
-            g_midi_cc_list[i].maximum = maximum;
             g_midi_cc_list[i].minimum = minimum;
+            g_midi_cc_list[i].maximum = maximum;
             g_midi_cc_list[i].symbol = port->symbol;
             g_midi_cc_list[i].port = port;
         }
@@ -3015,8 +3015,8 @@ int effects_midi_unmap(int effect_id, const char *control_symbol)
 
         g_midi_cc_list[i].channel = -1;
         g_midi_cc_list[i].controller = -1;
-        g_midi_cc_list[i].maximum = 1.0f;
         g_midi_cc_list[i].minimum = 0.0f;
+        g_midi_cc_list[i].maximum = 1.0f;
         g_midi_cc_list[i].effect_id = MIDI_LEARN_UNUSED;
         g_midi_cc_list[i].symbol = NULL;
         g_midi_cc_list[i].port = NULL;
