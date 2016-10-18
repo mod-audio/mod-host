@@ -2837,7 +2837,7 @@ int effects_get_parameter_info(int effect_id, const char *control_symbol, float 
     return ERR_LV2_INVALID_PARAM_SYMBOL;
 }
 
-int effects_midi_learn(int effect_id, const char *control_symbol, float maximum, float minimum)
+int effects_midi_learn(int effect_id, const char *control_symbol, float minimum, float maximum)
 {
     const port_t *port;
 
@@ -2922,7 +2922,7 @@ int effects_midi_learn(int effect_id, const char *control_symbol, float maximum,
     return ERR_ASSIGNMENT_LIST_FULL;
 }
 
-int effects_midi_map(int effect_id, const char *control_symbol, int channel, int controller, float maximum, float minimum)
+int effects_midi_map(int effect_id, const char *control_symbol, int channel, int controller, float minimum, float maximum)
 {
     const port_t *port;
 
