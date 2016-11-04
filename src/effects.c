@@ -1970,6 +1970,10 @@ int effects_add(const char *uid, int instance)
             if (lilv_port_has_property(plugin, lilv_port, lilv_enumeration))
             {
                 effect->ports[i]->hints |= HINT_ENUMERATION;
+
+                // make 2 scalepoint enumeration work as toggle
+                if (lilv_scale_points_size(effect->ports[i]->scale_points) == 2)
+                    effect->ports[i]->hints |= HINT_TOGGLE;
             }
             if (lilv_port_has_property(plugin, lilv_port, lilv_integer))
             {
