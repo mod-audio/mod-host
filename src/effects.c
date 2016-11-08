@@ -68,6 +68,10 @@
 #define LILV_URI_CV_PORT "http://lv2plug.in/ns/lv2core#CVPort"
 #endif
 
+#ifndef LV2_CORE__enabled
+#define LV2_CORE__enabled LV2_CORE_PREFIX "enabled"
+#endif
+
 #define LILV_NS_MOD "http://moddevices.com/ns/mod#"
 
 // custom jack flag used for cv
@@ -239,7 +243,8 @@ typedef struct EFFECT_T {
     port_t **output_event_ports;
     uint32_t output_event_ports_count;
 
-    uint32_t control_in; // index of control/event input port
+    int32_t control_index; // index of control/event input port (-1 if unavailable)
+    int32_t enabled_index; // index of enabled port
 
     preset_t **presets;
     uint32_t presets_count;
@@ -729,7 +734,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
         lv2_evbuf_reset(effect->output_event_ports[i]->evbuf, false);
 
     /* control in events */
-    if (effect->events_buffer)
+    if (effect->events_buffer && effect->control_index >= 0)
     {
         const size_t space = jack_ringbuffer_read_space(effect->events_buffer);
         LV2_Atom atom;
@@ -741,7 +746,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
             memcpy(&fatom, (char*)&atom, sizeof(atom));
             char *body = &fatom[sizeof(atom)];
             jack_ringbuffer_read(effect->events_buffer, body, atom.size);
-            const port_t *port = effect->ports[effect->control_in];
+            const port_t *port = effect->ports[effect->control_index];
             LV2_Evbuf_Iterator e = lv2_evbuf_end(port->evbuf);
             const LV2_Atom* const ratom = (const LV2_Atom*)fatom;
             lv2_evbuf_write(&e, nframes, 0, ratom->type, ratom->size,
@@ -750,7 +755,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
     }
 
     /* Bypass */
-    if (effect->bypass)
+    if (effect->bypass && effect->enabled_index < 0)
     {
         /* Plugins with audio inputs */
         if (effect->input_audio_ports_count > 0)
@@ -976,7 +981,14 @@ static float UpdateValueFromMidi(midi_cc_t* mcc, jack_midi_data_t mvalue)
 {
     if (!strcmp(mcc->symbol, g_bypass_port_symbol))
     {
-        g_effects[mcc->effect_id].bypass = (mvalue < 64);
+        effect_t *effect = &g_effects[mcc->effect_id];
+        effect->bypass = (mvalue < 64);
+
+        if (effect->enabled_index >= 0)
+        {
+            *(effect->ports[effect->enabled_index]->buffer) = (mvalue < 64) ? 0.0f : 1.0f;
+        }
+
         return (mvalue < 64) ? 1.0f : 0.0f;
     }
     else
@@ -1677,7 +1689,7 @@ int effects_add(const char *uid, int instance)
     const LilvPlugin *plugin;
     LilvInstance *lilv_instance;
     LilvNode *plugin_uri;
-    LilvNode *lilv_input, *lilv_control_in, *lilv_output;
+    LilvNode *lilv_input, *lilv_control_in, *lilv_enabled, *lilv_output;
     LilvNode *lilv_enumeration, *lilv_integer, *lilv_toggled, *lilv_trigger, *lilv_logarithmic;
     LilvNode *lilv_control, *lilv_audio, *lilv_cv, *lilv_event, *lilv_midi;
     LilvNode *lilv_default, *lilv_mod_default;
@@ -1701,6 +1713,7 @@ int effects_add(const char *uid, int instance)
     lilv_instance = NULL;
     lilv_input = NULL;
     lilv_control_in = NULL;
+    lilv_enabled = NULL;
     lilv_enumeration = NULL;
     lilv_integer = NULL;
     lilv_toggled = NULL;
@@ -1802,6 +1815,7 @@ int effects_add(const char *uid, int instance)
     lilv_cv = lilv_new_uri(g_lv2_data, LILV_URI_CV_PORT);
     lilv_input = lilv_new_uri(g_lv2_data, LILV_URI_INPUT_PORT);
     lilv_control_in = lilv_new_uri(g_lv2_data, LV2_CORE__control);
+    lilv_enabled = lilv_new_uri(g_lv2_data, LV2_CORE__enabled);
     lilv_enumeration = lilv_new_uri(g_lv2_data, LV2_CORE__enumeration);
     lilv_integer = lilv_new_uri(g_lv2_data, LV2_CORE__integer);
     lilv_toggled = lilv_new_uri(g_lv2_data, LV2_CORE__toggled);
@@ -2059,10 +2073,24 @@ int effects_add(const char *uid, int instance)
         }
     }
 
-    const LilvPort* control_input = lilv_plugin_get_port_by_designation(plugin, lilv_input, lilv_control_in);
-    if (control_input)
+    const LilvPort* control_in_port = lilv_plugin_get_port_by_designation(plugin, lilv_input, lilv_control_in);
+    if (control_in_port)
     {
-        effect->control_in = lilv_port_get_index(plugin, control_input);
+        effect->control_index = lilv_port_get_index(plugin, control_in_port);
+    }
+    else
+    {
+        effect->control_index = -1;
+    }
+
+    const LilvPort* enabled_port = lilv_plugin_get_port_by_designation(plugin, lilv_input, lilv_enabled);
+    if (enabled_port)
+    {
+        effect->enabled_index = lilv_port_get_index(plugin, enabled_port);
+    }
+    else
+    {
+        effect->enabled_index = -1;
     }
 
 
@@ -2224,6 +2252,7 @@ int effects_add(const char *uid, int instance)
     lilv_node_free(lilv_cv);
     lilv_node_free(lilv_input);
     lilv_node_free(lilv_control_in);
+    lilv_node_free(lilv_enabled);
     lilv_node_free(lilv_enumeration);
     lilv_node_free(lilv_integer);
     lilv_node_free(lilv_toggled);
@@ -2249,7 +2278,7 @@ int effects_add(const char *uid, int instance)
     lilv_instance_activate(lilv_instance);
 
     /* create ring buffer for events from socket/commandline */
-    if (control_input)
+    if (control_in_port)
     {
         effect->events_buffer = jack_ringbuffer_create(g_midi_buffer_size * 16); // 16 taken from jalv source code
         jack_ringbuffer_mlock(effect->events_buffer);
@@ -2272,6 +2301,7 @@ int effects_add(const char *uid, int instance)
         lilv_node_free(lilv_cv);
         lilv_node_free(lilv_input);
         lilv_node_free(lilv_control_in);
+        lilv_node_free(lilv_enabled);
         lilv_node_free(lilv_enumeration);
         lilv_node_free(lilv_integer);
         lilv_node_free(lilv_toggled);
@@ -2313,6 +2343,13 @@ int effects_preset_load(int effect_id, const char *uri)
             lilv_state_restore(state, effect->lilv_instance, SetParameterFromState, effect, 0, NULL);
             lilv_state_free(state);
             lilv_node_free(preset_uri);
+
+            // force state of special designated ports
+            if (effect->enabled_index >= 0)
+            {
+                *(effect->ports[effect->enabled_index]->buffer) = effect->bypass ? 0.0f : 1.0f;
+            }
+
             return SUCCESS;
         }
 
@@ -2740,13 +2777,20 @@ int effects_monitor_output_parameter(int effect_id, const char *control_symbol)
 
 int effects_bypass(int effect_id, int value)
 {
-    if (InstanceExist(effect_id))
+    if (!InstanceExist(effect_id))
     {
-        g_effects[effect_id].bypass = value;
-        return SUCCESS;
+        return ERR_INSTANCE_NON_EXISTS;
     }
 
-    return ERR_INSTANCE_NON_EXISTS;
+    effect_t *effect = &g_effects[effect_id];
+    effect->bypass = value;
+
+    if (effect->enabled_index >= 0)
+    {
+        *(effect->ports[effect->enabled_index]->buffer) = value ? 0.0f : 1.0f;
+    }
+
+    return SUCCESS;
 }
 
 int effects_get_parameter_symbols(int effect_id, char** symbols)
