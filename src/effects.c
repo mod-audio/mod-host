@@ -2101,6 +2101,7 @@ int effects_add(const char *uid, int instance)
     if (enabled_port)
     {
         effect->enabled_index = lilv_port_get_index(plugin, enabled_port);
+        *(effect->ports[effect->enabled_index]->buffer) = 1.0f;
     }
     else
     {
@@ -2111,6 +2112,7 @@ int effects_add(const char *uid, int instance)
     if (freewheel_port)
     {
         effect->freewheel_index = lilv_port_get_index(plugin, freewheel_port);
+        *(effect->ports[effect->freewheel_index]->buffer) = 0.0f;
     }
     else
     {
