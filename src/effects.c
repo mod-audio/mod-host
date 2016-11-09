@@ -243,8 +243,10 @@ typedef struct EFFECT_T {
     port_t **output_event_ports;
     uint32_t output_event_ports_count;
 
-    int32_t control_index; // index of control/event input port (-1 if unavailable)
-    int32_t enabled_index; // index of enabled port
+    // indexes of specially designated ports (-1 if unavailable)
+    int32_t control_index; // control/event input
+    int32_t enabled_index;
+    int32_t freewheel_index;
 
     preset_t **presets;
     uint32_t presets_count;
@@ -405,6 +407,7 @@ static void InstanceDelete(int effect_id);
 static int InstanceExist(int effect_id);
 static void AllocatePortBuffers(effect_t* effect);
 static int BufferSize(jack_nframes_t nframes, void* data);
+static void FreeWheelMode(int starting, void* data);
 static void RunPostPonedEvents(int ignored_effect_id);
 static void* PostPonedEventsThread(void* arg);
 static int ProcessPlugin(jack_nframes_t nframes, void *arg);
@@ -478,6 +481,15 @@ static int BufferSize(jack_nframes_t nframes, void* data)
     g_block_length = nframes;
     AllocatePortBuffers(effect);
     return SUCCESS;
+}
+
+static void FreeWheelMode(int starting, void* data)
+{
+    effect_t *effect = data;
+    if (effect->freewheel_index >= 0)
+    {
+        *(effect->ports[effect->freewheel_index]->buffer) = starting ? 1.0f : 0.0f;
+    }
 }
 
 static bool ShouldIgnorePostPonedEvent(postponed_event_list_data* ev, postponed_cached_events* cached_events)
@@ -1689,7 +1701,7 @@ int effects_add(const char *uid, int instance)
     const LilvPlugin *plugin;
     LilvInstance *lilv_instance;
     LilvNode *plugin_uri;
-    LilvNode *lilv_input, *lilv_control_in, *lilv_enabled, *lilv_output;
+    LilvNode *lilv_input, *lilv_control_in, *lilv_enabled, *lilv_freeWheeling, *lilv_output;
     LilvNode *lilv_enumeration, *lilv_integer, *lilv_toggled, *lilv_trigger, *lilv_logarithmic;
     LilvNode *lilv_control, *lilv_audio, *lilv_cv, *lilv_event, *lilv_midi;
     LilvNode *lilv_default, *lilv_mod_default;
@@ -1715,6 +1727,7 @@ int effects_add(const char *uid, int instance)
     lilv_control_in = NULL;
     lilv_enabled = NULL;
     lilv_enumeration = NULL;
+    lilv_freeWheeling = NULL;
     lilv_integer = NULL;
     lilv_toggled = NULL;
     lilv_trigger = NULL;
@@ -1817,6 +1830,7 @@ int effects_add(const char *uid, int instance)
     lilv_control_in = lilv_new_uri(g_lv2_data, LV2_CORE__control);
     lilv_enabled = lilv_new_uri(g_lv2_data, LV2_CORE__enabled);
     lilv_enumeration = lilv_new_uri(g_lv2_data, LV2_CORE__enumeration);
+    lilv_freeWheeling = lilv_new_uri(g_lv2_data, LV2_CORE__freeWheeling);
     lilv_integer = lilv_new_uri(g_lv2_data, LV2_CORE__integer);
     lilv_toggled = lilv_new_uri(g_lv2_data, LV2_CORE__toggled);
     lilv_trigger = lilv_new_uri(g_lv2_data, LV2_PORT_PROPS__trigger);
@@ -2093,6 +2107,16 @@ int effects_add(const char *uid, int instance)
         effect->enabled_index = -1;
     }
 
+    const LilvPort* freewheel_port = lilv_plugin_get_port_by_designation(plugin, lilv_input, lilv_freeWheeling);
+    if (freewheel_port)
+    {
+        effect->freewheel_index = lilv_port_get_index(plugin, freewheel_port);
+    }
+    else
+    {
+        effect->freewheel_index = -1;
+    }
+
 
     /* Allocate memory to indexes */
     /* Audio ports */
@@ -2254,6 +2278,7 @@ int effects_add(const char *uid, int instance)
     lilv_node_free(lilv_control_in);
     lilv_node_free(lilv_enabled);
     lilv_node_free(lilv_enumeration);
+    lilv_node_free(lilv_freeWheeling);
     lilv_node_free(lilv_integer);
     lilv_node_free(lilv_toggled);
     lilv_node_free(lilv_trigger);
@@ -2274,6 +2299,7 @@ int effects_add(const char *uid, int instance)
     jack_set_thread_init_callback(jack_client, JackThreadInit, effect);
     jack_set_process_callback(jack_client, ProcessPlugin, effect);
     jack_set_buffer_size_callback(jack_client, BufferSize, effect);
+    jack_set_freewheel_callback(g_jack_global_client, FreeWheelMode, effect);
 
     lilv_instance_activate(lilv_instance);
 
@@ -2303,6 +2329,7 @@ int effects_add(const char *uid, int instance)
         lilv_node_free(lilv_control_in);
         lilv_node_free(lilv_enabled);
         lilv_node_free(lilv_enumeration);
+        lilv_node_free(lilv_freeWheeling);
         lilv_node_free(lilv_integer);
         lilv_node_free(lilv_toggled);
         lilv_node_free(lilv_trigger);
@@ -2348,6 +2375,10 @@ int effects_preset_load(int effect_id, const char *uri)
             if (effect->enabled_index >= 0)
             {
                 *(effect->ports[effect->enabled_index]->buffer) = effect->bypass ? 0.0f : 1.0f;
+            }
+            if (effect->freewheel_index >= 0)
+            {
+                *(effect->ports[effect->freewheel_index]->buffer) = 0.0f;
             }
 
             return SUCCESS;
