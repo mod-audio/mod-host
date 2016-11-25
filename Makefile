@@ -52,9 +52,9 @@ INCS += -DHAVE_NE10
 endif
 
 # control chain support
-ifeq ($(shell pkg-config --exists control_chain && echo true), true)
-LIBS += $(shell pkg-config --libs control_chain)
-INCS += $(shell pkg-config --cflags control_chain) -DHAVE_CONTROLCHAIN
+ifeq ($(shell pkg-config --exists cc_client && echo true), true)
+LIBS += $(shell pkg-config --libs cc_client)
+INCS += $(shell pkg-config --cflags cc_client) -DHAVE_CONTROLCHAIN
 endif
 
 # source and object files
