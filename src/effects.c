@@ -54,6 +54,7 @@
 #include <lv2/lv2plug.in/ns/ext/port-props/port-props.h>
 #include <lv2/lv2plug.in/ns/ext/buf-size/buf-size.h>
 #include <lv2/lv2plug.in/ns/ext/parameters/parameters.h>
+#include "mod-license.h"
 
 #ifndef HAVE_NEW_LILV
 #define lilv_free(x) free(x)
@@ -143,6 +144,7 @@ enum {
     URID_UNMAP_FEATURE,
     OPTIONS_FEATURE,
     WORKER_FEATURE,
+    LICENSE_FEATURE,
     BUF_SIZE_POWER2_FEATURE,
     BUF_SIZE_FIXED_FEATURE,
     BUF_SIZE_BOUNDED_FEATURE,
@@ -255,6 +257,7 @@ typedef struct EFFECT_T {
     uint32_t monitors_count;
 
     worker_t worker;
+    const MOD_License_Interface* license_iface;
 
     jack_ringbuffer_t *events_buffer;
 
@@ -380,11 +383,13 @@ static LV2_URI_Map_Feature g_uri_map;
 static LV2_URID_Map g_urid_map;
 static LV2_URID_Unmap g_urid_unmap;
 static LV2_Options_Option g_options[6];
+static MOD_License_Feature g_license;
 
 static LV2_Feature g_uri_map_feature = {LV2_URI_MAP_URI, &g_uri_map};
 static LV2_Feature g_urid_map_feature = {LV2_URID__map, &g_urid_map};
 static LV2_Feature g_urid_unmap_feature = {LV2_URID__unmap, &g_urid_unmap};
 static LV2_Feature g_options_feature = {LV2_OPTIONS__options, &g_options};
+static LV2_Feature g_license_feature = {MOD_LICENSE__feature, &g_license};
 static LV2_Feature g_buf_size_features[3] = {
     { LV2_BUF_SIZE__powerOf2BlockLength, NULL },
     { LV2_BUF_SIZE__fixedBlockLength, NULL },
@@ -416,6 +421,8 @@ static int ProcessMonitorMidi(jack_nframes_t nframes, void *arg);
 static void JackThreadInit(void *arg);
 static void GetFeatures(effect_t *effect);
 static void FreeFeatures(effect_t *effect);
+static char* GetLicenseFile(MOD_License_Handle handle, const char *license_uri);
+void FreeLicenseData(MOD_License_Handle handle, char *license);
 
 
 /*
@@ -1276,6 +1283,7 @@ static void GetFeatures(effect_t *effect)
     features[URID_UNMAP_FEATURE]        = &g_urid_unmap_feature;
     features[OPTIONS_FEATURE]           = &g_options_feature;
     features[WORKER_FEATURE]            = work_schedule_feature;
+    features[LICENSE_FEATURE]           = &g_license_feature;
     features[BUF_SIZE_POWER2_FEATURE]   = &g_buf_size_features[0];
     features[BUF_SIZE_FIXED_FEATURE]    = &g_buf_size_features[1];
     features[BUF_SIZE_BOUNDED_FEATURE]  = &g_buf_size_features[2];
@@ -1408,6 +1416,23 @@ static void FreeFeatures(effect_t *effect)
     }
 }
 
+static char* GetLicenseFile(MOD_License_Handle handle, const char *license_uri)
+{
+    if (!license_uri || *license_uri == '\0')
+        return NULL;
+
+    // TODO
+    return NULL;
+
+    UNUSED_PARAM(handle);
+}
+
+void FreeLicenseData(MOD_License_Handle handle, char *license)
+{
+    return free(license);
+
+    UNUSED_PARAM(handle);
+}
 
 /*
 ************************************************************************************************************************
@@ -1628,6 +1653,10 @@ int effects_init(void* client)
     g_options[5].type = 0;
     g_options[5].value = NULL;
 
+    g_license.handle = NULL;
+    g_license.license = GetLicenseFile;
+    g_license.free = FreeLicenseData;
+
     lv2_atom_forge_init(&g_lv2_atom_forge, &g_urid_map);
 
     /* Init lilv_instance as NULL for all plugins */
@@ -1707,7 +1736,7 @@ int effects_add(const char *uid, int instance)
     LilvNode *lilv_default, *lilv_mod_default;
     LilvNode *lilv_minimum, *lilv_mod_minimum;
     LilvNode *lilv_maximum, *lilv_mod_maximum;
-    LilvNode *lilv_atom_port, *lilv_worker_interface;
+    LilvNode *lilv_atom_port, *lilv_worker_interface, *lilv_license_interface;
     const LilvPort *lilv_port;
     const LilvNode *symbol_node;
 
@@ -1746,6 +1775,7 @@ int effects_add(const char *uid, int instance)
     lilv_event = NULL;
     lilv_atom_port = NULL;
     lilv_worker_interface = NULL;
+    lilv_license_interface = NULL;
 
     /* Create a client to Jack */
     snprintf(effect_name, 31, "effect_%i", instance);
@@ -1819,6 +1849,13 @@ int effects_add(const char *uid, int instance)
             (LV2_Worker_Interface*) lilv_instance_get_extension_data(effect->lilv_instance, LV2_WORKER__interface);
 
         worker_init(&effect->worker, worker_interface);
+    }
+
+    lilv_license_interface = lilv_new_uri(g_lv2_data, MOD_LICENSE__interface);
+    if (lilv_plugin_has_extension_data(effect->lilv_plugin, lilv_license_interface))
+    {
+        effect->license_iface =
+            (MOD_License_Interface*) lilv_instance_get_extension_data(effect->lilv_instance, MOD_LICENSE__interface);
     }
 
     /* Create the URI for identify the ports */
@@ -2296,6 +2333,7 @@ int effects_add(const char *uid, int instance)
     lilv_node_free(lilv_mod_maximum);
     lilv_node_free(lilv_atom_port);
     lilv_node_free(lilv_worker_interface);
+    lilv_node_free(lilv_license_interface);
 
     /* Jack callbacks */
     jack_set_thread_init_callback(jack_client, JackThreadInit, effect);
@@ -2347,6 +2385,7 @@ int effects_add(const char *uid, int instance)
         lilv_node_free(lilv_mod_maximum);
         lilv_node_free(lilv_atom_port);
         lilv_node_free(lilv_worker_interface);
+        lilv_node_free(lilv_license_interface);
 
         effects_remove(instance);
 
