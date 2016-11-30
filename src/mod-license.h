@@ -68,7 +68,7 @@ typedef struct _MOD_License_Interface {
 
            @param instance The LV2 instance this is a method on.
         */
-        int (*is_licensed)(LV2_Handle instance);
+        int (*status)(LV2_Handle instance);
 
         /**
            Get the name of the licensee for a plugin instance.

@@ -87,6 +87,7 @@
 #include "lv2_evbuf.h"
 #include "worker.h"
 #include "symap.h"
+#include "sha1/sha1.h"
 #include "rtmempool/list.h"
 #include "rtmempool/rtmempool.h"
 
@@ -1421,8 +1422,75 @@ static char* GetLicenseFile(MOD_License_Handle handle, const char *license_uri)
     if (!license_uri || *license_uri == '\0')
         return NULL;
 
-    // TODO
-    return NULL;
+    // get keys path. note: assumes trailing separator
+    const char* const keyspath = getenv("MOD_KEYS_PATH");
+    if (!keyspath || *keyspath == '\0')
+        return NULL;
+
+    // get path length, check trailing separator
+    const size_t keyspathlen = strlen(keyspath);
+    if (keyspath[keyspathlen-1] != '/')
+        return NULL;
+
+    // local vars
+    uint8_t* hashenc;
+    char hashdec[HASH_LENGTH*2+1];
+    FILE* file;
+    long filesize;
+    size_t filenamesize;
+    char* filename;
+    char* filebuffer = NULL;
+    sha1nfo sha1;
+
+    // hash the uri
+    sha1_init(&sha1);
+    sha1_write(&sha1, license_uri, strlen(license_uri));
+    hashenc = sha1_result(&sha1);
+
+    for (int i=0; i<HASH_LENGTH; i++) {
+        sprintf(hashdec+(i*2), "%02x", hashenc[i]);
+    }
+    hashdec[HASH_LENGTH*2] = '\0';
+
+    // join path
+    filenamesize = strlen(keyspath) + HASH_LENGTH*2;
+    filename = malloc(filenamesize+1);
+
+    if (! filename)
+        return NULL;
+
+    memcpy(filename, keyspath, keyspathlen);
+    memcpy(filename+keyspathlen, hashdec, HASH_LENGTH*2);
+    filename[filenamesize] = '\0';
+
+    // open file
+    file = fopen(filename, "r");
+
+    // cleanup
+    free(filename);
+
+    if (!file)
+        return NULL;
+
+    // get size
+    fseek(file, 0, SEEK_END);
+    filesize = ftell(file);
+    if (filesize <= 0 || filesize > 5*1024*1024) // 5Mb
+        goto end;
+
+    // allocate file buffer
+    filebuffer = (char*)calloc(1, filesize);
+    if (! filebuffer)
+        goto end;
+
+    // read file
+    fseek(file, 0, SEEK_SET);
+    if (fread(filebuffer, 1, filesize, file) != (size_t)filesize)
+        filebuffer = NULL;
+
+end:
+    fclose(file);
+    return filebuffer;
 
     UNUSED_PARAM(handle);
 }

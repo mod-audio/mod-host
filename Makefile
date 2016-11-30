@@ -52,7 +52,7 @@ INCS += -DHAVE_NE10
 endif
 
 # source and object files
-SRC = $(wildcard $(SRC_DIR)/*.$(EXT)) $(SRC_DIR)/rtmempool/rtmempool.c
+SRC = $(wildcard $(SRC_DIR)/*.$(EXT)) $(SRC_DIR)/sha1/sha1.c $(SRC_DIR)/rtmempool/rtmempool.c
 OBJ = $(SRC:.$(EXT)=.o)
 
 # default build
