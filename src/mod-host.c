@@ -630,6 +630,7 @@ int main(int argc, char **argv)
     if (interactive)
     {
         interactive_mode();
+        return 0;
     }
     else
     {
