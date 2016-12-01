@@ -2407,7 +2407,7 @@ int effects_add(const char *uid, int instance)
     jack_set_thread_init_callback(jack_client, JackThreadInit, effect);
     jack_set_process_callback(jack_client, ProcessPlugin, effect);
     jack_set_buffer_size_callback(jack_client, BufferSize, effect);
-    jack_set_freewheel_callback(g_jack_global_client, FreeWheelMode, effect);
+    jack_set_freewheel_callback(jack_client, FreeWheelMode, effect);
 
     lilv_instance_activate(lilv_instance);
 
