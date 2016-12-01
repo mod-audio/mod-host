@@ -1,5 +1,6 @@
 /*
   Copyright 2016 Robin Gareus <robin@gareus.org>
+  Copyright 2016 Filipe Coelho <falktx@falktx.com>
   Copyright 2016 MOD Duo GbR
 
   Permission to use, copy, modify, and/or distribute this software for any
@@ -91,7 +92,7 @@ typedef struct _MOD_License_Feature {
         /**
            Opaque pointer to host data.
 
-           This MUST be passed to license() whenever it is called.
+           This MUST be passed to license() and free() whenever they are called.
            Otherwise, it must not be interpreted in any way.
         */
         MOD_License_Handle handle;
