@@ -1479,7 +1479,7 @@ static char* GetLicenseFile(MOD_License_Handle handle, const char *license_uri)
         goto end;
 
     // allocate file buffer
-    filebuffer = (char*)calloc(1, filesize);
+    filebuffer = (char*)calloc(1, filesize+1);
     if (! filebuffer)
         goto end;
 
