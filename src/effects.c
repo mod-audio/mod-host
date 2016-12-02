@@ -3214,6 +3214,33 @@ int effects_midi_unmap(int effect_id, const char *control_symbol)
     return ERR_LV2_INVALID_PARAM_SYMBOL;
 }
 
+int effects_licensee(int effect_id, char **licensee_ptr)
+{
+    if (!InstanceExist(effect_id))
+    {
+        return ERR_INSTANCE_NON_EXISTS;
+    }
+
+    effect_t *effect = &g_effects[effect_id];
+
+    if (effect->license_iface)
+    {
+        char* licensee = NULL;
+        LV2_Handle handle = lilv_instance_get_handle(effect->lilv_instance);
+
+        if (effect->license_iface->status(handle) == MOD_LICENSE_SUCCESS)
+            licensee = effect->license_iface->licensee(handle);
+
+        if (licensee)
+        {
+            *licensee_ptr = licensee;
+            return SUCCESS;
+        }
+    }
+
+    return ERR_INSTANCE_UNLICENSED;
+}
+
 void effects_midi_program_listen(int enable, int channel)
 {
     if (enable == 0 || channel < 0 || channel > 15)

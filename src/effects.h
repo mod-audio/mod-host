@@ -45,6 +45,7 @@ enum {
     ERR_INSTANCE_INVALID = -1,
     ERR_INSTANCE_ALREADY_EXISTS = -2,
     ERR_INSTANCE_NON_EXISTS = -3,
+    ERR_INSTANCE_UNLICENSED = -4,
 
     ERR_LV2_INVALID_URI = -101,
     ERR_LV2_INSTANTIATION = -102,
@@ -129,6 +130,7 @@ int effects_get_parameter_info(int effect_id, const char *control_symbol, float 
 int effects_midi_learn(int effect_id, const char *control_symbol, float minimum, float maximum);
 int effects_midi_map(int effect_id, const char *control_symbol, int channel, int controller, float minimum, float maximum);
 int effects_midi_unmap(int effect_id, const char *control_symbol);
+int effects_licensee(int effect_id, char **licensee);
 void effects_midi_program_listen(int enable, int channel);
 float effects_jack_cpu_load(void);
 void effects_bundle_add(const char* bundlepath);

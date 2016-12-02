@@ -256,6 +256,23 @@ static void effects_monitor_param_cb(proto_t *proto)
     protocol_response(buffer, proto);
 }
 
+static void effects_licensee_cb(proto_t *proto)
+{
+    char *licensee = NULL;
+
+    if (effects_licensee(atoi(proto->list[1]), &licensee) == SUCCESS)
+    {
+        if (licensee)
+        {
+            protocol_response(licensee, proto);
+            free(licensee);
+            return;
+        }
+    }
+
+    protocol_response("", proto);
+}
+
 static void monitor_addr_set_cb(proto_t *proto)
 {
     int resp;
@@ -485,6 +502,7 @@ static int mod_host_init(jack_client_t* client, int socket_port)
     protocol_add_command(EFFECT_PARAM_SET, effects_set_param_cb);
     protocol_add_command(EFFECT_PARAM_GET, effects_get_param_cb);
     protocol_add_command(EFFECT_PARAM_MON, effects_monitor_param_cb);
+    protocol_add_command(EFFECT_LICENSEE, effects_licensee_cb);
     protocol_add_command(MONITOR_ADDR_SET, monitor_addr_set_cb);
     protocol_add_command(MONITOR_OUTPUT, monitor_output_cb);
     protocol_add_command(MIDI_LEARN, midi_learn_cb);
