@@ -1719,7 +1719,7 @@ int effects_init(void* client)
 #ifdef HAVE_CONTROLCHAIN
     /* Init control chain */
     g_cc_client = cc_client_new("/tmp/control-chain.sock");
-    cc_client_data_update_cb(g_cc_client, CCDataUpdate);
+    if (g_cc_client) cc_client_data_update_cb(g_cc_client, CCDataUpdate);
 #endif
 
     return SUCCESS;
@@ -1727,13 +1727,17 @@ int effects_init(void* client)
 
 int effects_finish(int close_client)
 {
-#ifdef HAVE_CONTROLCHAIN
-    cc_client_delete(g_cc_client);
-#endif
-
     g_postevents_running = -1;
     sem_post(&g_postevents_semaphore);
     pthread_join(g_postevents_thread, NULL);
+
+#ifdef HAVE_CONTROLCHAIN
+    if (g_cc_client)
+    {
+        cc_client_delete(g_cc_client);
+        g_cc_client = NULL;
+    }
+#endif
 
     effects_remove(REMOVE_ALL);
     if (g_capture_ports) jack_free(g_capture_ports);
@@ -3198,9 +3202,9 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
 {
 #ifdef HAVE_CONTROLCHAIN
     if (!InstanceExist(effect_id))
-    {
         return ERR_INSTANCE_NON_EXISTS;
-    }
+    if (!g_cc_client)
+        return ERR_CONTROL_CHAIN_UNAVAILABLE;
 
     if (!strcmp(control_symbol, g_bypass_port_symbol))
     {
@@ -3257,9 +3261,9 @@ int effects_cc_unmap(int effect_id, const char *control_symbol)
     const port_t *port = NULL;
 
     if (!InstanceExist(effect_id))
-    {
         return ERR_INSTANCE_NON_EXISTS;
-    }
+    if (!g_cc_client)
+        return ERR_CONTROL_CHAIN_UNAVAILABLE;
 
     port = FindEffectInputPortBySymbol(&(g_effects[effect_id]), control_symbol);
     if (port == NULL)
