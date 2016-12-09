@@ -2158,7 +2158,8 @@ int effects_add(const char *uid, int instance)
             lilv_instance_connect_port(lilv_instance, i, cv_buffer);
 
             /* Jack port creation */
-            jack_port = jack_port_register(jack_client, port_name, JACK_DEFAULT_AUDIO_TYPE, jack_flags|JackPortIsControlVoltage, 0);
+            jack_flags |= JackPortIsControlVoltage;
+            jack_port = jack_port_register(jack_client, port_name, JACK_DEFAULT_AUDIO_TYPE, jack_flags, 0);
             if (jack_port == NULL)
             {
                 fprintf(stderr, "can't get jack port\n");

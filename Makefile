@@ -78,7 +78,7 @@ install: install_man
 
 # clean rule
 clean:
-	@rm -f $(SRC_DIR)/*.o $(PROG) $(PROG).so src/info.h
+	@rm -f $(SRC_DIR)/*.o $(SRC_DIR)/*/*.o $(PROG) $(PROG).so src/info.h
 
 test:
 	py.test tests/test_host.py
