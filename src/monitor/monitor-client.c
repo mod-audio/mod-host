@@ -150,6 +150,7 @@ int jack_initialize(jack_client_t* client, const char* load_init)
         if (! mon->ports[i])
         {
             fprintf(stderr, "can't register jack ports\n");
+            free(mon);
             return 1;
         }
     }
@@ -161,6 +162,7 @@ int jack_initialize(jack_client_t* client, const char* load_init)
     if (jack_activate(client) != 0)
     {
         fprintf(stderr, "can't activate jack client\n");
+        free(mon);
         return 1;
     }
 

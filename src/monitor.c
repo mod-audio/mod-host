@@ -119,7 +119,8 @@ int monitor_start(char *addr, int port)
 
     if (server == NULL)
     {
-      fprintf(stderr,"ERROR, no such host");
+        fprintf(stderr,"ERROR, no such host");
+        return 1;
     }
 
     bzero((char *) &serv_addr, sizeof(serv_addr));
@@ -130,14 +131,19 @@ int monitor_start(char *addr, int port)
     serv_addr.sin_port = htons(port);
 
     if (connect(g_sockfd,(struct sockaddr*)&serv_addr,sizeof(serv_addr)) < 0)
+    {
         perror("ERROR connecting");
+        return 1;
+    }
 
     g_status = ON;
 
     int flags = fcntl(g_sockfd, F_GETFL, 0);
     if (fcntl(g_sockfd, F_SETFL, flags | O_NONBLOCK) != 0)
+    {
         perror("ERROR setting socket to nonblocking");
-
+        return 1;
+    }
 
     return 0;
 }
