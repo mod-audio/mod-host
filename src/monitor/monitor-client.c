@@ -22,20 +22,12 @@
 ************************************************************************************************************************
 */
 
+#include <stdbool.h>
 #include <stdio.h>
-#include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netdb.h>
-#include <fcntl.h>
 
 #include <jack/jack.h>
-#include <lilv/lilv.h>
-
-#include "monitor.h"
-
 
 /*
 ************************************************************************************************************************
@@ -43,6 +35,8 @@
 ************************************************************************************************************************
 */
 
+// used for local stack variables
+#define MAX_CHAR_BUF_SIZE 255
 
 /*
 ************************************************************************************************************************
@@ -50,6 +44,13 @@
 ************************************************************************************************************************
 */
 
+enum Ports {
+    PORT_IN1,
+    PORT_IN2,
+    PORT_OUT1,
+    PORT_OUT2,
+    PORT_COUNT
+};
 
 /*
 ************************************************************************************************************************
@@ -57,6 +58,10 @@
 ************************************************************************************************************************
 */
 
+typedef struct MONITOR_CLIENT_T {
+    jack_client_t *client;
+    jack_port_t *ports[PORT_COUNT];
+} monitor_client_t;
 
 /*
 ************************************************************************************************************************
@@ -64,16 +69,13 @@
 ************************************************************************************************************************
 */
 
-#define OFF 0
-#define ON 1
-
 /*
 ************************************************************************************************************************
 *           LOCAL GLOBAL VARIABLES
 ************************************************************************************************************************
 */
 
-static int g_status, g_sockfd;
+static bool g_active = false;
 
 /*
 ************************************************************************************************************************
@@ -81,13 +83,11 @@ static int g_status, g_sockfd;
 ************************************************************************************************************************
 */
 
-
 /*
 ************************************************************************************************************************
 *           LOCAL CONFIGURATION ERRORS
 ************************************************************************************************************************
 */
-
 
 /*
 ************************************************************************************************************************
@@ -95,106 +95,116 @@ static int g_status, g_sockfd;
 ************************************************************************************************************************
 */
 
-
 /*
 ************************************************************************************************************************
 *           GLOBAL FUNCTIONS
 ************************************************************************************************************************
 */
 
-int monitor_start(char *addr, int port)
+static int ProcessMonitor(jack_nframes_t nframes, void *arg)
 {
-    /* connects to the address specified by the client and starts
-     * monitoring and sending information according to the settings
-     * for each monitoring plugin */
+    monitor_client_t *const mon = arg;
 
-    struct sockaddr_in serv_addr;
-    struct hostent *server;
+    memcpy(jack_port_get_buffer(mon->ports[PORT_OUT1], nframes),
+           jack_port_get_buffer(mon->ports[PORT_IN1], nframes),
+           sizeof(float)*nframes);
 
-    g_sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (g_sockfd < 0)
-        perror("ERROR opening socket");
-
-    server = gethostbyname(addr);
-
-    if (server == NULL)
-    {
-        fprintf(stderr,"ERROR, no such host");
-        return 1;
-    }
-
-    bzero((char *) &serv_addr, sizeof(serv_addr));
-    serv_addr.sin_family = AF_INET;
-    bcopy((char *)server->h_addr,
-          (char *)&serv_addr.sin_addr.s_addr,
-          server->h_length);
-    serv_addr.sin_port = htons(port);
-
-    if (connect(g_sockfd,(struct sockaddr*)&serv_addr,sizeof(serv_addr)) < 0)
-    {
-        perror("ERROR connecting");
-        return 1;
-    }
-
-    g_status = ON;
-
-    int flags = fcntl(g_sockfd, F_GETFL, 0);
-    if (fcntl(g_sockfd, F_SETFL, flags | O_NONBLOCK) != 0)
-    {
-        perror("ERROR setting socket to nonblocking");
-        return 1;
-    }
+    memcpy(jack_port_get_buffer(mon->ports[PORT_OUT2], nframes),
+           jack_port_get_buffer(mon->ports[PORT_IN2], nframes),
+           sizeof(float)*nframes);
 
     return 0;
 }
 
+__attribute__ ((visibility("default")))
+int jack_initialize(jack_client_t* client, const char* load_init);
 
-int monitor_status()
+int jack_initialize(jack_client_t* client, const char* load_init)
 {
-    return g_status;
-}
-
-int monitor_stop()
-{
-    close(g_sockfd);
-    g_status = OFF;
-    return 0;
-}
-
-int monitor_send(int instance, const char *symbol, float value)
-{
-    int ret;
-
-    char msg[255];
-    sprintf(msg, "monitor %d %s %f", instance, symbol, value);
-
-    ret = write(g_sockfd, msg, strlen(msg) + 1);
-    if (ret < 0)
+    /* can only be run once */
+    if (g_active)
     {
-        perror("send error");
+        fprintf(stderr, "loading 2 instances of monitor client is not allowed\n");
+        return 1;
     }
 
-    return ret;
-}
+    /* allocate monitor client */
+    monitor_client_t *const mon = malloc(sizeof(monitor_client_t));
 
-
-int monitor_check_condition(int op, float cond_value, float value)
-{
-    switch(op)
+    if (!mon)
     {
-        case 0:
-            return value > cond_value ? 1 : 0;
-        case 1:
-            return value >= cond_value ? 1 : 0;
-        case 2:
-            return value < cond_value ? 1 : 0;
-        case 3:
-            return value <= cond_value ? 1 : 0;
-        case 4:
-            return value == cond_value ? 1 : 0;
-        case 5:
-            return value != cond_value ? 1 : 0;
+        fprintf(stderr, "out of memory\n");
+        return 1;
     }
+
+    mon->client = client;
+
+    /* Register jack ports */
+    mon->ports[PORT_IN1 ] = jack_port_register(client, "in_1", JACK_DEFAULT_AUDIO_TYPE, JackPortIsInput, 0);
+    mon->ports[PORT_IN2 ] = jack_port_register(client, "in_2", JACK_DEFAULT_AUDIO_TYPE, JackPortIsInput, 0);
+    mon->ports[PORT_OUT1] = jack_port_register(client, "out_1", JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput, 0);
+    mon->ports[PORT_OUT2] = jack_port_register(client, "out_2", JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput, 0);
+
+    for (int i=0; i<PORT_COUNT; ++i)
+    {
+        if (! mon->ports[i])
+        {
+            fprintf(stderr, "can't register jack ports\n");
+            free(mon);
+            return 1;
+        }
+    }
+
+    /* Set jack callbacks */
+    jack_set_process_callback(client, ProcessMonitor, mon);
+
+    /* Activate the jack client */
+    if (jack_activate(client) != 0)
+    {
+        fprintf(stderr, "can't activate jack client\n");
+        free(mon);
+        return 1;
+    }
+
+    g_active = true;
+
+    /* Connect output ports */
+    char ourportname[MAX_CHAR_BUF_SIZE+1];
+    ourportname[MAX_CHAR_BUF_SIZE] = '\0';
+
+    const char* const ourclientname = jack_get_client_name(client);
+
+    snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:out_1", ourclientname);
+    jack_connect(client, ourportname, "system:playback_1");
+
+    if (jack_port_by_name(client, "mod-peakmeter:in_3") != NULL)
+        jack_connect(client, ourportname, "mod-peakmeter:in_3");
+
+    snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:out_2", ourclientname);
+    jack_connect(client, ourportname, "system:playback_2");
+
+    if (jack_port_by_name(client, "mod-peakmeter:in_4") != NULL)
+        jack_connect(client, ourportname, "mod-peakmeter:in_4");
+
     return 0;
+
+    // unused
+    (void)load_init;
 }
 
+__attribute__ ((visibility("default")))
+void jack_finish(void* arg);
+
+void jack_finish(void* arg)
+{
+    monitor_client_t *const mon = arg;
+
+    jack_deactivate(mon->client);
+
+    g_active = false;
+
+    for (int i=0; i<PORT_COUNT; ++i)
+        jack_port_unregister(mon->client, mon->ports[i]);
+
+    free(mon);
+}

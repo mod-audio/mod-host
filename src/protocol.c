@@ -138,11 +138,12 @@ void protocol_parse(msg_t *msg)
 
     unsigned int match, variable_arguments = 0;
 
+    index = NOT_FOUND;
+
     // loop all registered commands
     for (i = 0; i < g_command_count; i++)
     {
         match = 0;
-        index = NOT_FOUND;
 
         // checks received protocol
         for (j = 0; j < proto.list_count && j < g_commands[i].count; j++)
@@ -153,7 +154,10 @@ void protocol_parse(msg_t *msg)
             }
             else if (match > 0)
             {
-                if (is_wildcard(g_commands[i].list[j])) match++;
+                if (is_wildcard(g_commands[i].list[j]))
+                {
+                    match++;
+                }
                 else if (strcmp(g_commands[i].list[j], "...") == 0)
                 {
                     match++;
@@ -186,6 +190,12 @@ void protocol_parse(msg_t *msg)
             else if (match == proto.list_count || variable_arguments)
             {
                 index = i;
+            }
+
+            // not found
+            else
+            {
+                index = NOT_FOUND;
             }
 
             break;

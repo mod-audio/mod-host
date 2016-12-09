@@ -58,11 +58,11 @@ INCS += $(shell pkg-config --cflags cc_client) -DHAVE_CONTROLCHAIN
 endif
 
 # source and object files
-SRC = $(wildcard $(SRC_DIR)/*.$(EXT)) $(SRC_DIR)/rtmempool/rtmempool.c
+SRC = $(wildcard $(SRC_DIR)/*.$(EXT)) $(SRC_DIR)/sha1/sha1.c $(SRC_DIR)/rtmempool/rtmempool.c
 OBJ = $(SRC:.$(EXT)=.o)
 
 # default build
-all: $(PROG) $(PROG).so
+all: $(PROG) $(PROG).so mod-monitor.so
 
 # linking rule
 $(PROG): $(OBJ)
@@ -75,16 +75,24 @@ $(PROG).so: $(OBJ)
 %.o: %.$(EXT) src/info.h
 	$(CC) $(INCS) $(CFLAGS) -o $@ $<
 
+# custom rules for monitor client
+mod-monitor.so: src/mod-monitor.o
+	$(CC) $< $(LDFLAGS) $(LIBS) -shared -o $@
+
+src/mod-monitor.o: src/monitor/monitor-client.c
+	$(CC) $(INCS) $(CFLAGS) -o $@ $<
+
 # install rule
 install: install_man
 	install -d $(DESTDIR)$(BINDIR)
 	install -m 755 $(PROG) $(DESTDIR)$(BINDIR)
 	install -d $(DESTDIR)$(shell pkg-config --variable=libdir jack)/jack/
 	install -m 755 $(PROG).so $(DESTDIR)$(shell pkg-config --variable=libdir jack)/jack/
+	install -m 755 mod-monitor.so $(DESTDIR)$(shell pkg-config --variable=libdir jack)/jack/
 
 # clean rule
 clean:
-	@rm -f $(SRC_DIR)/*.o $(PROG) $(PROG).so src/info.h
+	@rm -f $(SRC_DIR)/*.o $(SRC_DIR)/*/*.o $(PROG) $(PROG).so src/info.h
 
 test:
 	py.test tests/test_host.py

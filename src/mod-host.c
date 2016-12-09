@@ -256,6 +256,23 @@ static void effects_monitor_param_cb(proto_t *proto)
     protocol_response(buffer, proto);
 }
 
+static void effects_licensee_cb(proto_t *proto)
+{
+    char *licensee = NULL;
+
+    if (effects_licensee(atoi(proto->list[1]), &licensee) == SUCCESS)
+    {
+        if (licensee)
+        {
+            protocol_response(licensee, proto);
+            free(licensee);
+            return;
+        }
+    }
+
+    protocol_response("", proto);
+}
+
 static void monitor_addr_set_cb(proto_t *proto)
 {
     int resp;
@@ -505,6 +522,7 @@ static int mod_host_init(jack_client_t* client, int socket_port)
     protocol_add_command(EFFECT_PARAM_SET, effects_set_param_cb);
     protocol_add_command(EFFECT_PARAM_GET, effects_get_param_cb);
     protocol_add_command(EFFECT_PARAM_MON, effects_monitor_param_cb);
+    protocol_add_command(EFFECT_LICENSEE, effects_licensee_cb);
     protocol_add_command(MONITOR_ADDR_SET, monitor_addr_set_cb);
     protocol_add_command(MONITOR_OUTPUT, monitor_output_cb);
     protocol_add_command(MIDI_LEARN, midi_learn_cb);
@@ -652,6 +670,7 @@ int main(int argc, char **argv)
     if (interactive)
     {
         interactive_mode();
+        return 0;
     }
     else
     {
@@ -702,13 +721,16 @@ int jack_initialize(jack_client_t* client, const char* load_init)
 }
 
 __attribute__ ((visibility("default")))
-void jack_finish(void);
+void jack_finish(void* arg);
 
-void jack_finish(void)
+void jack_finish(void* arg)
 {
     running = 0;
     socket_finish();
     pthread_join(intclient_socket_thread, NULL);
     effects_finish(0);
     protocol_remove_commands();
+
+    // unused
+    return; (void)arg;
 }

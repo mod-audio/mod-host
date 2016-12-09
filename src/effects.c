@@ -54,6 +54,7 @@
 #include <lv2/lv2plug.in/ns/ext/port-props/port-props.h>
 #include <lv2/lv2plug.in/ns/ext/buf-size/buf-size.h>
 #include <lv2/lv2plug.in/ns/ext/parameters/parameters.h>
+#include "mod-license.h"
 
 #ifdef HAVE_CONTROLCHAIN
 /* Control Chain */
@@ -91,6 +92,7 @@
 #include "lv2_evbuf.h"
 #include "worker.h"
 #include "symap.h"
+#include "sha1/sha1.h"
 #include "rtmempool/list.h"
 #include "rtmempool/rtmempool.h"
 
@@ -148,6 +150,7 @@ enum {
     URID_UNMAP_FEATURE,
     OPTIONS_FEATURE,
     WORKER_FEATURE,
+    LICENSE_FEATURE,
     BUF_SIZE_POWER2_FEATURE,
     BUF_SIZE_FIXED_FEATURE,
     BUF_SIZE_BOUNDED_FEATURE,
@@ -260,6 +263,7 @@ typedef struct EFFECT_T {
     uint32_t monitors_count;
 
     worker_t worker;
+    const MOD_License_Interface* license_iface;
 
     jack_ringbuffer_t *events_buffer;
 
@@ -383,7 +387,7 @@ static jack_client_t *g_jack_global_client;
 static jack_nframes_t g_sample_rate, g_block_length;
 static const char **g_capture_ports, **g_playback_ports;
 static size_t g_midi_buffer_size;
-static jack_port_t *g_jack_ports[5]; // in1, in2, out1, out2, midi-in
+static jack_port_t *g_midi_in_port;
 
 /* LV2 and Lilv */
 static LilvWorld *g_lv2_data;
@@ -398,11 +402,13 @@ static LV2_URI_Map_Feature g_uri_map;
 static LV2_URID_Map g_urid_map;
 static LV2_URID_Unmap g_urid_unmap;
 static LV2_Options_Option g_options[6];
+static MOD_License_Feature g_license;
 
 static LV2_Feature g_uri_map_feature = {LV2_URI_MAP_URI, &g_uri_map};
 static LV2_Feature g_urid_map_feature = {LV2_URID__map, &g_urid_map};
 static LV2_Feature g_urid_unmap_feature = {LV2_URID__unmap, &g_urid_unmap};
 static LV2_Feature g_options_feature = {LV2_OPTIONS__options, &g_options};
+static LV2_Feature g_license_feature = {MOD_LICENSE__feature, &g_license};
 static LV2_Feature g_buf_size_features[3] = {
     { LV2_BUF_SIZE__powerOf2BlockLength, NULL },
     { LV2_BUF_SIZE__fixedBlockLength, NULL },
@@ -430,10 +436,12 @@ static void RunPostPonedEvents(int ignored_effect_id);
 static void* PostPonedEventsThread(void* arg);
 static int ProcessPlugin(jack_nframes_t nframes, void *arg);
 static float UpdateValueFromMidi(midi_cc_t* mcc, jack_midi_data_t mvalue);
-static int ProcessMonitorMidi(jack_nframes_t nframes, void *arg);
+static int ProcessMidi(jack_nframes_t nframes, void *arg);
 static void JackThreadInit(void *arg);
 static void GetFeatures(effect_t *effect);
 static void FreeFeatures(effect_t *effect);
+static char* GetLicenseFile(MOD_License_Handle handle, const char *license_uri);
+void FreeLicenseData(MOD_License_Handle handle, char *license);
 
 
 /*
@@ -1068,23 +1076,14 @@ static float UpdateValueFromMidi(midi_cc_t* mcc, jack_midi_data_t mvalue)
     }
 }
 
-static int ProcessMonitorMidi(jack_nframes_t nframes, void *arg)
+static int ProcessMidi(jack_nframes_t nframes, void *arg)
 {
-    // bypass monitor ports
-    memcpy(jack_port_get_buffer(g_jack_ports[2], nframes),
-           jack_port_get_buffer(g_jack_ports[0], nframes),
-           sizeof(jack_nframes_t)*nframes);
-
-    memcpy(jack_port_get_buffer(g_jack_ports[3], nframes),
-           jack_port_get_buffer(g_jack_ports[1], nframes),
-           sizeof(jack_nframes_t)*nframes);
-
     jack_midi_event_t event;
     int8_t channel, controller;
     float value;
     bool handled, needs_post = false;
 
-    void *const port_buf = jack_port_get_buffer(g_jack_ports[4], nframes);
+    void *const port_buf = jack_port_get_buffer(g_midi_in_port, nframes);
     const jack_nframes_t event_count = jack_midi_get_event_count(port_buf);
 
     for (jack_nframes_t i = 0 ; i < event_count; i++)
@@ -1294,6 +1293,7 @@ static void GetFeatures(effect_t *effect)
     features[URID_UNMAP_FEATURE]        = &g_urid_unmap_feature;
     features[OPTIONS_FEATURE]           = &g_options_feature;
     features[WORKER_FEATURE]            = work_schedule_feature;
+    features[LICENSE_FEATURE]           = &g_license_feature;
     features[BUF_SIZE_POWER2_FEATURE]   = &g_buf_size_features[0];
     features[BUF_SIZE_FIXED_FEATURE]    = &g_buf_size_features[1];
     features[BUF_SIZE_BOUNDED_FEATURE]  = &g_buf_size_features[2];
@@ -1426,6 +1426,91 @@ static void FreeFeatures(effect_t *effect)
     }
 }
 
+static char* GetLicenseFile(MOD_License_Handle handle, const char *license_uri)
+{
+    if (!license_uri || *license_uri == '\0')
+        return NULL;
+
+    // get keys path. note: assumes trailing separator
+    const char* const keyspath = getenv("MOD_KEYS_PATH");
+    if (!keyspath || *keyspath == '\0')
+        return NULL;
+
+    // get path length, check trailing separator
+    const size_t keyspathlen = strlen(keyspath);
+    if (keyspath[keyspathlen-1] != '/')
+        return NULL;
+
+    // local vars
+    uint8_t* hashenc;
+    char hashdec[HASH_LENGTH*2+1];
+    FILE* file;
+    long filesize;
+    size_t filenamesize;
+    char* filename;
+    char* filebuffer = NULL;
+    sha1nfo sha1;
+
+    // hash the uri
+    sha1_init(&sha1);
+    sha1_write(&sha1, license_uri, strlen(license_uri));
+    hashenc = sha1_result(&sha1);
+
+    for (int i=0; i<HASH_LENGTH; i++) {
+        sprintf(hashdec+(i*2), "%02x", hashenc[i]);
+    }
+    hashdec[HASH_LENGTH*2] = '\0';
+
+    // join path
+    filenamesize = strlen(keyspath) + HASH_LENGTH*2;
+    filename = malloc(filenamesize+1);
+
+    if (! filename)
+        return NULL;
+
+    memcpy(filename, keyspath, keyspathlen);
+    memcpy(filename+keyspathlen, hashdec, HASH_LENGTH*2);
+    filename[filenamesize] = '\0';
+
+    // open file
+    file = fopen(filename, "r");
+
+    // cleanup
+    free(filename);
+
+    if (!file)
+        return NULL;
+
+    // get size
+    fseek(file, 0, SEEK_END);
+    filesize = ftell(file);
+    if (filesize <= 0 || filesize > 5*1024*1024) // 5Mb
+        goto end;
+
+    // allocate file buffer
+    filebuffer = (char*)calloc(1, filesize+1);
+    if (! filebuffer)
+        goto end;
+
+    // read file
+    fseek(file, 0, SEEK_SET);
+    if (fread(filebuffer, 1, filesize, file) != (size_t)filesize)
+        filebuffer = NULL;
+
+end:
+    fclose(file);
+    return filebuffer;
+
+    UNUSED_PARAM(handle);
+}
+
+void FreeLicenseData(MOD_License_Handle handle, char *license)
+{
+    return free(license);
+
+    UNUSED_PARAM(handle);
+}
+
 #ifdef HAVE_CONTROLCHAIN
 static void CCDataUpdate(void *arg)
 {
@@ -1471,8 +1556,6 @@ static void CCDataUpdate(void *arg)
         sem_post(&g_postevents_semaphore);
 }
 #endif
-
-
 /*
 ************************************************************************************************************************
 *           GLOBAL FUNCTIONS
@@ -1539,18 +1622,14 @@ int effects_init(void* client)
 
     /* Set jack callbacks */
     jack_set_thread_init_callback(g_jack_global_client, JackThreadInit, NULL);
-    jack_set_process_callback(g_jack_global_client, ProcessMonitorMidi, NULL);
+    jack_set_process_callback(g_jack_global_client, ProcessMidi, NULL);
 
     /* Register jack ports */
-    g_jack_ports[0] = jack_port_register(g_jack_global_client, "monitor-in_1", JACK_DEFAULT_AUDIO_TYPE, JackPortIsInput, 0);
-    g_jack_ports[1] = jack_port_register(g_jack_global_client, "monitor-in_2", JACK_DEFAULT_AUDIO_TYPE, JackPortIsInput, 0);
-    g_jack_ports[2] = jack_port_register(g_jack_global_client, "monitor-out_1", JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput, 0);
-    g_jack_ports[3] = jack_port_register(g_jack_global_client, "monitor-out_2", JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput, 0);
-    g_jack_ports[4] = jack_port_register(g_jack_global_client, "midi_in", JACK_DEFAULT_MIDI_TYPE, JackPortIsInput, 0);
+    g_midi_in_port = jack_port_register(g_jack_global_client, "midi_in", JACK_DEFAULT_MIDI_TYPE, JackPortIsInput, 0);
 
-    if (! (g_jack_ports[0] && g_jack_ports[1] && g_jack_ports[2] && g_jack_ports[3] && g_jack_ports[4]))
+    if (! g_midi_in_port)
     {
-        fprintf(stderr, "can't register global jack ports\n");
+        fprintf(stderr, "can't register global jack midi-in port\n");
         if (client == NULL)
             jack_client_close(g_jack_global_client);
         return ERR_JACK_PORT_REGISTER;
@@ -1565,29 +1644,16 @@ int effects_init(void* client)
         return ERR_JACK_CLIENT_ACTIVATION;
     }
 
-    /* connect monitor output ports */
-    char ourportname[MAX_CHAR_BUF_SIZE+1];
-    ourportname[MAX_CHAR_BUF_SIZE] = '\0';
-
-    const char* const ourclientname = jack_get_client_name(g_jack_global_client);
-
-    snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:monitor-out_1", ourclientname);
-    jack_connect(g_jack_global_client, ourportname, "system:playback_1");
-
-    if (jack_port_by_name(g_jack_global_client, "mod-peakmeter:in_3") != NULL)
-        jack_connect(g_jack_global_client, ourportname, "mod-peakmeter:in_3");
-
-    snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:monitor-out_2", ourclientname);
-    jack_connect(g_jack_global_client, ourportname, "system:playback_2");
-
-    if (jack_port_by_name(g_jack_global_client, "mod-peakmeter:in_4") != NULL)
-        jack_connect(g_jack_global_client, ourportname, "mod-peakmeter:in_4");
-
     /* Connect to all good hw ports (system, ttymidi and nooice) */
     const char** const midihwports = jack_get_ports(g_jack_global_client, "", JACK_DEFAULT_MIDI_TYPE,
                                                                               JackPortIsOutput|JackPortIsPhysical);
     if (midihwports != NULL)
     {
+        char ourportname[MAX_CHAR_BUF_SIZE+1];
+        ourportname[MAX_CHAR_BUF_SIZE] = '\0';
+
+        const char* const ourclientname = jack_get_client_name(g_jack_global_client);
+
         snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:midi_in", ourclientname);
 
         for (int i=0; midihwports[i] != NULL; ++i)
@@ -1692,6 +1758,10 @@ int effects_init(void* client)
     g_options[5].type = 0;
     g_options[5].value = NULL;
 
+    g_license.handle = NULL;
+    g_license.license = GetLicenseFile;
+    g_license.free = FreeLicenseData;
+
     lv2_atom_forge_init(&g_lv2_atom_forge, &g_urid_map);
 
     /* Init lilv_instance as NULL for all plugins */
@@ -1785,7 +1855,7 @@ int effects_add(const char *uid, int instance)
     LilvNode *lilv_default, *lilv_mod_default;
     LilvNode *lilv_minimum, *lilv_mod_minimum;
     LilvNode *lilv_maximum, *lilv_mod_maximum;
-    LilvNode *lilv_atom_port, *lilv_worker_interface;
+    LilvNode *lilv_atom_port, *lilv_worker_interface, *lilv_license_interface;
     const LilvPort *lilv_port;
     const LilvNode *symbol_node;
 
@@ -1824,6 +1894,7 @@ int effects_add(const char *uid, int instance)
     lilv_event = NULL;
     lilv_atom_port = NULL;
     lilv_worker_interface = NULL;
+    lilv_license_interface = NULL;
 
     /* Create a client to Jack */
     snprintf(effect_name, 31, "effect_%i", instance);
@@ -1897,6 +1968,13 @@ int effects_add(const char *uid, int instance)
             (LV2_Worker_Interface*) lilv_instance_get_extension_data(effect->lilv_instance, LV2_WORKER__interface);
 
         worker_init(&effect->worker, worker_interface);
+    }
+
+    lilv_license_interface = lilv_new_uri(g_lv2_data, MOD_LICENSE__interface);
+    if (lilv_plugin_has_extension_data(effect->lilv_plugin, lilv_license_interface))
+    {
+        effect->license_iface =
+            (MOD_License_Interface*) lilv_instance_get_extension_data(effect->lilv_instance, MOD_LICENSE__interface);
     }
 
     /* Create the URI for identify the ports */
@@ -2131,7 +2209,8 @@ int effects_add(const char *uid, int instance)
             lilv_instance_connect_port(lilv_instance, i, cv_buffer);
 
             /* Jack port creation */
-            jack_port = jack_port_register(jack_client, port_name, JACK_DEFAULT_AUDIO_TYPE, jack_flags|JackPortIsControlVoltage, 0);
+            jack_flags |= JackPortIsControlVoltage;
+            jack_port = jack_port_register(jack_client, port_name, JACK_DEFAULT_AUDIO_TYPE, jack_flags, 0);
             if (jack_port == NULL)
             {
                 fprintf(stderr, "can't get jack port\n");
@@ -2374,12 +2453,13 @@ int effects_add(const char *uid, int instance)
     lilv_node_free(lilv_mod_maximum);
     lilv_node_free(lilv_atom_port);
     lilv_node_free(lilv_worker_interface);
+    lilv_node_free(lilv_license_interface);
 
     /* Jack callbacks */
     jack_set_thread_init_callback(jack_client, JackThreadInit, effect);
     jack_set_process_callback(jack_client, ProcessPlugin, effect);
     jack_set_buffer_size_callback(jack_client, BufferSize, effect);
-    jack_set_freewheel_callback(g_jack_global_client, FreeWheelMode, effect);
+    jack_set_freewheel_callback(jack_client, FreeWheelMode, effect);
 
     lilv_instance_activate(lilv_instance);
 
@@ -2425,6 +2505,7 @@ int effects_add(const char *uid, int instance)
         lilv_node_free(lilv_mod_maximum);
         lilv_node_free(lilv_atom_port);
         lilv_node_free(lilv_worker_interface);
+        lilv_node_free(lilv_license_interface);
 
         effects_remove(instance);
 
@@ -3190,6 +3271,33 @@ int effects_midi_unmap(int effect_id, const char *control_symbol)
     return ERR_LV2_INVALID_PARAM_SYMBOL;
 }
 
+int effects_licensee(int effect_id, char **licensee_ptr)
+{
+    if (!InstanceExist(effect_id))
+    {
+        return ERR_INSTANCE_NON_EXISTS;
+    }
+
+    effect_t *effect = &g_effects[effect_id];
+
+    if (effect->license_iface)
+    {
+        char* licensee = NULL;
+        LV2_Handle handle = lilv_instance_get_handle(effect->lilv_instance);
+
+        if (effect->license_iface->status(handle) == MOD_LICENSE_SUCCESS)
+            licensee = effect->license_iface->licensee(handle);
+
+        if (licensee)
+        {
+            *licensee_ptr = licensee;
+            return SUCCESS;
+        }
+    }
+
+    return ERR_INSTANCE_UNLICENSED;
+}
+
 void effects_midi_program_listen(int enable, int channel)
 {
     if (enable == 0 || channel < 0 || channel > 15)
@@ -3197,6 +3305,7 @@ void effects_midi_program_listen(int enable, int channel)
 
     g_midi_program_listen = channel;
 }
+
 
 int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int actuator_id)
 {
