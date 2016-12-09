@@ -699,13 +699,16 @@ int jack_initialize(jack_client_t* client, const char* load_init)
 }
 
 __attribute__ ((visibility("default")))
-void jack_finish(void);
+void jack_finish(void* arg);
 
-void jack_finish(void)
+void jack_finish(void* arg)
 {
     running = 0;
     socket_finish();
     pthread_join(intclient_socket_thread, NULL);
     effects_finish(0);
     protocol_remove_commands();
+
+    // unused
+    return; (void)arg;
 }
