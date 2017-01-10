@@ -268,7 +268,8 @@ typedef struct EFFECT_T {
     jack_ringbuffer_t *events_buffer;
 
     // current and previous bypass state
-    bool bypass;
+    port_t bypass_port;
+    float bypass;
     bool was_bypassed;
 
     // avoids itenerating controls each cycle
@@ -2427,8 +2428,18 @@ int effects_add(const char *uid, int instance)
     lilv_nodes_free(properties);
 
     /* Default value of bypass */
-    effect->bypass = false;
+    effect->bypass = 0.0;
     effect->was_bypassed = false;
+
+    effect->bypass_port.buffer_count = 1;
+    effect->bypass_port.buffer = &effect->bypass;
+    effect->bypass_port.min_value = 0.0;
+    effect->bypass_port.max_value = 1.0;
+    effect->bypass_port.def_value = 0.0;
+    effect->bypass_port.type = TYPE_CONTROL;
+    effect->bypass_port.flow = FLOW_INPUT;
+    effect->bypass_port.hints = HINT_TOGGLE;
+    effect->bypass_port.symbol = BYPASS_PORT_SYMBOL;
 
     lilv_node_free(lilv_audio);
     lilv_node_free(lilv_control);
@@ -2535,7 +2546,7 @@ int effects_preset_load(int effect_id, const char *uri)
             // force state of special designated ports
             if (effect->enabled_index >= 0)
             {
-                *(effect->ports[effect->enabled_index]->buffer) = effect->bypass ? 0.0f : 1.0f;
+                *(effect->ports[effect->enabled_index]->buffer) = effect->bypass;
             }
             if (effect->freewheel_index >= 0)
             {
@@ -2980,7 +2991,7 @@ int effects_bypass(int effect_id, int value)
     }
 
     effect_t *effect = &g_effects[effect_id];
-    effect->bypass = value;
+    effect->bypass = value ? 1.0f : 0.0f;
 
     if (effect->enabled_index >= 0)
     {
@@ -3315,42 +3326,45 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
     if (!g_cc_client)
         return ERR_CONTROL_CHAIN_UNAVAILABLE;
 
+    const port_t *port;
+    effect_t *effect = &(g_effects[effect_id]);
+
     if (!strcmp(control_symbol, g_bypass_port_symbol))
     {
-        // TODO
+        port = &effect->bypass_port;
     }
     else
     {
-        effect_t *effect = &(g_effects[effect_id]);
-        const port_t *port = FindEffectInputPortBySymbol(effect, control_symbol);
+        port = FindEffectInputPortBySymbol(effect, control_symbol);
 
         if (port == NULL)
             return ERR_LV2_INVALID_PARAM_SYMBOL;
+    }
 
-        cc_assignment_t assignment;
-        assignment.device_id = device_id;
-        assignment.actuator_id = actuator_id;
-        assignment.mode = CC_MODE_TOGGLE;
-        assignment.value = *port->buffer;
-        assignment.min = port->min_value;
-        assignment.max = port->max_value;
-        assignment.def = port->def_value;
+    cc_assignment_t assignment;
+    assignment.device_id = device_id;
+    assignment.actuator_id = actuator_id;
+    assignment.mode = CC_MODE_TOGGLE;
+    assignment.label = port->symbol;
+    assignment.value = *port->buffer;
+    assignment.min = port->min_value;
+    assignment.max = port->max_value;
+    assignment.def = port->def_value;
 
-        if (port->hints & HINT_TRIGGER)
-            assignment.mode = CC_MODE_TRIGGER;
+    if (port->hints & HINT_TRIGGER)
+        assignment.mode = CC_MODE_TRIGGER;
 
-        int assignment_id = cc_client_assignment(g_cc_client, &assignment);
-        if (assignment_id >= 0)
-        {
-            assignment_t *item =
-                &g_assignments_list[assignment.device_id][assignment_id];
+    int assignment_id = cc_client_assignment(g_cc_client, &assignment);
+    if (assignment_id >= 0)
+    {
+        assignment_t *item =
+            &g_assignments_list[assignment.device_id][assignment_id];
 
-            item->effect_id = effect_id;
-            item->port = port;
-            item->symbol = port->symbol;
-            item->device_id = assignment.device_id;
-            item->assignment_id = assignment_id;
-        }
+        item->effect_id = effect_id;
+        item->port = port;
+        item->symbol = port->symbol;
+        item->device_id = assignment.device_id;
+        item->assignment_id = assignment_id;
     }
 
     return SUCCESS;
@@ -3367,16 +3381,11 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
 int effects_cc_unmap(int effect_id, const char *control_symbol)
 {
 #ifdef HAVE_CONTROLCHAIN
-    const port_t *port = NULL;
 
     if (!InstanceExist(effect_id))
         return ERR_INSTANCE_NON_EXISTS;
     if (!g_cc_client)
         return ERR_CONTROL_CHAIN_UNAVAILABLE;
-
-    port = FindEffectInputPortBySymbol(&(g_effects[effect_id]), control_symbol);
-    if (port == NULL)
-        return ERR_LV2_INVALID_PARAM_SYMBOL;
 
     for (int i = 0; i < CC_MAX_DEVICES; i++)
     {
@@ -3398,8 +3407,6 @@ int effects_cc_unmap(int effect_id, const char *control_symbol)
             }
         }
     }
-
-    // TODO: bypass
 
     return ERR_ASSIGNMENT_INVALID_OP;
 #else
