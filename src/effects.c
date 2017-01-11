@@ -3389,7 +3389,7 @@ int effects_cc_unmap(int effect_id, const char *control_symbol)
 
     for (int i = 0; i < CC_MAX_DEVICES; i++)
     {
-        for (int j = 0; i < CC_MAX_ASSIGNMENTS; j++)
+        for (int j = 0; j < CC_MAX_ASSIGNMENTS; j++)
         {
             assignment_t *assignment = &g_assignments_list[i][j];
             if (assignment->symbol && assignment->effect_id == effect_id &&
