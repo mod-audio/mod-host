@@ -719,7 +719,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
     {
         lv2_evbuf_reset(effect->input_event_ports[i]->evbuf, true);
 
-        if (effect->bypass)
+        if (effect->bypass > 0.5f)
         {
             // effect is now bypassed, but wasn't before
             if (!effect->was_bypassed)
@@ -794,7 +794,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
     }
 
     /* Bypass */
-    if (effect->bypass && effect->enabled_index < 0)
+    if (effect->bypass > 0.5f && effect->enabled_index < 0)
     {
         /* Plugins with audio inputs */
         if (effect->input_audio_ports_count > 0)
@@ -922,7 +922,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
             void* buf = jack_port_get_buffer(port->jack_port, nframes);
             jack_midi_clear_buffer(buf);
 
-            if (effect->bypass)
+            if (effect->bypass > 0.5f)
             {
                 if (effect->input_audio_ports_count == 0 &&
                     effect->output_audio_ports_count == 0 &&
@@ -1011,7 +1011,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
             sem_post(&g_postevents_semaphore);
     }
 
-    effect->was_bypassed = effect->bypass;
+    effect->was_bypassed = effect->bypass > 0.5f;
 
     return 0;
 }
@@ -1021,7 +1021,7 @@ static float UpdateValueFromMidi(midi_cc_t* mcc, jack_midi_data_t mvalue)
     if (!strcmp(mcc->symbol, g_bypass_port_symbol))
     {
         effect_t *effect = &g_effects[mcc->effect_id];
-        effect->bypass = (mvalue < 64);
+        effect->bypass = (mvalue < 64) ? 1.0f : 0.0f;
 
         if (effect->enabled_index >= 0)
         {
