@@ -2458,7 +2458,7 @@ int effects_preset_load(int effect_id, const char *uri)
             // force state of special designated ports
             if (effect->enabled_index >= 0)
             {
-                *(effect->ports[effect->enabled_index]->buffer) = effect->bypass ? 0.0f : 1.0f;
+                *(effect->ports[effect->enabled_index]->buffer) = effect->bypass > 0.5f ? 0.0 : 1.0f;
             }
             if (effect->freewheel_index >= 0)
             {
@@ -2898,7 +2898,7 @@ int effects_bypass(int effect_id, int value)
     }
 
     effect_t *effect = &g_effects[effect_id];
-    effect->bypass = value;
+    effect->bypass = value ? 1.0f : 0.0f;
 
     if (effect->enabled_index >= 0)
     {
