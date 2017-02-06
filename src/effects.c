@@ -1523,7 +1523,6 @@ static void CCDataUpdate(void *arg)
     cc_update_list_t *updates = arg;
     for (int i = 0; i < updates->count; i++)
     {
-        // TODO: bypass
         cc_update_data_t *data = &updates->list[i];
         assignment_t *assignment =
             &g_assignments_list[updates->device_id][data->assignment_id];
@@ -1531,7 +1530,20 @@ static void CCDataUpdate(void *arg)
         if (!assignment->port)
             continue;
 
-        *(assignment->port->buffer) = data->value;
+        if (!strcmp(assignment->symbol, g_bypass_port_symbol))
+        {
+            const bool enabled = data->value > 0.5f;
+            effect_t *effect = &g_effects[assignment->effect_id];
+
+            *(assignment->port->buffer) = enabled ? 0.0f : 1.0f;
+
+            if (effect->enabled_index >= 0)
+                *(effect->ports[effect->enabled_index]->buffer) = enabled ? 1.0f : 0.0f;
+        }
+        else
+        {
+            *(assignment->port->buffer) = data->value;
+        }
 
         postponed_event_list_data* const posteventptr =
             rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
@@ -2550,7 +2562,7 @@ int effects_preset_load(int effect_id, const char *uri)
             // force state of special designated ports
             if (effect->enabled_index >= 0)
             {
-                *(effect->ports[effect->enabled_index]->buffer) = effect->bypass > 0.5f ? 0.0 : 1.0f;
+                *(effect->ports[effect->enabled_index]->buffer) = effect->bypass > 0.5f ? 0.0f : 1.0f;
             }
             if (effect->freewheel_index >= 0)
             {
@@ -3345,6 +3357,13 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
     assignment.min = minimum;
     assignment.max = maximum;
     assignment.def = port->def_value;
+
+    if (!strcmp(control_symbol, g_bypass_port_symbol))
+    {
+        // invert value for bypass
+        assignment.value = value > 0.5f ? 0.0f : 1.0f;
+        assignment.def = 1.0f;
+    }
 
     // TODO: steps and options
 
