@@ -1319,6 +1319,9 @@ property_t *FindEffectPropertyByLabel(effect_t *effect, const char *label)
 
 port_t *FindEffectInputPortBySymbol(effect_t *effect, const char *control_symbol)
 {
+    if (!strcmp(control_symbol, g_bypass_port_symbol))
+        return &effect->bypass_port;
+
     for (uint32_t i = 0; i < effect->input_control_ports_count; i++)
     {
         if (strcmp(effect->input_control_ports[i]->symbol, control_symbol) == 0)
@@ -2428,14 +2431,15 @@ int effects_add(const char *uid, int instance)
     lilv_nodes_free(properties);
 
     /* Default value of bypass */
-    effect->bypass = 0.0;
+    effect->bypass = 0.0f;
     effect->was_bypassed = false;
 
     effect->bypass_port.buffer_count = 1;
     effect->bypass_port.buffer = &effect->bypass;
-    effect->bypass_port.min_value = 0.0;
-    effect->bypass_port.max_value = 1.0;
-    effect->bypass_port.def_value = 0.0;
+    effect->bypass_port.min_value = 0.0f;
+    effect->bypass_port.max_value = 1.0f;
+    effect->bypass_port.def_value = 0.0f;
+    effect->bypass_port.prev_value = 0.0f;
     effect->bypass_port.type = TYPE_CONTROL;
     effect->bypass_port.flow = FLOW_INPUT;
     effect->bypass_port.hints = HINT_TOGGLE;
@@ -3317,8 +3321,8 @@ void effects_midi_program_listen(int enable, int channel)
     g_midi_program_listen = channel;
 }
 
-
-int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int actuator_id)
+int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int actuator_id,
+                   const char* label, float value, float minimum, float maximum)
 {
 #ifdef HAVE_CONTROLCHAIN
     if (!InstanceExist(effect_id))
@@ -3326,30 +3330,23 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
     if (!g_cc_client)
         return ERR_CONTROL_CHAIN_UNAVAILABLE;
 
-    const port_t *port;
     effect_t *effect = &(g_effects[effect_id]);
+    const port_t *port = FindEffectInputPortBySymbol(effect, control_symbol);
 
-    if (!strcmp(control_symbol, g_bypass_port_symbol))
-    {
-        port = &effect->bypass_port;
-    }
-    else
-    {
-        port = FindEffectInputPortBySymbol(effect, control_symbol);
-
-        if (port == NULL)
-            return ERR_LV2_INVALID_PARAM_SYMBOL;
-    }
+    if (port == NULL)
+        return ERR_LV2_INVALID_PARAM_SYMBOL;
 
     cc_assignment_t assignment;
     assignment.device_id = device_id;
     assignment.actuator_id = actuator_id;
     assignment.mode = CC_MODE_TOGGLE;
-    assignment.label = port->symbol;
-    assignment.value = *port->buffer;
-    assignment.min = port->min_value;
-    assignment.max = port->max_value;
+    assignment.label = label;
+    assignment.value = value;
+    assignment.min = minimum;
+    assignment.max = maximum;
     assignment.def = port->def_value;
+
+    // TODO: steps and options
 
     if (port->hints & HINT_TRIGGER)
         assignment.mode = CC_MODE_TRIGGER;
@@ -3375,6 +3372,10 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
     UNUSED_PARAM(control_symbol);
     UNUSED_PARAM(device_id);
     UNUSED_PARAM(actuator_id);
+    UNUSED_PARAM(label);
+    UNUSED_PARAM(value);
+    UNUSED_PARAM(minimum);
+    UNUSED_PARAM(maximum);
 #endif
 }
 
@@ -3396,8 +3397,8 @@ int effects_cc_unmap(int effect_id, const char *control_symbol)
                 strcmp(assignment->symbol, control_symbol) == 0)
             {
                 assignment->effect_id = -1;
-                assignment->port = 0;
-                assignment->symbol = 0;
+                assignment->port = NULL;
+                assignment->symbol = NULL;
 
                 cc_unassignment_t unassignment;
                 unassignment.device_id = assignment->device_id;

@@ -340,7 +340,8 @@ static void midi_program_listen_cb(proto_t *proto)
 static void cc_map_cb(proto_t *proto)
 {
     int resp;
-    resp = effects_cc_map(atoi(proto->list[1]), proto->list[2], atoi(proto->list[3]), atoi(proto->list[4]));
+    resp = effects_cc_map(atoi(proto->list[1]), proto->list[2], atoi(proto->list[3]), atoi(proto->list[4]),
+                          proto->list[5], atof(proto->list[6]), atof(proto->list[7]), atof(proto->list[8]));
 
     char buffer[128];
     sprintf(buffer, "resp %i", resp);
