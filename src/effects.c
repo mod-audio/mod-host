@@ -1532,18 +1532,14 @@ static void CCDataUpdate(void *arg)
 
         if (!strcmp(assignment->symbol, g_bypass_port_symbol))
         {
-            const bool enabled = data->value > 0.5f;
+            data->value = 1.0f - data->value;
+
             effect_t *effect = &g_effects[assignment->effect_id];
-
-            *(assignment->port->buffer) = enabled ? 0.0f : 1.0f;
-
             if (effect->enabled_index >= 0)
-                *(effect->ports[effect->enabled_index]->buffer) = enabled ? 1.0f : 0.0f;
+                *(effect->ports[effect->enabled_index]->buffer) = (data->value > 0.5f) ? 0.0f : 1.0f;
         }
-        else
-        {
-            *(assignment->port->buffer) = data->value;
-        }
+
+        *(assignment->port->buffer) = data->value;
 
         postponed_event_list_data* const posteventptr =
             rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
