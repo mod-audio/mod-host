@@ -445,6 +445,7 @@ static void FreeFeatures(effect_t *effect);
 static char* GetLicenseFile(MOD_License_Handle handle, const char *license_uri);
 void FreeLicenseData(MOD_License_Handle handle, char *license);
 #ifdef HAVE_CONTROLCHAIN
+static void CCDataUpdate(void* arg);
 static void InitializeControlChainIfNeeded(void);
 #endif
 
@@ -522,17 +523,6 @@ static void FreeWheelMode(int starting, void* data)
         *(effect->ports[effect->freewheel_index]->buffer) = starting ? 1.0f : 0.0f;
     }
 }
-
-#ifdef HAVE_CONTROLCHAIN
-static void InitializeControlChainIfNeeded(void)
-{
-    if (g_cc_client != NULL)
-        return;
-
-    if ((g_cc_client = cc_client_new("/tmp/control-chain.sock")) != NULL)
-        cc_client_data_update_cb(g_cc_client, CCDataUpdate);
-}
-#endif
 
 static bool ShouldIgnorePostPonedEvent(postponed_event_list_data* ev, postponed_cached_events* cached_events)
 {
@@ -1531,7 +1521,7 @@ void FreeLicenseData(MOD_License_Handle handle, char *license)
 }
 
 #ifdef HAVE_CONTROLCHAIN
-static void CCDataUpdate(void *arg)
+static void CCDataUpdate(void* arg)
 {
     bool needs_post = false;
 
@@ -1582,7 +1572,17 @@ static void CCDataUpdate(void *arg)
     if (needs_post)
         sem_post(&g_postevents_semaphore);
 }
+
+static void InitializeControlChainIfNeeded(void)
+{
+    if (g_cc_client != NULL)
+        return;
+
+    if ((g_cc_client = cc_client_new("/tmp/control-chain.sock")) != NULL)
+        cc_client_data_update_cb(g_cc_client, CCDataUpdate);
+}
 #endif
+
 /*
 ************************************************************************************************************************
 *           GLOBAL FUNCTIONS
