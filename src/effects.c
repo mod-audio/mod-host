@@ -428,6 +428,7 @@ static const char* const g_bypass_port_symbol = BYPASS_PORT_SYMBOL;
 ************************************************************************************************************************
 */
 
+static bool FloatsDifferEnough(float a, float b);
 static void InstanceDelete(int effect_id);
 static int InstanceExist(int effect_id);
 static void AllocatePortBuffers(effect_t* effect);
@@ -443,6 +444,9 @@ static void GetFeatures(effect_t *effect);
 static void FreeFeatures(effect_t *effect);
 static char* GetLicenseFile(MOD_License_Handle handle, const char *license_uri);
 void FreeLicenseData(MOD_License_Handle handle, char *license);
+#ifdef HAVE_CONTROLCHAIN
+static void InitializeControlChainIfNeeded(void);
+#endif
 
 
 /*
@@ -518,6 +522,17 @@ static void FreeWheelMode(int starting, void* data)
         *(effect->ports[effect->freewheel_index]->buffer) = starting ? 1.0f : 0.0f;
     }
 }
+
+#ifdef HAVE_CONTROLCHAIN
+static void InitializeControlChainIfNeeded(void)
+{
+    if (g_cc_client != NULL)
+        return;
+
+    if ((g_cc_client = cc_client_new("/tmp/control-chain.sock")) != NULL)
+        cc_client_data_update_cb(g_cc_client, CCDataUpdate);
+}
+#endif
 
 static bool ShouldIgnorePostPonedEvent(postponed_event_list_data* ev, postponed_cached_events* cached_events)
 {
@@ -1799,9 +1814,7 @@ int effects_init(void* client)
     pthread_create(&g_postevents_thread, NULL, PostPonedEventsThread, NULL);
 
 #ifdef HAVE_CONTROLCHAIN
-    /* Init control chain */
-    g_cc_client = cc_client_new("/tmp/control-chain.sock");
-    if (g_cc_client) cc_client_data_update_cb(g_cc_client, CCDataUpdate);
+    InitializeControlChainIfNeeded();
 #endif
 
     return SUCCESS;
@@ -3333,6 +3346,8 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
                    const char* label, float value, float minimum, float maximum)
 {
 #ifdef HAVE_CONTROLCHAIN
+    InitializeControlChainIfNeeded();
+
     if (!InstanceExist(effect_id))
         return ERR_INSTANCE_NON_EXISTS;
     if (!g_cc_client)
@@ -3397,6 +3412,7 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
 int effects_cc_unmap(int effect_id, const char *control_symbol)
 {
 #ifdef HAVE_CONTROLCHAIN
+    InitializeControlChainIfNeeded();
 
     if (!InstanceExist(effect_id))
         return ERR_INSTANCE_NON_EXISTS;
