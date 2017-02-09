@@ -63,6 +63,7 @@ enum {
     ERR_ASSIGNMENT_ALREADY_EXISTS = -301,
     ERR_ASSIGNMENT_INVALID_OP = -302,
     ERR_ASSIGNMENT_LIST_FULL = -303,
+    ERR_ASSIGNMENT_FAILED = -304,
 
     ERR_CONTROL_CHAIN_UNAVAILABLE = -401,
 
@@ -135,7 +136,7 @@ int effects_midi_unmap(int effect_id, const char *control_symbol);
 int effects_licensee(int effect_id, char **licensee);
 void effects_midi_program_listen(int enable, int channel);
 int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int actuator_id,
-                   const char* label, float value, float minimum, float maximum);
+                   const char* label, float value, float minimum, float maximum, int steps);
 int effects_cc_unmap(int effect_id, const char *control_symbol);
 float effects_jack_cpu_load(void);
 void effects_bundle_add(const char* bundlepath);

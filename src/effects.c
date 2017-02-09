@@ -316,8 +316,8 @@ typedef struct MIDI_CC_T {
 typedef struct ASSIGNMENT_T {
     int effect_id;
     const port_t *port;
-    const char *symbol;
-    int device_id, assignment_id;
+    int device_id;
+    int assignment_id;
 } assignment_t;
 
 typedef struct POSTPONED_EVENT_T {
@@ -1523,19 +1523,21 @@ void FreeLicenseData(MOD_License_Handle handle, char *license)
 #ifdef HAVE_CONTROLCHAIN
 static void CCDataUpdate(void* arg)
 {
-    bool needs_post = false;
-
     cc_update_list_t *updates = arg;
+
+    bool needs_post = false;
+    const int device_id = updates->device_id;
+
     for (int i = 0; i < updates->count; i++)
     {
         cc_update_data_t *data = &updates->list[i];
         assignment_t *assignment =
-            &g_assignments_list[updates->device_id][data->assignment_id];
+            &g_assignments_list[device_id][data->assignment_id];
 
         if (!assignment->port)
             continue;
 
-        if (!strcmp(assignment->symbol, g_bypass_port_symbol))
+        if (!strcmp(assignment->port->symbol, g_bypass_port_symbol))
         {
             data->value = 1.0f - data->value;
 
@@ -1555,7 +1557,7 @@ static void CCDataUpdate(void* arg)
         const postponed_event_t pevent = {
             POSTPONED_PARAM_SET,
             assignment->effect_id,
-            assignment->symbol,
+            assignment->port->symbol,
             -1, -1,
             data->value,
             0.0f, 0.0f
@@ -2464,7 +2466,7 @@ int effects_add(const char *uid, int instance)
     effect->bypass_port.type = TYPE_CONTROL;
     effect->bypass_port.flow = FLOW_INPUT;
     effect->bypass_port.hints = HINT_TOGGLE;
-    effect->bypass_port.symbol = BYPASS_PORT_SYMBOL;
+    effect->bypass_port.symbol = g_bypass_port_symbol;
 
     lilv_node_free(lilv_audio);
     lilv_node_free(lilv_control);
@@ -3343,7 +3345,7 @@ void effects_midi_program_listen(int enable, int channel)
 }
 
 int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int actuator_id,
-                   const char* label, float value, float minimum, float maximum)
+                   const char* label, float value, float minimum, float maximum, int steps)
 {
 #ifdef HAVE_CONTROLCHAIN
     InitializeControlChainIfNeeded();
@@ -3381,18 +3383,17 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
     if (port->hints & HINT_TRIGGER)
         assignment.mode = CC_MODE_TRIGGER;
 
-    int assignment_id = cc_client_assignment(g_cc_client, &assignment);
-    if (assignment_id >= 0)
-    {
-        assignment_t *item =
-            &g_assignments_list[assignment.device_id][assignment_id];
+    const int assignment_id = cc_client_assignment(g_cc_client, &assignment);
 
-        item->effect_id = effect_id;
-        item->port = port;
-        item->symbol = port->symbol;
-        item->device_id = assignment.device_id;
-        item->assignment_id = assignment_id;
-    }
+    if (assignment_id < 0)
+        return ERR_ASSIGNMENT_FAILED;
+
+    assignment_t *item = &g_assignments_list[assignment.device_id][assignment_id];
+
+    item->effect_id = effect_id;
+    item->port = port;
+    item->device_id = device_id;
+    item->assignment_id = assignment_id;
 
     return SUCCESS;
 #else
@@ -3407,6 +3408,8 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
     UNUSED_PARAM(minimum);
     UNUSED_PARAM(maximum);
 #endif
+
+    UNUSED_PARAM(steps);
 }
 
 int effects_cc_unmap(int effect_id, const char *control_symbol)
@@ -3424,12 +3427,11 @@ int effects_cc_unmap(int effect_id, const char *control_symbol)
         for (int j = 0; j < CC_MAX_ASSIGNMENTS; j++)
         {
             assignment_t *assignment = &g_assignments_list[i][j];
-            if (assignment->symbol && assignment->effect_id == effect_id &&
-                strcmp(assignment->symbol, control_symbol) == 0)
+            if (assignment->effect_id == effect_id && assignment->port != NULL &&
+                strcmp(assignment->port->symbol, control_symbol) == 0)
             {
                 assignment->effect_id = -1;
                 assignment->port = NULL;
-                assignment->symbol = NULL;
 
                 cc_unassignment_t unassignment;
                 unassignment.device_id = assignment->device_id;

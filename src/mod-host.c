@@ -340,8 +340,16 @@ static void midi_program_listen_cb(proto_t *proto)
 static void cc_map_cb(proto_t *proto)
 {
     int resp;
-    resp = effects_cc_map(atoi(proto->list[1]), proto->list[2], atoi(proto->list[3]), atoi(proto->list[4]),
-                          proto->list[5], atof(proto->list[6]), atof(proto->list[7]), atof(proto->list[8]));
+    resp = effects_cc_map(atoi(proto->list[1]), // effect_id
+                               proto->list[2],  // control_symbol
+                          atoi(proto->list[3]), // device_id
+                          atoi(proto->list[4]), // actuator_id
+                               proto->list[5],  // label
+                          atof(proto->list[6]), // value
+                          atof(proto->list[7]), // minimum
+                          atof(proto->list[8]), // maximum
+                          atoi(proto->list[9])  // steps
+                         );
 
     char buffer[128];
     sprintf(buffer, "resp %i", resp);
