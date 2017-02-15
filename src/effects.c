@@ -370,7 +370,7 @@ static midi_cc_t g_midi_cc_list[MAX_MIDI_CC_ASSIGN], *g_midi_learning;
 
 #ifdef HAVE_CONTROLCHAIN
 /* Control Chain */
-static cc_client_t *g_cc_client;
+static cc_client_t *g_cc_client = NULL;
 static assignment_t g_assignments_list[CC_MAX_DEVICES][CC_MAX_ASSIGNMENTS];
 #endif
 
@@ -1814,10 +1814,6 @@ int effects_init(void* client)
     g_postevents_running = 1;
     g_postevents_ready = true;
     pthread_create(&g_postevents_thread, NULL, PostPonedEventsThread, NULL);
-
-#ifdef HAVE_CONTROLCHAIN
-    InitializeControlChainIfNeeded();
-#endif
 
     return SUCCESS;
 }
