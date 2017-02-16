@@ -3341,7 +3341,7 @@ void effects_midi_program_listen(int enable, int channel)
 }
 
 int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int actuator_id,
-                   const char* label, float value, float minimum, float maximum, int steps)
+                   const char* label, float value, float minimum, float maximum, int steps, const char *unit)
 {
 #ifdef HAVE_CONTROLCHAIN
     InitializeControlChainIfNeeded();
@@ -3360,12 +3360,14 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
     cc_assignment_t assignment;
     assignment.device_id = device_id;
     assignment.actuator_id = actuator_id;
-    assignment.mode = CC_MODE_TOGGLE;
+    assignment.mode  = CC_MODE_TOGGLE;
     assignment.label = label;
     assignment.value = value;
-    assignment.min = minimum;
-    assignment.max = maximum;
-    assignment.def = port->def_value;
+    assignment.min   = minimum;
+    assignment.max   = maximum;
+    assignment.def   = port->def_value;
+    assignment.steps = steps;
+    assignment.unit  = unit;
 
     if (!strcmp(control_symbol, g_bypass_port_symbol))
     {
@@ -3374,7 +3376,7 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
         assignment.def = 1.0f;
     }
 
-    // TODO: steps and options
+    // TODO: mode and options
 
     if (port->hints & HINT_TRIGGER)
         assignment.mode = CC_MODE_TRIGGER;
@@ -3403,9 +3405,9 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
     UNUSED_PARAM(value);
     UNUSED_PARAM(minimum);
     UNUSED_PARAM(maximum);
-#endif
-
     UNUSED_PARAM(steps);
+    UNUSED_PARAM(unit);
+#endif
 }
 
 int effects_cc_unmap(int effect_id, const char *control_symbol)

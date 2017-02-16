@@ -348,7 +348,8 @@ static void cc_map_cb(proto_t *proto)
                           atof(proto->list[6]), // value
                           atof(proto->list[7]), // minimum
                           atof(proto->list[8]), // maximum
-                          atoi(proto->list[9])  // steps
+                          atoi(proto->list[9]), // steps
+                               proto->list[10]  // unit
                          );
 
     char buffer[128];
