@@ -929,6 +929,24 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
 
             if (effect->bypass > 0.5f)
             {
+                // effect is now bypassed, but wasn't before
+                if (!effect->was_bypassed)
+                {
+                    jack_midi_data_t bufNotesOff[3] = {
+                        0xB0, // CC
+                        0x7B, // all-notes-off
+                        0
+                    };
+
+                    int j=0;
+
+                    do {
+                        if (jack_midi_event_write(buf, 0, bufNotesOff, 3) != 0)
+                            break;
+                        bufNotesOff[0] += 1;
+                    } while (++j < 16);
+                }
+
                 if (effect->input_audio_ports_count == 0 &&
                     effect->output_audio_ports_count == 0 &&
                     effect->input_event_ports_count == effect->output_event_ports_count)
