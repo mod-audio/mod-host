@@ -105,8 +105,8 @@
 
 #define REMOVE_ALL      (-1)
 
-#define MIDI_LEARN_UNUSED -1
-#define MIDI_LEARN_NULL   -2
+#define ASSIGNMENT_UNUSED -1 // item was used before, so there might other valid items after this one
+#define ASSIGNMENT_NULL   -2 // item never used before, thus signaling the end of valid items
 
 #define BYPASS_PORT_SYMBOL  ":bypass"
 #define PRESETS_PORT_SYMBOL ":presets"
@@ -1155,9 +1155,9 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
 
         for (int i = 0; i < MAX_MIDI_CC_ASSIGN; i++)
         {
-            if (g_midi_cc_list[i].effect_id == MIDI_LEARN_NULL)
+            if (g_midi_cc_list[i].effect_id == ASSIGNMENT_NULL)
                 break;
-            if (g_midi_cc_list[i].effect_id == MIDI_LEARN_UNUSED)
+            if (g_midi_cc_list[i].effect_id == ASSIGNMENT_UNUSED)
                 continue;
 
             // TODO: avoid race condition against effects_midi_unmap
@@ -1822,7 +1822,7 @@ int effects_init(void* client)
         g_midi_cc_list[i].controller = -1;
         g_midi_cc_list[i].minimum = 0.0f;
         g_midi_cc_list[i].maximum = 1.0f;
-        g_midi_cc_list[i].effect_id = MIDI_LEARN_NULL;
+        g_midi_cc_list[i].effect_id = ASSIGNMENT_NULL;
         g_midi_cc_list[i].symbol = NULL;
         g_midi_cc_list[i].port = NULL;
     }
@@ -1830,7 +1830,16 @@ int effects_init(void* client)
     g_midi_program_listen = 0;
 
 #ifdef HAVE_CONTROLCHAIN
+    /* Init the control chain variables */
     memset(&g_assignments_list, 0, sizeof(g_assignments_list));
+
+    for (int i = 0; i < CC_MAX_DEVICES; i++)
+    {
+        for (int j = 0; j < CC_MAX_ASSIGNMENTS; j++)
+        {
+            g_assignments_list[i][j].effect_id = ASSIGNMENT_NULL;
+        }
+    }
 #endif
 
     g_postevents_running = 1;
@@ -2776,10 +2785,22 @@ int effects_remove(int effect_id)
             g_midi_cc_list[i].controller = -1;
             g_midi_cc_list[i].minimum = 0.0f;
             g_midi_cc_list[i].maximum = 1.0f;
-            g_midi_cc_list[i].effect_id = MIDI_LEARN_NULL;
+            g_midi_cc_list[i].effect_id = ASSIGNMENT_NULL;
             g_midi_cc_list[i].symbol = NULL;
             g_midi_cc_list[i].port = NULL;
         }
+
+#ifdef HAVE_CONTROLCHAIN
+        memset(&g_assignments_list, 0, sizeof(g_assignments_list));
+
+        for (int i = 0; i < CC_MAX_DEVICES; i++)
+        {
+            for (int j = 0; j < CC_MAX_ASSIGNMENTS; j++)
+            {
+                g_assignments_list[i][j].effect_id = ASSIGNMENT_NULL;
+            }
+        }
+#endif
 
         // reset all events
         pthread_mutex_lock(&g_rtsafe_mutex);
@@ -2802,7 +2823,7 @@ int effects_remove(int effect_id)
         pthread_mutex_lock(&g_midi_learning_mutex);
         if (g_midi_learning != NULL && g_midi_learning->effect_id == effect_id)
         {
-            g_midi_learning->effect_id = MIDI_LEARN_UNUSED;
+            g_midi_learning->effect_id = ASSIGNMENT_UNUSED;
             g_midi_learning->symbol = NULL;
             g_midi_learning->port = NULL;
             g_midi_learning = NULL;
@@ -2811,14 +2832,14 @@ int effects_remove(int effect_id)
 
         for (int i = 0; i < MAX_MIDI_CC_ASSIGN; i++)
         {
-            if (g_midi_cc_list[i].effect_id == MIDI_LEARN_NULL)
+            if (g_midi_cc_list[i].effect_id == ASSIGNMENT_NULL)
                 break;
-            if (g_midi_cc_list[i].effect_id == MIDI_LEARN_UNUSED)
+            if (g_midi_cc_list[i].effect_id == ASSIGNMENT_UNUSED)
                 continue;
             if (g_midi_cc_list[i].effect_id != effect_id)
                 continue;
 
-            g_midi_cc_list[i].effect_id = MIDI_LEARN_UNUSED;
+            g_midi_cc_list[i].effect_id = ASSIGNMENT_UNUSED;
             g_midi_cc_list[i].channel = -1;
             g_midi_cc_list[i].controller = -1;
             g_midi_cc_list[i].minimum = 0.0f;
@@ -3155,7 +3176,7 @@ int effects_midi_learn(int effect_id, const char *control_symbol, float minimum,
     pthread_mutex_lock(&g_midi_learning_mutex);
     if (g_midi_learning != NULL)
     {
-        g_midi_learning->effect_id = MIDI_LEARN_UNUSED;
+        g_midi_learning->effect_id = ASSIGNMENT_UNUSED;
         g_midi_learning->symbol = NULL;
         g_midi_learning->port = NULL;
         g_midi_learning = NULL;
@@ -3165,9 +3186,9 @@ int effects_midi_learn(int effect_id, const char *control_symbol, float minimum,
     // if already mapped set it to re-learn
     for (int i = 0; i < MAX_MIDI_CC_ASSIGN; i++)
     {
-        if (g_midi_cc_list[i].effect_id == MIDI_LEARN_NULL)
+        if (g_midi_cc_list[i].effect_id == ASSIGNMENT_NULL)
             break;
-        if (g_midi_cc_list[i].effect_id == MIDI_LEARN_UNUSED)
+        if (g_midi_cc_list[i].effect_id == ASSIGNMENT_UNUSED)
             continue;
         if (g_midi_cc_list[i].effect_id != effect_id)
             continue;
@@ -3240,9 +3261,9 @@ int effects_midi_map(int effect_id, const char *control_symbol, int channel, int
     // update current mapping first if it exists
     for (int i = 0; i < MAX_MIDI_CC_ASSIGN; i++)
     {
-        if (g_midi_cc_list[i].effect_id == MIDI_LEARN_NULL)
+        if (g_midi_cc_list[i].effect_id == ASSIGNMENT_NULL)
             break;
-        if (g_midi_cc_list[i].effect_id == MIDI_LEARN_UNUSED)
+        if (g_midi_cc_list[i].effect_id == ASSIGNMENT_UNUSED)
             continue;
         if (g_midi_cc_list[i].effect_id != effect_id)
             continue;
@@ -3303,9 +3324,9 @@ int effects_midi_unmap(int effect_id, const char *control_symbol)
 
     for (int i = 0; i < MAX_MIDI_CC_ASSIGN; i++)
     {
-        if (g_midi_cc_list[i].effect_id == MIDI_LEARN_NULL)
+        if (g_midi_cc_list[i].effect_id == ASSIGNMENT_NULL)
             break;
-        if (g_midi_cc_list[i].effect_id == MIDI_LEARN_UNUSED)
+        if (g_midi_cc_list[i].effect_id == ASSIGNMENT_UNUSED)
             continue;
         if (g_midi_cc_list[i].effect_id != effect_id)
             continue;
@@ -3321,7 +3342,7 @@ int effects_midi_unmap(int effect_id, const char *control_symbol)
         g_midi_cc_list[i].controller = -1;
         g_midi_cc_list[i].minimum = 0.0f;
         g_midi_cc_list[i].maximum = 1.0f;
-        g_midi_cc_list[i].effect_id = MIDI_LEARN_UNUSED;
+        g_midi_cc_list[i].effect_id = ASSIGNMENT_UNUSED;
         g_midi_cc_list[i].symbol = NULL;
         g_midi_cc_list[i].port = NULL;
         return SUCCESS;
@@ -3448,10 +3469,14 @@ int effects_cc_unmap(int effect_id, const char *control_symbol)
         for (int j = 0; j < CC_MAX_ASSIGNMENTS; j++)
         {
             assignment_t *assignment = &g_assignments_list[i][j];
+
+            if (assignment->effect_id == ASSIGNMENT_NULL)
+                break;
+
             if (assignment->effect_id == effect_id && assignment->port != NULL &&
                 strcmp(assignment->port->symbol, control_symbol) == 0)
             {
-                assignment->effect_id = -1;
+                assignment->effect_id = ASSIGNMENT_UNUSED;
                 assignment->port = NULL;
 
                 cc_unassignment_t unassignment;
