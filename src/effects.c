@@ -2788,6 +2788,27 @@ int effects_remove(int effect_id)
         }
 
 #ifdef HAVE_CONTROLCHAIN
+        if (g_cc_client)
+        {
+            for (int i = 0; i < CC_MAX_DEVICES; i++)
+            {
+                for (int j = 0; j < CC_MAX_ASSIGNMENTS; j++)
+                {
+                    assignment_t *assignment = &g_assignments_list[i][j];
+
+                    if (assignment->effect_id == ASSIGNMENT_NULL)
+                        break;
+                    if (assignment->effect_id == ASSIGNMENT_UNUSED)
+                        continue;
+
+                    cc_unassignment_t unassignment;
+                    unassignment.device_id = assignment->device_id;
+                    unassignment.assignment_id = assignment->assignment_id;
+                    cc_client_unassignment(g_cc_client, &unassignment);
+                }
+            }
+        }
+
         memset(&g_assignments_list, 0, sizeof(g_assignments_list));
 
         for (int i = 0; i < CC_MAX_DEVICES; i++)
@@ -2858,6 +2879,14 @@ int effects_remove(int effect_id)
                     continue;
                 if (assignment->effect_id != effect_id)
                     continue;
+
+                if (g_cc_client)
+                {
+                    cc_unassignment_t unassignment;
+                    unassignment.device_id = assignment->device_id;
+                    unassignment.assignment_id = assignment->assignment_id;
+                    cc_client_unassignment(g_cc_client, &unassignment);
+                }
 
                 memset(assignment, 0, sizeof(assignment_t));
                 assignment->effect_id = ASSIGNMENT_UNUSED;
