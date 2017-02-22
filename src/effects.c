@@ -2844,10 +2844,10 @@ int effects_remove(int effect_id)
                     if (assignment->effect_id == ASSIGNMENT_UNUSED)
                         continue;
 
-                    cc_unassignment_t unassignment;
-                    unassignment.device_id = assignment->device_id;
-                    unassignment.assignment_id = assignment->assignment_id;
-                    cc_client_unassignment(g_cc_client, &unassignment);
+                    cc_assignment_key_t key;
+                    key.device_id = assignment->device_id;
+                    key.id = assignment->assignment_id;
+                    cc_client_unassignment(g_cc_client, &key);
                 }
             }
         }
@@ -2925,10 +2925,10 @@ int effects_remove(int effect_id)
 
                 if (g_cc_client)
                 {
-                    cc_unassignment_t unassignment;
-                    unassignment.device_id = assignment->device_id;
-                    unassignment.assignment_id = assignment->assignment_id;
-                    cc_client_unassignment(g_cc_client, &unassignment);
+                    cc_assignment_key_t key;
+                    key.device_id = assignment->device_id;
+                    key.id = assignment->assignment_id;
+                    cc_client_unassignment(g_cc_client, &key);
                 }
 
                 memset(assignment, 0, sizeof(assignment_t));
@@ -3565,14 +3565,14 @@ int effects_cc_unmap(int effect_id, const char *control_symbol)
             if (assignment->effect_id == effect_id && assignment->port != NULL &&
                 strcmp(assignment->port->symbol, control_symbol) == 0)
             {
-                cc_unassignment_t unassignment;
-                unassignment.device_id = assignment->device_id;
-                unassignment.assignment_id = assignment->assignment_id;
+                cc_assignment_key_t key;
+                key.device_id = assignment->device_id;
+                key.id = assignment->assignment_id;
 
                 memset(assignment, 0, sizeof(assignment_t));
                 assignment->effect_id = ASSIGNMENT_UNUSED;
 
-                cc_client_unassignment(g_cc_client, &unassignment);
+                cc_client_unassignment(g_cc_client, &key);
                 return SUCCESS;
             }
         }
