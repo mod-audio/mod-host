@@ -2740,7 +2740,6 @@ int effects_remove(int effect_id)
                 {
                     if (effect->ports[i])
                     {
-                        effects_cc_unmap(effect->instance, effect->ports[i]->symbol);
                         free(effect->ports[i]->buffer);
                         lilv_scale_points_free(effect->ports[i]->scale_points);
                         free(effect->ports[i]);
@@ -2748,8 +2747,6 @@ int effects_remove(int effect_id)
                 }
                 free(effect->ports);
             }
-
-            effects_cc_unmap(effect->instance, g_bypass_port_symbol);
 
             if (effect->lilv_instance) lilv_instance_deactivate(effect->lilv_instance);
             lilv_instance_free(effect->lilv_instance);
@@ -2847,6 +2844,26 @@ int effects_remove(int effect_id)
             g_midi_cc_list[i].symbol = NULL;
             g_midi_cc_list[i].port = NULL;
         }
+
+#ifdef HAVE_CONTROLCHAIN
+        for (int i = 0; i < CC_MAX_DEVICES; i++)
+        {
+            for (int j = 0; j < CC_MAX_ASSIGNMENTS; j++)
+            {
+                assignment_t *assignment = &g_assignments_list[i][j];
+
+                if (assignment->effect_id == ASSIGNMENT_NULL)
+                    break;
+                if (assignment->effect_id == ASSIGNMENT_UNUSED)
+                    continue;
+                if (assignment->effect_id != effect_id)
+                    continue;
+
+                memset(assignment, 0, sizeof(assignment_t));
+                assignment->effect_id = ASSIGNMENT_UNUSED;
+            }
+        }
+#endif
 
         // flush events for all effects except this one
         RunPostPonedEvents(effect_id);
@@ -3476,12 +3493,13 @@ int effects_cc_unmap(int effect_id, const char *control_symbol)
             if (assignment->effect_id == effect_id && assignment->port != NULL &&
                 strcmp(assignment->port->symbol, control_symbol) == 0)
             {
-                assignment->effect_id = ASSIGNMENT_UNUSED;
-                assignment->port = NULL;
-
                 cc_unassignment_t unassignment;
                 unassignment.device_id = assignment->device_id;
                 unassignment.assignment_id = assignment->assignment_id;
+
+                memset(assignment, 0, sizeof(assignment_t));
+                assignment->effect_id = ASSIGNMENT_UNUSED;
+
                 cc_client_unassignment(g_cc_client, &unassignment);
                 return SUCCESS;
             }
