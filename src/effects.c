@@ -1829,6 +1829,10 @@ int effects_init(void* client)
     g_midi_learning = NULL;
     g_midi_program_listen = 0;
 
+#ifdef HAVE_CONTROLCHAIN
+    memset(&g_assignments_list, 0, sizeof(g_assignments_list));
+#endif
+
     g_postevents_running = 1;
     g_postevents_ready = true;
     pthread_create(&g_postevents_thread, NULL, PostPonedEventsThread, NULL);
