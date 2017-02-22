@@ -2334,33 +2334,76 @@ int effects_add(const char *uid, int instance)
 
     /* Allocate memory to indexes */
     /* Audio ports */
-    effect->audio_ports_count = audio_ports_count;
-    effect->audio_ports = (port_t **) calloc(audio_ports_count, sizeof(port_t *));
-    effect->input_audio_ports_count = input_audio_ports_count;
-    effect->input_audio_ports = (port_t **) calloc(input_audio_ports_count, sizeof(port_t *));
-    effect->output_audio_ports_count = output_audio_ports_count;
-    effect->output_audio_ports = (port_t **) calloc(output_audio_ports_count, sizeof(port_t *));
+    if (audio_ports_count > 0)
+    {
+        effect->audio_ports_count = audio_ports_count;
+        effect->audio_ports = (port_t **) calloc(audio_ports_count, sizeof(port_t *));
+
+        if (input_audio_ports_count > 0)
+        {
+            effect->input_audio_ports_count = input_audio_ports_count;
+            effect->input_audio_ports = (port_t **) calloc(input_audio_ports_count, sizeof(port_t *));
+        }
+        if (output_audio_ports_count > 0)
+        {
+            effect->output_audio_ports_count = output_audio_ports_count;
+            effect->output_audio_ports = (port_t **) calloc(output_audio_ports_count, sizeof(port_t *));
+        }
+    }
+
     /* Control ports */
-    effect->control_ports_count = control_ports_count;
-    effect->control_ports = (port_t **) calloc(control_ports_count, sizeof(port_t *));
-    effect->input_control_ports_count = input_control_ports_count;
-    effect->input_control_ports = (port_t **) calloc(input_control_ports_count, sizeof(port_t *));
-    effect->output_control_ports_count = output_control_ports_count;
-    effect->output_control_ports = (port_t **) calloc(output_control_ports_count, sizeof(port_t *));
+    if (control_ports_count > 0)
+    {
+        effect->control_ports_count = control_ports_count;
+        effect->control_ports = (port_t **) calloc(control_ports_count, sizeof(port_t *));
+
+        if (input_control_ports_count > 0)
+        {
+            effect->input_control_ports_count = input_control_ports_count;
+            effect->input_control_ports = (port_t **) calloc(input_control_ports_count, sizeof(port_t *));
+        }
+        if (output_control_ports_count > 0)
+        {
+            effect->output_control_ports_count = output_control_ports_count;
+            effect->output_control_ports = (port_t **) calloc(output_control_ports_count, sizeof(port_t *));
+        }
+    }
+
     /* CV ports */
-    effect->cv_ports_count = cv_ports_count;
-    effect->cv_ports = (port_t **) calloc(cv_ports_count, sizeof(port_t *));
-    effect->input_cv_ports_count = input_cv_ports_count;
-    effect->input_cv_ports = (port_t **) calloc(input_cv_ports_count, sizeof(port_t *));
-    effect->output_cv_ports_count = output_cv_ports_count;
-    effect->output_cv_ports = (port_t **) calloc(output_cv_ports_count, sizeof(port_t *));
+    if (cv_ports_count > 0)
+    {
+        effect->cv_ports_count = cv_ports_count;
+        effect->cv_ports = (port_t **) calloc(cv_ports_count, sizeof(port_t *));
+
+        if (input_cv_ports_count > 0)
+        {
+            effect->input_cv_ports_count = input_cv_ports_count;
+            effect->input_cv_ports = (port_t **) calloc(input_cv_ports_count, sizeof(port_t *));
+        }
+        if (output_cv_ports_count > 0)
+        {
+            effect->output_cv_ports_count = output_cv_ports_count;
+            effect->output_cv_ports = (port_t **) calloc(output_cv_ports_count, sizeof(port_t *));
+        }
+    }
+
     /* Event ports */
-    effect->event_ports_count = event_ports_count;
-    effect->event_ports = (port_t **) calloc(event_ports_count, sizeof(port_t *));
-    effect->input_event_ports_count = input_event_ports_count;
-    effect->input_event_ports = (port_t **) calloc(input_event_ports_count, sizeof(port_t *));
-    effect->output_event_ports_count = output_event_ports_count;
-    effect->output_event_ports = (port_t **) calloc(output_event_ports_count, sizeof(port_t *));
+    if (event_ports_count > 0)
+    {
+        effect->event_ports_count = event_ports_count;
+        effect->event_ports = (port_t **) calloc(event_ports_count, sizeof(port_t *));
+
+        if (input_event_ports_count > 0)
+        {
+            effect->input_event_ports_count = input_event_ports_count;
+            effect->input_event_ports = (port_t **) calloc(input_event_ports_count, sizeof(port_t *));
+        }
+        if (output_event_ports_count > 0)
+        {
+            effect->output_event_ports_count = output_event_ports_count;
+            effect->output_event_ports = (port_t **) calloc(output_event_ports_count, sizeof(port_t *));
+        }
+    }
 
     /* Index the audio, control and event ports */
     audio_ports_count = 0;
