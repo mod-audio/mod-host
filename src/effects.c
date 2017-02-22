@@ -1842,6 +1842,8 @@ int effects_finish(int close_client)
     sem_post(&g_postevents_semaphore);
     pthread_join(g_postevents_thread, NULL);
 
+    effects_remove(REMOVE_ALL);
+
 #ifdef HAVE_CONTROLCHAIN
     if (g_cc_client)
     {
@@ -1850,7 +1852,6 @@ int effects_finish(int close_client)
     }
 #endif
 
-    effects_remove(REMOVE_ALL);
     if (g_capture_ports) jack_free(g_capture_ports);
     if (g_playback_ports) jack_free(g_playback_ports);
     if (close_client) jack_client_close(g_jack_global_client);
