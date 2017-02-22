@@ -2735,7 +2735,7 @@ int effects_remove(int effect_id)
                 free(effect->ports);
             }
 
-            effects_cc_unmap(effect->instance, effect->bypass_port.symbol);
+            effects_cc_unmap(effect->instance, g_bypass_port_symbol);
 
             if (effect->lilv_instance) lilv_instance_deactivate(effect->lilv_instance);
             lilv_instance_free(effect->lilv_instance);
@@ -3433,8 +3433,6 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
 int effects_cc_unmap(int effect_id, const char *control_symbol)
 {
 #ifdef HAVE_CONTROLCHAIN
-    InitializeControlChainIfNeeded();
-
     if (!InstanceExist(effect_id))
         return ERR_INSTANCE_NON_EXISTS;
     if (!g_cc_client)
