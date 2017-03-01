@@ -79,6 +79,9 @@
 // needed because we prefer jack2 which doesn't have metadata yet
 #define JackPortIsControlVoltage 0x100
 
+// use pitchbend as midi cc, with an invalid MIDI controller number
+#define MIDI_PITCHBEND_AS_CC 131
+
 /* Local */
 #include "effects.h"
 #include "monitor.h"
@@ -299,7 +302,7 @@ typedef struct URIDS_T {
 
 typedef struct MIDI_CC_T {
     int8_t channel;
-    int8_t controller;
+    uint8_t controller;
     float minimum;
     float maximum;
     int effect_id;
@@ -312,7 +315,7 @@ typedef struct POSTPONED_EVENT_T {
     int effect_id;
     const char* symbol;
     int8_t channel;
-    int8_t controller;
+    uint8_t controller;
     float value;
     float minimum;
     float maximum;
@@ -417,7 +420,7 @@ static void FreeWheelMode(int starting, void* data);
 static void RunPostPonedEvents(int ignored_effect_id);
 static void* PostPonedEventsThread(void* arg);
 static int ProcessPlugin(jack_nframes_t nframes, void *arg);
-static float UpdateValueFromMidi(midi_cc_t* mcc, jack_midi_data_t mvalue);
+static float UpdateValueFromMidi(midi_cc_t* mcc, uint16_t mvalue, bool highres);
 static int ProcessMidi(jack_nframes_t nframes, void *arg);
 static void JackThreadInit(void *arg);
 static void GetFeatures(effect_t *effect);
@@ -1015,19 +1018,23 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
     return 0;
 }
 
-static float UpdateValueFromMidi(midi_cc_t* mcc, jack_midi_data_t mvalue)
+static float UpdateValueFromMidi(midi_cc_t* mcc, uint16_t mvalue, bool highres)
 {
+    const uint16_t mvaluediv = highres ? 8192 : 64;
+
     if (!strcmp(mcc->symbol, g_bypass_port_symbol))
     {
         effect_t *effect = &g_effects[mcc->effect_id];
-        effect->bypass = (mvalue < 64);
+
+        const bool bypassed = mvalue < mvaluediv;
+        effect->bypass = bypassed;
 
         if (effect->enabled_index >= 0)
         {
-            *(effect->ports[effect->enabled_index]->buffer) = (mvalue < 64) ? 0.0f : 1.0f;
+            *(effect->ports[effect->enabled_index]->buffer) = bypassed ? 0.0f : 1.0f;
         }
 
-        return (mvalue < 64) ? 1.0f : 0.0f;
+        return bypassed ? 1.0f : 0.0f;
     }
     else
     {
@@ -1044,13 +1051,17 @@ static float UpdateValueFromMidi(midi_cc_t* mcc, jack_midi_data_t mvalue)
         else if (port->hints & HINT_TOGGLE)
         {
             // toggle, always min or max
-            value = mvalue >= 64 ? port->max_value : port->min_value;
+            value = mvalue >= mvaluediv ? port->max_value : port->min_value;
         }
         else
         {
             // get percentage by dividing by max MIDI value
-            value  = (float)mvalue;
-            value /= 127.0f;
+            value = (float)mvalue;
+
+            if (highres)
+                value /= 16383.0f;
+            else
+                value /= 127.0f;
 
             // make sure bounds are correct
             if (value < 0.0f)
@@ -1079,9 +1090,10 @@ static float UpdateValueFromMidi(midi_cc_t* mcc, jack_midi_data_t mvalue)
 static int ProcessMidi(jack_nframes_t nframes, void *arg)
 {
     jack_midi_event_t event;
-    int8_t channel, controller;
+    uint8_t channel, controller, status;
+    uint16_t mvalue;
     float value;
-    bool handled, needs_post = false;
+    bool handled, highres, needs_post = false;
 
     void *const port_buf = jack_port_get_buffer(g_midi_in_port, nframes);
     const jack_nframes_t event_count = jack_midi_get_event_count(port_buf);
@@ -1091,8 +1103,10 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
         if (jack_midi_event_get(&event, port_buf, i) != 0)
             break;
 
+        status = event.buffer[0] & 0xF0;
+
         // check if it's a program event
-        if ((event.buffer[0] & 0xF0) == 0xC0)
+        if (status == 0xC0)
         {
             if (event.size != 2 || g_midi_program_listen != (event.buffer[0] & 0x0F))
                 continue;
@@ -1117,17 +1131,29 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
             }
         }
 
-        // check if it's a CC event
-        if (event.buffer[0] < 0xB0)
-            continue;
-        if (event.buffer[0] > 0xBF)
-            continue;
         if (event.size != 3)
             continue;
 
-        handled    = false;
-        channel    = (event.buffer[0] & 0x0F);
-        controller =  event.buffer[1];
+        // check if it's a CC or Pitchbend event
+        if (status == 0xB0)
+        {
+            controller = event.buffer[1];
+            mvalue     = event.buffer[2];
+            highres    = false;
+        }
+        else if (status == 0xE0)
+        {
+            controller = MIDI_PITCHBEND_AS_CC;
+            mvalue     = (event.buffer[2] << 7) | event.buffer[1];
+            highres    = true;
+        }
+        else
+        {
+            continue;
+        }
+
+        handled = false;
+        channel = (event.buffer[0] & 0x0F);
 
         for (int i = 0; i < MAX_MIDI_CC_ASSIGN; i++)
         {
@@ -1141,7 +1167,7 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
                 g_midi_cc_list[i].controller == controller)
             {
                 handled = true;
-                value = UpdateValueFromMidi(&g_midi_cc_list[i], event.buffer[2]);
+                value = UpdateValueFromMidi(&g_midi_cc_list[i], mvalue, highres);
 
                 postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
 
@@ -1181,7 +1207,7 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
                 symbol    = g_midi_learning->symbol;
                 minimum   = g_midi_learning->minimum;
                 maximum   = g_midi_learning->maximum;
-                value     = UpdateValueFromMidi(g_midi_learning, event.buffer[2]);
+                value     = UpdateValueFromMidi(g_midi_learning, mvalue, highres);
                 g_midi_learning->channel    = channel;
                 g_midi_learning->controller = controller;
                 g_midi_learning = NULL;
@@ -1727,7 +1753,7 @@ int effects_init(void* client)
     for (int i = 0; i < MAX_MIDI_CC_ASSIGN; i++)
     {
         g_midi_cc_list[i].channel = -1;
-        g_midi_cc_list[i].controller = -1;
+        g_midi_cc_list[i].controller = 0;
         g_midi_cc_list[i].minimum = 0.0f;
         g_midi_cc_list[i].maximum = 1.0f;
         g_midi_cc_list[i].effect_id = MIDI_LEARN_NULL;
@@ -2693,7 +2719,7 @@ int effects_remove(int effect_id)
         for (int i = 0; i < MAX_MIDI_CC_ASSIGN; i++)
         {
             g_midi_cc_list[i].channel = -1;
-            g_midi_cc_list[i].controller = -1;
+            g_midi_cc_list[i].controller = 0;
             g_midi_cc_list[i].minimum = 0.0f;
             g_midi_cc_list[i].maximum = 1.0f;
             g_midi_cc_list[i].effect_id = MIDI_LEARN_NULL;
@@ -2740,7 +2766,7 @@ int effects_remove(int effect_id)
 
             g_midi_cc_list[i].effect_id = MIDI_LEARN_UNUSED;
             g_midi_cc_list[i].channel = -1;
-            g_midi_cc_list[i].controller = -1;
+            g_midi_cc_list[i].controller = 0;
             g_midi_cc_list[i].minimum = 0.0f;
             g_midi_cc_list[i].maximum = 1.0f;
             g_midi_cc_list[i].symbol = NULL;
@@ -3095,7 +3121,7 @@ int effects_midi_learn(int effect_id, const char *control_symbol, float minimum,
             continue;
 
         g_midi_cc_list[i].channel = -1;
-        g_midi_cc_list[i].controller = -1;
+        g_midi_cc_list[i].controller = 0;
 
         if (!is_bypass)
         {
@@ -3134,7 +3160,7 @@ int effects_midi_learn(int effect_id, const char *control_symbol, float minimum,
         }
 
         g_midi_cc_list[i].channel = -1;
-        g_midi_cc_list[i].controller = -1;
+        g_midi_cc_list[i].controller = 0;
         g_midi_cc_list[i].effect_id = effect_id;
 
         pthread_mutex_lock(&g_midi_learning_mutex);
@@ -3238,7 +3264,7 @@ int effects_midi_unmap(int effect_id, const char *control_symbol)
         pthread_mutex_unlock(&g_midi_learning_mutex);
 
         g_midi_cc_list[i].channel = -1;
-        g_midi_cc_list[i].controller = -1;
+        g_midi_cc_list[i].controller = 0;
         g_midi_cc_list[i].minimum = 0.0f;
         g_midi_cc_list[i].maximum = 1.0f;
         g_midi_cc_list[i].effect_id = MIDI_LEARN_UNUSED;
