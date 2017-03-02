@@ -124,8 +124,8 @@ int effects_get_parameter(int effect_id, const char *control_symbol, float *valu
 int effects_monitor_parameter(int effect_id, const char *control_symbol, const char *op, float value);
 int effects_monitor_output_parameter(int effect_id, const char *control_symbol);
 int effects_bypass(int effect_id, int value);
-int effects_get_parameter_symbols(int effect_id, char** symbols);
-int effects_get_presets_uris(int effect_id, char **uris);
+int effects_get_parameter_symbols(int effect_id, const char** symbols);
+int effects_get_presets_uris(int effect_id, const char **uris);
 int effects_get_parameter_info(int effect_id, const char *control_symbol, float **range, const char **scale_points);
 int effects_midi_learn(int effect_id, const char *control_symbol, float minimum, float maximum);
 int effects_midi_map(int effect_id, const char *control_symbol, int channel, int controller, float minimum, float maximum);

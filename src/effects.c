@@ -30,7 +30,6 @@
 #include <errno.h>
 #include <limits.h>
 #include <math.h>
-#include <float.h>
 #include <pthread.h>
 
 /* Jack */
@@ -424,9 +423,14 @@ static float UpdateValueFromMidi(midi_cc_t* mcc, uint16_t mvalue, bool highres);
 static int ProcessMidi(jack_nframes_t nframes, void *arg);
 static void JackThreadInit(void *arg);
 static void GetFeatures(effect_t *effect);
+static property_t *FindEffectPropertyByLabel(effect_t *effect, const char *label);
+static port_t *FindEffectInputPortBySymbol(effect_t *effect, const char *control_symbol);
+static port_t *FindEffectOutputPortBySymbol(effect_t *effect, const char *control_symbol);
+static const void* GetPortValueForState(const char* symbol, void* user_data, uint32_t* size, uint32_t* type);
+static int LoadPresets(effect_t *effect);
 static void FreeFeatures(effect_t *effect);
 static char* GetLicenseFile(MOD_License_Handle handle, const char *license_uri);
-void FreeLicenseData(MOD_License_Handle handle, char *license);
+static void FreeLicenseData(MOD_License_Handle handle, char *license);
 
 
 /*
@@ -441,12 +445,6 @@ void FreeLicenseData(MOD_License_Handle handle, char *license);
 *           LOCAL FUNCTIONS
 ************************************************************************************************************************
 */
-
-// safely compare 2 float values
-static bool FloatsDifferEnough(float a, float b)
-{
-    return fabsf(a - b) >= FLT_EPSILON;
-}
 
 static void InstanceDelete(int effect_id)
 {
@@ -887,7 +885,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
             int port_id = effect->monitors[i]->port_id;
             float value = *(effect->ports[port_id]->buffer);
             if (monitor_check_condition(effect->monitors[i]->op, effect->monitors[i]->value, value) &&
-                value != effect->monitors[i]->last_notified_value) {
+                floats_differ_enough(value, effect->monitors[i]->last_notified_value)) {
                 if (monitor_send(effect->instance, effect->ports[port_id]->symbol, value) >= 0)
                     effect->monitors[i]->last_notified_value = value;
             }
@@ -945,12 +943,12 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
             }
             else
             {
-                LV2_Evbuf_Iterator i;
-                for (i = lv2_evbuf_begin(port->evbuf); lv2_evbuf_is_valid(i); i = lv2_evbuf_next(i))
+                LV2_Evbuf_Iterator it;
+                for (it = lv2_evbuf_begin(port->evbuf); lv2_evbuf_is_valid(it); it = lv2_evbuf_next(it))
                 {
                     uint32_t frames, subframes, type, size;
                     uint8_t* body;
-                    lv2_evbuf_get(i, &frames, &subframes, &type, &size, &body);
+                    lv2_evbuf_get(it, &frames, &subframes, &type, &size, &body);
                     if (type == g_urids.midi_MidiEvent)
                     {
                         jack_midi_event_write(buf, frames, body, size);
@@ -981,7 +979,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
 
             value = *(effect->output_control_ports[i]->buffer);
 
-            if (! FloatsDifferEnough(effect->output_control_ports[i]->prev_value, value))
+            if (! floats_differ_enough(effect->output_control_ports[i]->prev_value, value))
                 continue;
 
             postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
@@ -1155,19 +1153,19 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
         handled = false;
         channel = (event.buffer[0] & 0x0F);
 
-        for (int i = 0; i < MAX_MIDI_CC_ASSIGN; i++)
+        for (int j = 0; j < MAX_MIDI_CC_ASSIGN; j++)
         {
-            if (g_midi_cc_list[i].effect_id == MIDI_LEARN_NULL)
+            if (g_midi_cc_list[j].effect_id == MIDI_LEARN_NULL)
                 break;
-            if (g_midi_cc_list[i].effect_id == MIDI_LEARN_UNUSED)
+            if (g_midi_cc_list[j].effect_id == MIDI_LEARN_UNUSED)
                 continue;
 
             // TODO: avoid race condition against effects_midi_unmap
-            if (g_midi_cc_list[i].channel    == channel &&
-                g_midi_cc_list[i].controller == controller)
+            if (g_midi_cc_list[j].channel    == channel &&
+                g_midi_cc_list[j].controller == controller)
             {
                 handled = true;
-                value = UpdateValueFromMidi(&g_midi_cc_list[i], mvalue, highres);
+                value = UpdateValueFromMidi(&g_midi_cc_list[j], mvalue, highres);
 
                 postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
 
@@ -1175,8 +1173,8 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
                 {
                     const postponed_event_t pevent = {
                         POSTPONED_PARAM_SET,
-                        g_midi_cc_list[i].effect_id,
-                        g_midi_cc_list[i].symbol,
+                        g_midi_cc_list[j].effect_id,
+                        g_midi_cc_list[j].symbol,
                         -1, -1,
                         value,
                         0.0f, 0.0f
@@ -1328,7 +1326,7 @@ static void GetFeatures(effect_t *effect)
     effect->features = features;
 }
 
-property_t *FindEffectPropertyByLabel(effect_t *effect, const char *label)
+static property_t *FindEffectPropertyByLabel(effect_t *effect, const char *label)
 {
     // TODO: index properties to make it faster
 
@@ -1342,7 +1340,7 @@ property_t *FindEffectPropertyByLabel(effect_t *effect, const char *label)
     return NULL;
 }
 
-port_t *FindEffectInputPortBySymbol(effect_t *effect, const char *control_symbol)
+static port_t *FindEffectInputPortBySymbol(effect_t *effect, const char *control_symbol)
 {
     for (uint32_t i = 0; i < effect->input_control_ports_count; i++)
     {
@@ -1352,7 +1350,7 @@ port_t *FindEffectInputPortBySymbol(effect_t *effect, const char *control_symbol
     return NULL;
 }
 
-port_t *FindEffectOutputPortBySymbol(effect_t *effect, const char *control_symbol)
+static port_t *FindEffectOutputPortBySymbol(effect_t *effect, const char *control_symbol)
 {
     for (uint32_t i = 0; i < effect->output_control_ports_count; i++)
     {
@@ -1373,25 +1371,25 @@ static void SetParameterFromState(const char* symbol, void* user_data,
     {
         if (size != sizeof(float))
             return;
-        realvalue = *((float*)value);
+        realvalue = *((const float*)value);
     }
     else if (type == g_urids.atom_Double)
     {
         if (size != sizeof(double))
             return;
-        realvalue = *((double*)value);
+        realvalue = *((const double*)value);
     }
     else if (type == g_urids.atom_Int)
     {
         if (size != sizeof(int32_t))
             return;
-        realvalue = *((int32_t*)value);
+        realvalue = *((const int32_t*)value);
     }
     else if (type == g_urids.atom_Long)
     {
         if (size != sizeof(int64_t))
             return;
-        realvalue = *((int64_t*)value);
+        realvalue = *((const int64_t*)value);
     }
     else
     {
@@ -1402,8 +1400,7 @@ static void SetParameterFromState(const char* symbol, void* user_data,
     effects_set_parameter(effect->instance, symbol, realvalue);
 }
 
-static const void* GetPortValueForState(const char* symbol, void* user_data,
-                                  uint32_t* size, uint32_t* type)
+static const void* GetPortValueForState(const char* symbol, void* user_data, uint32_t* size, uint32_t* type)
 {
     effect_t *effect = (effect_t*)user_data;
     port_t *port = FindEffectInputPortBySymbol(effect, symbol);
@@ -1416,7 +1413,7 @@ static const void* GetPortValueForState(const char* symbol, void* user_data,
     return NULL;
 }
 
-int LoadPresets(effect_t *effect)
+static int LoadPresets(effect_t *effect)
 {
     LilvNode *preset_uri = lilv_new_uri(g_lv2_data, LV2_PRESETS__Preset);
     LilvNodes* presets = lilv_plugin_get_related(effect->lilv_plugin, preset_uri);
@@ -1440,6 +1437,10 @@ int LoadPresets(effect_t *effect)
     return 0;
 }
 
+// ignore const cast for this function, need to free const features array
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wcast-qual"
+
 static void FreeFeatures(effect_t *effect)
 {
     worker_finish(&effect->worker);
@@ -1451,6 +1452,9 @@ static void FreeFeatures(effect_t *effect)
         free(effect->features);
     }
 }
+
+// back to normal
+#pragma GCC diagnostic pop
 
 static char* GetLicenseFile(MOD_License_Handle handle, const char *license_uri)
 {
@@ -1530,7 +1534,7 @@ end:
     UNUSED_PARAM(handle);
 }
 
-void FreeLicenseData(MOD_License_Handle handle, char *license)
+static void FreeLicenseData(MOD_License_Handle handle, char *license)
 {
     return free(license);
 
@@ -1930,9 +1934,10 @@ int effects_add(const char *uid, int instance)
     lilv_worker_interface = lilv_new_uri(g_lv2_data, LV2_WORKER__interface);
     if (lilv_plugin_has_extension_data(effect->lilv_plugin, lilv_worker_interface))
     {
-        LV2_Worker_Interface * worker_interface;
+        const LV2_Worker_Interface *worker_interface;
         worker_interface =
-            (LV2_Worker_Interface*) lilv_instance_get_extension_data(effect->lilv_instance, LV2_WORKER__interface);
+            (const LV2_Worker_Interface*) lilv_instance_get_extension_data(effect->lilv_instance,
+                                                                           LV2_WORKER__interface);
 
         worker_init(&effect->worker, worker_interface);
     }
@@ -1941,7 +1946,8 @@ int effects_add(const char *uid, int instance)
     if (lilv_plugin_has_extension_data(effect->lilv_plugin, lilv_license_interface))
     {
         effect->license_iface =
-            (MOD_License_Interface*) lilv_instance_get_extension_data(effect->lilv_instance, MOD_LICENSE__interface);
+            (const MOD_License_Interface*) lilv_instance_get_extension_data(effect->lilv_instance,
+                                                                           MOD_LICENSE__interface);
     }
 
     /* Create the URI for identify the ports */
@@ -2716,15 +2722,15 @@ int effects_remove(int effect_id)
         g_midi_learning = NULL;
         pthread_mutex_unlock(&g_midi_learning_mutex);
 
-        for (int i = 0; i < MAX_MIDI_CC_ASSIGN; i++)
+        for (j = 0; j < MAX_MIDI_CC_ASSIGN; j++)
         {
-            g_midi_cc_list[i].channel = -1;
-            g_midi_cc_list[i].controller = 0;
-            g_midi_cc_list[i].minimum = 0.0f;
-            g_midi_cc_list[i].maximum = 1.0f;
-            g_midi_cc_list[i].effect_id = MIDI_LEARN_NULL;
-            g_midi_cc_list[i].symbol = NULL;
-            g_midi_cc_list[i].port = NULL;
+            g_midi_cc_list[j].channel = -1;
+            g_midi_cc_list[j].controller = 0;
+            g_midi_cc_list[j].minimum = 0.0f;
+            g_midi_cc_list[j].maximum = 1.0f;
+            g_midi_cc_list[j].effect_id = MIDI_LEARN_NULL;
+            g_midi_cc_list[j].symbol = NULL;
+            g_midi_cc_list[j].port = NULL;
         }
 
         // reset all events
@@ -2755,22 +2761,22 @@ int effects_remove(int effect_id)
         }
         pthread_mutex_unlock(&g_midi_learning_mutex);
 
-        for (int i = 0; i < MAX_MIDI_CC_ASSIGN; i++)
+        for (j = 0; j < MAX_MIDI_CC_ASSIGN; j++)
         {
-            if (g_midi_cc_list[i].effect_id == MIDI_LEARN_NULL)
+            if (g_midi_cc_list[j].effect_id == MIDI_LEARN_NULL)
                 break;
-            if (g_midi_cc_list[i].effect_id == MIDI_LEARN_UNUSED)
+            if (g_midi_cc_list[j].effect_id == MIDI_LEARN_UNUSED)
                 continue;
-            if (g_midi_cc_list[i].effect_id != effect_id)
+            if (g_midi_cc_list[j].effect_id != effect_id)
                 continue;
 
-            g_midi_cc_list[i].effect_id = MIDI_LEARN_UNUSED;
-            g_midi_cc_list[i].channel = -1;
-            g_midi_cc_list[i].controller = 0;
-            g_midi_cc_list[i].minimum = 0.0f;
-            g_midi_cc_list[i].maximum = 1.0f;
-            g_midi_cc_list[i].symbol = NULL;
-            g_midi_cc_list[i].port = NULL;
+            g_midi_cc_list[j].effect_id = MIDI_LEARN_UNUSED;
+            g_midi_cc_list[j].channel = -1;
+            g_midi_cc_list[j].controller = 0;
+            g_midi_cc_list[j].minimum = 0.0f;
+            g_midi_cc_list[j].maximum = 1.0f;
+            g_midi_cc_list[j].symbol = NULL;
+            g_midi_cc_list[j].port = NULL;
         }
 
         // flush events for all effects except this one
@@ -2995,7 +3001,7 @@ int effects_bypass(int effect_id, int value)
     return SUCCESS;
 }
 
-int effects_get_parameter_symbols(int effect_id, char** symbols)
+int effects_get_parameter_symbols(int effect_id, const char** symbols)
 {
     if (!InstanceExist(effect_id))
     {
@@ -3008,7 +3014,7 @@ int effects_get_parameter_symbols(int effect_id, char** symbols)
 
     for (i = 0; i < effect->control_ports_count; i++)
     {
-        symbols[i] = (char *) effect->control_ports[i]->symbol;
+        symbols[i] = (const char *) effect->control_ports[i]->symbol;
     }
 
     symbols[i] = NULL;
@@ -3016,7 +3022,7 @@ int effects_get_parameter_symbols(int effect_id, char** symbols)
     return SUCCESS;
 }
 
-int effects_get_presets_uris(int effect_id, char **uris)
+int effects_get_presets_uris(int effect_id, const char **uris)
 {
     if (!InstanceExist(effect_id))
     {
@@ -3029,7 +3035,7 @@ int effects_get_presets_uris(int effect_id, char **uris)
 
     for (i = 0; i < effect->presets_count; i++)
     {
-        uris[i] = (char *) lilv_node_as_uri(effect->presets[i]->uri);
+        uris[i] = (const char *) lilv_node_as_uri(effect->presets[i]->uri);
     }
 
     uris[i] = NULL;

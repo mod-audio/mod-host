@@ -32,6 +32,7 @@
 ************************************************************************************************************************
 */
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -63,7 +64,7 @@
 typedef struct MSG_T {
     int sender_id;
     char *data;
-    uint32_t data_size;
+    size_t data_size;
 } msg_t;
 
 
@@ -90,6 +91,8 @@ typedef struct MSG_T {
 ************************************************************************************************************************
 */
 
+// safely compare 2 float values
+bool floats_differ_enough(float a, float b);
 // splits the string in each whitespace occurrence and returns a array of strings NULL terminated
 char** strarr_split(char *str);
 // returns the string array length
