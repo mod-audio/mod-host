@@ -430,7 +430,6 @@ static const char* const g_bypass_port_symbol = BYPASS_PORT_SYMBOL;
 ************************************************************************************************************************
 */
 
-static bool FloatsDifferEnough(float a, float b);
 static void InstanceDelete(int effect_id);
 static int InstanceExist(int effect_id);
 static void AllocatePortBuffers(effect_t* effect);
