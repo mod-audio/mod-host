@@ -33,7 +33,7 @@ typedef struct WORKER_T {
 } worker_t;
 
 
-void worker_init(worker_t *worker, LV2_Worker_Interface *iface);
+void worker_init(worker_t *worker, const LV2_Worker_Interface *iface);
 void worker_finish(worker_t *worker);
 LV2_Worker_Status worker_schedule(LV2_Worker_Schedule_Handle handle, uint32_t size, const void *data);
 void worker_emit_responses(worker_t *worker);

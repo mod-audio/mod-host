@@ -23,6 +23,8 @@
 */
 
 #include "utils.h"
+#include <float.h>
+#include <math.h>
 #include <string.h>
 
 
@@ -120,6 +122,11 @@ static void trim_spaces(char *str)
 *           GLOBAL FUNCTIONS
 ************************************************************************************************************************
 */
+
+bool floats_differ_enough(float a, float b)
+{
+    return fabsf(a - b) >= FLT_EPSILON;
+}
 
 char** strarr_split(char *str)
 {

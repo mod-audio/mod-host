@@ -51,7 +51,7 @@ static void* worker_func(void* data)
     return NULL;
 }
 
-void worker_init(worker_t *worker, LV2_Worker_Interface *iface)
+void worker_init(worker_t *worker, const LV2_Worker_Interface *iface)
 {
     worker->exit = false;
     worker->iface = iface;

@@ -46,7 +46,7 @@
 ************************************************************************************************************************
 */
 
-static char *g_commands[] = {
+static const char *g_commands[] = {
     "add",
     "remove",
     "preset_load",
@@ -69,7 +69,7 @@ static char *g_commands[] = {
     NULL
 };
 
-static char *g_condition[] = {
+static const char *g_condition[] = {
     ">",
     ">=",
     "<",
@@ -102,8 +102,8 @@ static char *g_condition[] = {
 ************************************************************************************************************************
 */
 
-static char **g_list, **g_plugins_list, **g_ports_list, **g_symbols, **g_instances_list;
-static const char **g_scale_points;
+static char **g_plugins_list, **g_ports_list, **g_instances_list;
+static const char **g_list, **g_scale_points, **g_symbols;
 static float **g_param_range;
 
 /*
@@ -112,7 +112,7 @@ static float **g_param_range;
 ************************************************************************************************************************
 */
 
-static char *dupstr(char *s);
+static char *dupstr(const char *s);
 static uint32_t spaces_count(const char *str);
 static char **completion(const char *text, int start, int end);
 static char *generator(const char *text, int state);
@@ -133,7 +133,7 @@ static void update_instances_list(void);
 ************************************************************************************************************************
 */
 
-static char *dupstr(char *s)
+static char *dupstr(const char *s)
 {
     char *r;
 
@@ -178,6 +178,10 @@ static uint32_t spaces_count(const char *str)
     return count;
 }
 
+
+// ignore char** to const char** pointer type switching for this function
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wincompatible-pointer-types"
 
 /* Attempt to complete on the contents of TEXT.  START and END bound the
    region of rl_line_buffer that contains the word to complete.  TEXT is
@@ -349,6 +353,9 @@ static char **completion(const char *text, int start, int end)
     return (matches);
 }
 
+// back to normal
+#pragma GCC diagnostic pop
+
 
 /* Generator function for command completion.  STATE lets us know whether
    to start from scratch; without any state (i.e. STATE == 0), then we
@@ -356,7 +363,7 @@ static char **completion(const char *text, int start, int end)
 static char *generator(const char *text, int state)
 {
     static int list_index, len;
-    char *name;
+    const char *name;
 
     /* If this is a new word to complete, initialize now.  This includes
        saving the length of TEXT for efficiency, and initializing the index
@@ -410,6 +417,7 @@ static void update_ports_list(const char *flow)
         }
 
         free(g_ports_list);
+        g_ports_list = NULL;
     }
 
     /* Gets ports list */
@@ -464,6 +472,7 @@ static void update_instances_list(void)
         }
 
         free(g_instances_list);
+        g_instances_list = NULL;
     }
 
     /* Gets ports list */
@@ -539,7 +548,7 @@ void completer_init(void)
     g_instances_list = NULL;
 
     /* Create a array of strings to symbols and scale points */
-    g_symbols = (char **) calloc(128, sizeof(char *));
+    g_symbols = (const char **) calloc(128, sizeof(char *));
     g_scale_points = (const char **) calloc(256, sizeof(char *));
 
     /* Allocates memory to parameter range */

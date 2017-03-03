@@ -31,10 +31,8 @@
 #include <netdb.h>
 #include <fcntl.h>
 
-#include <jack/jack.h>
-#include <lilv/lilv.h>
-
 #include "monitor.h"
+#include "utils.h"
 
 
 /*
@@ -149,12 +147,12 @@ int monitor_start(char *addr, int port)
 }
 
 
-int monitor_status()
+int monitor_status(void)
 {
     return g_status;
 }
 
-int monitor_stop()
+int monitor_stop(void)
 {
     close(g_sockfd);
     g_status = OFF;
@@ -191,9 +189,9 @@ int monitor_check_condition(int op, float cond_value, float value)
         case 3:
             return value <= cond_value ? 1 : 0;
         case 4:
-            return value == cond_value ? 1 : 0;
+            return floats_differ_enough(value, cond_value) ? 0 : 1;
         case 5:
-            return value != cond_value ? 1 : 0;
+            return floats_differ_enough(value, cond_value) ? 1 : 0;
     }
     return 0;
 }

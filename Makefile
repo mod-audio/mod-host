@@ -29,6 +29,15 @@ else
    LDFLAGS += -s
 endif
 
+ifeq ($(TESTBUILD), 1)
+# CFLAGS += -Wconversion -Wsign-conversion
+CFLAGS += -Werror -Wabi -Wcast-qual -Wclobbered -Wdisabled-optimization -Wfloat-equal -Wformat=2
+CFLAGS += -Winit-self -Wmissing-declarations -Woverlength-strings -Wpointer-arith -Wredundant-decls -Wshadow
+CFLAGS += -Wundef -Wuninitialized -Wunused -Wnested-externs
+CFLAGS += -Wstrict-aliasing -fstrict-aliasing -Wstrict-overflow -fstrict-overflow
+CFLAGS += -Wmissing-prototypes -Wstrict-prototypes -Wwrite-strings
+endif
+
 # libraries
 LIBS = $(shell pkg-config --libs jack lilv-0) -lreadline -lpthread -lrt -lm
 

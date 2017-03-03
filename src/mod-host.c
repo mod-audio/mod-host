@@ -78,10 +78,6 @@
 ************************************************************************************************************************
 */
 
-/* The text of help message is extracted from README file */
-extern const char help_msg[];
-/* The version is extracted from git history */
-extern const char version[];
 /* Wherever we should be running */
 static volatile int running;
 /* Thread that calls socket_run() for the JACK internal client */
