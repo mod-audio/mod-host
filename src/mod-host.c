@@ -380,6 +380,8 @@ static void cc_map_cb(proto_t *proto)
                           scalepoints
                           );
 
+    free(scalepoints);
+
     char buffer[128];
     sprintf(buffer, "resp %i", resp);
     protocol_response(buffer, proto);
