@@ -354,8 +354,6 @@ static void cc_map_cb(proto_t *proto)
             {
                 scalepoints[i].label = proto->list[12+i*2];
                 scalepoints[i].value = atof(proto->list[12+i*2+1]);
-
-                printf("scalepoint %i => %s %f\n", i, scalepoints[i].label, scalepoints[i].value);
             }
         }
         else
