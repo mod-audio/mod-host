@@ -3545,8 +3545,8 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
         {
             for (int i = 0; i < scalepoints_count; i++)
             {
-                assignment.list_items[i].label = scalepoints[i].label;
-                assignment.list_items[i].value = scalepoints[i].value;
+                assignment.list_items[i]->label = scalepoints[i].label;
+                assignment.list_items[i]->value = scalepoints[i].value;
             }
         }
         else
