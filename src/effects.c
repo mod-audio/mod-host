@@ -3507,7 +3507,8 @@ void effects_midi_program_listen(int enable, int channel)
 }
 
 int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int actuator_id,
-                   const char* label, float value, float minimum, float maximum, int steps, const char *unit)
+                   const char *label, float value, float minimum, float maximum, int steps, const char *unit,
+                   int scalepoints_count, const scalepoint_t *scalepoints)
 {
 #ifdef HAVE_CONTROLCHAIN
     InitializeControlChainIfNeeded();
@@ -3534,6 +3535,29 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
     assignment.def   = port->def_value;
     assignment.steps = steps;
     assignment.unit  = unit;
+    assignment.list_count = scalepoints_count;
+
+    if (scalepoints_count > 0)
+    {
+        assignment.list_items = malloc(sizeof(cc_item_t)*scalepoints_count);
+
+        if (assignment.list_items != NULL)
+        {
+            for (int i = 0; i < scalepoints_count; i++)
+            {
+                assignment.list_items[i].label = scalepoints[i].label;
+                assignment.list_items[i].value = scalepoints[i].value;
+            }
+        }
+        else
+        {
+            assignment.list_count = 0;
+        }
+    }
+    else
+    {
+        assignment.list_items = NULL;
+    }
 
     if (!strcmp(control_symbol, g_bypass_port_symbol))
     {
@@ -3548,6 +3572,8 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
         assignment.mode = CC_MODE_TRIGGER;
 
     const int assignment_id = cc_client_assignment(g_cc_client, &assignment);
+
+    free(assignment.list_items);
 
     if (assignment_id < 0)
         return ERR_ASSIGNMENT_FAILED;
@@ -3573,6 +3599,8 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
     UNUSED_PARAM(maximum);
     UNUSED_PARAM(steps);
     UNUSED_PARAM(unit);
+    UNUSED_PARAM(scalepoints_count);
+    UNUSED_PARAM(scalepoints);
 #endif
 }
 
