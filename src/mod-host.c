@@ -334,9 +334,9 @@ static void cc_map_cb(proto_t *proto)
 {
     int resp;
     int scalepoints_count = atoi(proto->list[11]);
-    scalepoint_t* scalepoints;
+    scalepoint_t *scalepoints;
 
-    if (proto->list_count < (uint32_t)(12+2*scalepoints_count))
+    if (scalepoints_count != 0 && (scalepoints_count == 1 || proto->list_count < (uint32_t)(12+2*scalepoints_count)))
     {
         char buffer[128];
         sprintf(buffer, "resp %i", ERR_ASSIGNMENT_INVALID_OP);
@@ -344,7 +344,7 @@ static void cc_map_cb(proto_t *proto)
         return;
     }
 
-    if (scalepoints_count > 0)
+    if (scalepoints_count >= 2)
     {
         scalepoints = malloc(sizeof(scalepoint_t)*scalepoints_count);
 
@@ -358,7 +358,10 @@ static void cc_map_cb(proto_t *proto)
         }
         else
         {
-            scalepoints_count = 0;
+            char buffer[128];
+            sprintf(buffer, "resp %i", ERR_MEMORY_ALLOCATION);
+            protocol_response(buffer, proto);
+            return;
         }
     }
     else
@@ -376,9 +379,7 @@ static void cc_map_cb(proto_t *proto)
                           atof(proto->list[8]), // maximum
                           atoi(proto->list[9]), // steps
                                proto->list[10], // unit
-                          scalepoints_count,
-                          scalepoints
-                          );
+                          scalepoints_count, scalepoints);
 
     free(scalepoints);
 

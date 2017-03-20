@@ -3517,6 +3517,8 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
         return ERR_INSTANCE_NON_EXISTS;
     if (!g_cc_client)
         return ERR_CONTROL_CHAIN_UNAVAILABLE;
+    if (scalepoints_count == 1)
+        return ERR_ASSIGNMENT_INVALID_OP;
 
     effect_t *effect = &(g_effects[effect_id]);
     const port_t *port = FindEffectInputPortBySymbol(effect, control_symbol);
@@ -3527,7 +3529,7 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
     cc_assignment_t assignment;
     assignment.device_id = device_id;
     assignment.actuator_id = actuator_id;
-    assignment.mode  = CC_MODE_TOGGLE;
+    assignment.mode  = 0x0;
     assignment.label = label;
     assignment.value = value;
     assignment.min   = minimum;
@@ -3537,26 +3539,41 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
     assignment.unit  = unit;
     assignment.list_count = scalepoints_count;
 
-    if (scalepoints_count > 0)
-    {
-        assignment.list_items = malloc(sizeof(cc_item_t)*scalepoints_count);
+    cc_item_t *item_data;
 
-        if (assignment.list_items != NULL)
+    if (scalepoints_count >= 2)
+    {
+        item_data = malloc(sizeof(cc_item_t)*scalepoints_count);
+        assignment.list_items = malloc(sizeof(cc_item_t*)*scalepoints_count);
+
+        if (assignment.list_items != NULL && item_data != NULL)
         {
+            // FIXME use real CC macro
+            assignment.mode = 0x4;
+
             for (int i = 0; i < scalepoints_count; i++)
             {
-                assignment.list_items[i]->label = scalepoints[i].label;
-                assignment.list_items[i]->value = scalepoints[i].value;
+                item_data[i].label = scalepoints[i].label;
+                item_data[i].value = scalepoints[i].value;
+                assignment.list_items[i] = item_data + i;
             }
         }
         else
         {
-            assignment.list_count = 0;
+            free(item_data);
+            free(assignment.list_items);
+            return ERR_MEMORY_ALLOCATION;
         }
     }
     else
     {
+        item_data = NULL;
         assignment.list_items = NULL;
+
+        if (port->hints & HINT_TOGGLE)
+            assignment.mode = CC_MODE_TOGGLE;
+        if (port->hints & HINT_TRIGGER)
+            assignment.mode = CC_MODE_TRIGGER;
     }
 
     if (!strcmp(control_symbol, g_bypass_port_symbol))
@@ -3566,17 +3583,15 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
         assignment.def = 1.0f;
     }
 
-    // TODO: mode and options
-
-    if (port->hints & HINT_TRIGGER)
-        assignment.mode = CC_MODE_TRIGGER;
-
     const int assignment_id = cc_client_assignment(g_cc_client, &assignment);
 
+    free(item_data);
     free(assignment.list_items);
 
     if (assignment_id < 0)
+    {
         return ERR_ASSIGNMENT_FAILED;
+    }
 
     assignment_t *item = &g_assignments_list[assignment.device_id][assignment_id];
 
