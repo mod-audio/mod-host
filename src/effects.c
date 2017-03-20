@@ -198,7 +198,6 @@ typedef struct PROPERTY_T {
 typedef struct PROPERTY_EVENT_T {
     uint32_t size;
     uint8_t  body[];
-
 } property_event_t;
 
 typedef struct PRESET_T {
@@ -273,6 +272,10 @@ typedef struct EFFECT_T {
     port_t bypass_port;
     float bypass;
     bool was_bypassed;
+
+    // virtual presets port
+    port_t presets_port;
+    float preset_value;
 
     // avoids itenerating controls each cycle
     bool has_triggers;
@@ -422,6 +425,7 @@ static int g_midi_program_listen;
 static pthread_mutex_t g_midi_learning_mutex;
 
 static const char* const g_bypass_port_symbol = BYPASS_PORT_SYMBOL;
+static const char* const g_presets_port_symbol = PRESETS_PORT_SYMBOL;
 
 
 /*
@@ -1367,6 +1371,8 @@ static port_t *FindEffectInputPortBySymbol(effect_t *effect, const char *control
 {
     if (!strcmp(control_symbol, g_bypass_port_symbol))
         return &effect->bypass_port;
+    if (!strcmp(control_symbol, g_presets_port_symbol))
+        return &effect->presets_port;
 
     for (uint32_t i = 0; i < effect->input_control_ports_count; i++)
     {
@@ -1572,7 +1578,7 @@ static void CCDataUpdate(void* arg)
 {
     cc_update_list_t *updates = arg;
 
-    bool needs_post = false;
+    bool is_bypass, needs_post = false;
     const int device_id = updates->device_id;
 
     for (int i = 0; i < updates->count; i++)
@@ -1584,10 +1590,16 @@ static void CCDataUpdate(void* arg)
         if (!assignment->port)
             continue;
 
-        if (!strcmp(assignment->port->symbol, g_bypass_port_symbol))
-        {
+        // invert value if bypass
+        if ((is_bypass = !strcmp(assignment->port->symbol, g_bypass_port_symbol)))
             data->value = 1.0f - data->value;
 
+        // ignore requests for same value
+        if (!floats_differ_enough(*(assignment->port->buffer), data->value))
+            continue;
+
+        if (is_bypass)
+        {
             effect_t *effect = &g_effects[assignment->effect_id];
             if (effect->enabled_index >= 0)
                 *(effect->ports[effect->enabled_index]->buffer) = (data->value > 0.5f) ? 0.0f : 1.0f;
@@ -2570,6 +2582,19 @@ int effects_add(const char *uid, int instance)
     effect->bypass_port.hints = HINT_TOGGLE;
     effect->bypass_port.symbol = g_bypass_port_symbol;
 
+    // virtual presets port
+    effect->preset_value = 0.0f;
+    effect->presets_port.buffer_count = 1;
+    effect->presets_port.buffer = &effect->preset_value;
+    effect->presets_port.min_value = 0.0f;
+    effect->presets_port.max_value = 1.0f;
+    effect->presets_port.def_value = 0.0f;
+    effect->presets_port.prev_value = 0.0f;
+    effect->presets_port.type = TYPE_CONTROL;
+    effect->presets_port.flow = FLOW_INPUT;
+    effect->presets_port.hints = HINT_ENUMERATION|HINT_INTEGER;
+    effect->presets_port.symbol = g_presets_port_symbol;
+
     lilv_node_free(lilv_audio);
     lilv_node_free(lilv_control);
     lilv_node_free(lilv_cv);
@@ -3521,7 +3546,7 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
         return ERR_ASSIGNMENT_INVALID_OP;
 
     effect_t *effect = &(g_effects[effect_id]);
-    const port_t *port = FindEffectInputPortBySymbol(effect, control_symbol);
+    port_t *port = FindEffectInputPortBySymbol(effect, control_symbol);
 
     if (port == NULL)
         return ERR_LV2_INVALID_PARAM_SYMBOL;
@@ -3581,6 +3606,13 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
         // invert value for bypass
         assignment.value = value > 0.5f ? 0.0f : 1.0f;
         assignment.def = 1.0f;
+    }
+    else if (!strcmp(control_symbol, g_presets_port_symbol))
+    {
+        // virtual presets port
+        port->min_value = minimum;
+        port->max_value = maximum;
+        port->def_value = port->prev_value = *port->buffer = value;
     }
 
     const int assignment_id = cc_client_assignment(g_cc_client, &assignment);
