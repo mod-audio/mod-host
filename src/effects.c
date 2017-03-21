@@ -3573,8 +3573,7 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
 
         if (assignment.list_items != NULL && item_data != NULL)
         {
-            // FIXME use real CC macro
-            assignment.mode = 0x4;
+            assignment.mode = CC_MODE_OPTIONS;
 
             for (int i = 0; i < scalepoints_count; i++)
             {
