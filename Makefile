@@ -66,6 +66,12 @@ LIBS += $(shell pkg-config --libs cc_client)
 INCS += $(shell pkg-config --cflags cc_client) -DHAVE_CONTROLCHAIN
 endif
 
+# hylia/link support
+ifeq ($(shell pkg-config --exists hylia && echo true), true)
+LIBS += $(shell pkg-config --libs hylia)
+INCS += $(shell pkg-config --cflags hylia) -DHAVE_HYLIA
+endif
+
 # source and object files
 SRC = $(wildcard $(SRC_DIR)/*.$(EXT)) $(SRC_DIR)/sha1/sha1.c $(SRC_DIR)/rtmempool/rtmempool.c
 OBJ = $(SRC:.$(EXT)=.o)

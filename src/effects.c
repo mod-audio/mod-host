@@ -35,6 +35,7 @@
 /* Jack */
 #include <jack/jack.h>
 #include <jack/midiport.h>
+#include <jack/transport.h>
 
 /* LV2 and Lilv */
 #include <lilv/lilv.h>
@@ -60,6 +61,11 @@
 #include <cc/cc_client.h>
 #endif
 
+#ifdef HAVE_HYLIA
+/* Hylia / Link */
+#include <hylia.h>
+#endif
+
 #ifndef HAVE_NEW_LILV
 #define lilv_free(x) free(x)
 #warning Your current lilv version does not support loading or unloading bundles
@@ -78,6 +84,8 @@
 #endif
 
 #define LILV_NS_MOD "http://moddevices.com/ns/mod#"
+
+#define KX_TIME__TicksPerBeat "http://kxstudio.sf.net/ns/lv2ext/props#TimePositionTicksPerBeat"
 
 // custom jack flag used for cv
 // needed because we prefer jack2 which doesn't have metadata yet
@@ -143,7 +151,14 @@ enum PortHints {
     HINT_LOGARITHMIC   = 1 << 4,
     HINT_MONITORED     = 1 << 5, // outputs only
     // events
-    HINT_OLD_EVENT_API = 1 << 0,
+    HINT_TRANSPORT     = 1 << 0,
+    HINT_OLD_EVENT_API = 1 << 1,
+};
+
+enum PluginHints {
+    //HINT_TRANSPORT     = 1 << 0,
+    HINT_TRIGGERS        = 1 << 1,
+    HINT_OUTPUT_MONITORS = 1 << 2,
 };
 
 enum {
@@ -256,6 +271,8 @@ typedef struct EFFECT_T {
     int32_t control_index; // control/event input
     int32_t enabled_index;
     int32_t freewheel_index;
+    int32_t bpm_index;
+    int32_t speed_index;
 
     preset_t **presets;
     uint32_t presets_count;
@@ -273,13 +290,12 @@ typedef struct EFFECT_T {
     float bypass;
     bool was_bypassed;
 
+    // cached plugin information, avoids itenerating controls each cycle
+    enum PluginHints hints;
+
     // virtual presets port
     port_t presets_port;
     float preset_value;
-
-    // avoids itenerating controls each cycle
-    bool has_triggers;
-    bool has_output_monitors;
 } effect_t;
 
 typedef struct URIDS_T {
@@ -301,9 +317,11 @@ typedef struct URIDS_T {
     LV2_URID time_Position;
     LV2_URID time_bar;
     LV2_URID time_barBeat;
+    LV2_URID time_beat;
     LV2_URID time_beatUnit;
     LV2_URID time_beatsPerBar;
     LV2_URID time_beatsPerMinute;
+    LV2_URID time_ticksPerBeat;
     LV2_URID time_frame;
     LV2_URID time_speed;
 } urids_t;
@@ -599,7 +617,9 @@ static void RunPostPonedEvents(int ignored_effect_id)
 
     cached_param_set.last_effect_id = -1;
     cached_output_mon.last_effect_id = -1;
+    cached_param_set.last_symbol[0] = '\0';
     cached_param_set.last_symbol[MAX_CHAR_BUF_SIZE] = '\0';
+    cached_output_mon.last_symbol[0] = '\0';
     cached_output_mon.last_symbol[MAX_CHAR_BUF_SIZE] = '\0';
     INIT_LIST_HEAD(&cached_param_set.symbols.siblings);
     INIT_LIST_HEAD(&cached_output_mon.symbols.siblings);
@@ -985,7 +1005,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
         }
     }
 
-    if (effect->has_triggers)
+    if (effect->hints & HINT_TRIGGERS)
     {
         for (i = 0; i < effect->input_control_ports_count; i++)
         {
@@ -994,7 +1014,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
         }
     }
 
-    if (effect->has_output_monitors)
+    if (effect->hints & HINT_OUTPUT_MONITORS)
     {
         bool needs_post = false;
         float value;
@@ -1706,6 +1726,7 @@ int effects_init(void* client)
 
     /* Get buffers size */
     g_block_length = jack_get_buffer_size(g_jack_global_client);
+    g_sample_rate = jack_get_sample_rate(g_jack_global_client);
     g_midi_buffer_size = jack_port_type_get_buffer_size(g_jack_global_client, JACK_DEFAULT_MIDI_TYPE);
 
     /* Set jack callbacks */
@@ -1764,7 +1785,6 @@ int effects_init(void* client)
     g_plugins = lilv_world_get_all_plugins(g_lv2_data);
 
     /* Get sample rate */
-    g_sample_rate = jack_get_sample_rate(g_jack_global_client);
     g_sample_rate_node = lilv_new_uri(g_lv2_data, LV2_CORE__sampleRate);
 
     /* URI and URID Feature initialization */
@@ -1797,9 +1817,11 @@ int effects_init(void* client)
     g_urids.time_Position        = urid_to_id(g_symap, LV2_TIME__Position);
     g_urids.time_bar             = urid_to_id(g_symap, LV2_TIME__bar);
     g_urids.time_barBeat         = urid_to_id(g_symap, LV2_TIME__barBeat);
+    g_urids.time_beat            = urid_to_id(g_symap, LV2_TIME__beat);
     g_urids.time_beatUnit        = urid_to_id(g_symap, LV2_TIME__beatUnit);
     g_urids.time_beatsPerBar     = urid_to_id(g_symap, LV2_TIME__beatsPerBar);
     g_urids.time_beatsPerMinute  = urid_to_id(g_symap, LV2_TIME__beatsPerMinute);
+    g_urids.time_ticksPerBeat    = urid_to_id(g_symap, KX_TIME__TicksPerBeat);
     g_urids.time_frame           = urid_to_id(g_symap, LV2_TIME__frame);
     g_urids.time_speed           = urid_to_id(g_symap, LV2_TIME__speed);
 
@@ -1946,6 +1968,7 @@ int effects_add(const char *uid, int instance)
     LilvInstance *lilv_instance;
     LilvNode *plugin_uri;
     LilvNode *lilv_input, *lilv_control_in, *lilv_enabled, *lilv_freeWheeling, *lilv_output;
+    LilvNode *lilv_timePosition, *lilv_timeBeatsPerMinute, *lilv_timeSpeed;
     LilvNode *lilv_enumeration, *lilv_integer, *lilv_toggled, *lilv_trigger, *lilv_logarithmic;
     LilvNode *lilv_control, *lilv_audio, *lilv_cv, *lilv_event, *lilv_midi;
     LilvNode *lilv_default, *lilv_mod_default;
@@ -1972,6 +1995,9 @@ int effects_add(const char *uid, int instance)
     lilv_enabled = NULL;
     lilv_enumeration = NULL;
     lilv_freeWheeling = NULL;
+    lilv_timePosition = NULL;
+    lilv_timeBeatsPerMinute = NULL;
+    lilv_timeSpeed = NULL;
     lilv_integer = NULL;
     lilv_toggled = NULL;
     lilv_trigger = NULL;
@@ -2085,6 +2111,9 @@ int effects_add(const char *uid, int instance)
     lilv_enabled = lilv_new_uri(g_lv2_data, LV2_CORE__enabled);
     lilv_enumeration = lilv_new_uri(g_lv2_data, LV2_CORE__enumeration);
     lilv_freeWheeling = lilv_new_uri(g_lv2_data, LV2_CORE__freeWheeling);
+    lilv_timePosition = lilv_new_uri(g_lv2_data, LV2_TIME__Position);
+    lilv_timeBeatsPerMinute = lilv_new_uri(g_lv2_data, LV2_TIME__beatsPerMinute);
+    lilv_timeSpeed = lilv_new_uri(g_lv2_data, LV2_TIME__speed);
     lilv_integer = lilv_new_uri(g_lv2_data, LV2_CORE__integer);
     lilv_toggled = lilv_new_uri(g_lv2_data, LV2_CORE__toggled);
     lilv_trigger = lilv_new_uri(g_lv2_data, LV2_PORT_PROPS__trigger);
@@ -2268,7 +2297,7 @@ int effects_add(const char *uid, int instance)
             if (lilv_port_has_property(plugin, lilv_port, lilv_trigger))
             {
                 effect->ports[i]->hints |= HINT_TRIGGER;
-                effect->has_triggers = true;
+                effect->hints |= HINT_TRIGGERS;
             }
             if (lilv_port_has_property(plugin, lilv_port, lilv_logarithmic))
             {
@@ -2326,7 +2355,15 @@ int effects_add(const char *uid, int instance)
         {
             effect->ports[i]->type = TYPE_EVENT;
             if (lilv_port_is_a(plugin, lilv_port, lilv_event))
+            {
                 effect->ports[i]->hints |= HINT_OLD_EVENT_API;
+            }
+            else if (lilv_port_supports_event(plugin, lilv_port, lilv_timePosition))
+            {
+                effect->ports[i]->hints |= HINT_TRANSPORT;
+                effect->hints |= HINT_TRANSPORT;
+            }
+
             jack_port = jack_port_register(jack_client, port_name, JACK_DEFAULT_MIDI_TYPE, jack_flags, 0);
             if (jack_port == NULL)
             {
@@ -2374,6 +2411,27 @@ int effects_add(const char *uid, int instance)
         effect->freewheel_index = -1;
     }
 
+    const LilvPort* bpm_port = lilv_plugin_get_port_by_designation(plugin, lilv_input, lilv_timeBeatsPerMinute);
+    if (bpm_port)
+    {
+        effect->bpm_index = lilv_port_get_index(plugin, bpm_port);
+        // TODO
+    }
+    else
+    {
+        effect->bpm_index = -1;
+    }
+
+    const LilvPort* speed_port = lilv_plugin_get_port_by_designation(plugin, lilv_input, lilv_timeSpeed);
+    if (speed_port)
+    {
+        effect->speed_index = lilv_port_get_index(plugin, speed_port);
+        // TODO
+    }
+    else
+    {
+        effect->speed_index = -1;
+    }
 
     /* Allocate memory to indexes */
     /* Audio ports */
@@ -2603,6 +2661,9 @@ int effects_add(const char *uid, int instance)
     lilv_node_free(lilv_enabled);
     lilv_node_free(lilv_enumeration);
     lilv_node_free(lilv_freeWheeling);
+    lilv_node_free(lilv_timePosition);
+    lilv_node_free(lilv_timeBeatsPerMinute);
+    lilv_node_free(lilv_timeSpeed);
     lilv_node_free(lilv_integer);
     lilv_node_free(lilv_toggled);
     lilv_node_free(lilv_trigger);
@@ -2655,6 +2716,9 @@ int effects_add(const char *uid, int instance)
         lilv_node_free(lilv_enabled);
         lilv_node_free(lilv_enumeration);
         lilv_node_free(lilv_freeWheeling);
+        lilv_node_free(lilv_timePosition);
+        lilv_node_free(lilv_timeBeatsPerMinute);
+        lilv_node_free(lilv_timeSpeed);
         lilv_node_free(lilv_integer);
         lilv_node_free(lilv_toggled);
         lilv_node_free(lilv_trigger);
@@ -3192,7 +3256,7 @@ int effects_monitor_output_parameter(int effect_id, const char *control_symbol)
     port->hints |= HINT_MONITORED;
 
     // activate output monitor
-    g_effects[effect_id].has_output_monitors = true;
+    g_effects[effect_id].hints |= HINT_OUTPUT_MONITORS;
 
     return SUCCESS;
 }
