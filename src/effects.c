@@ -4155,8 +4155,9 @@ int effects_link_enable(int enable)
 #ifdef HAVE_HYLIA
     if (g_hylia_instance)
     {
-        hylia_enabled = enable;
         hylia_enable(g_hylia_instance, enable);
+        hylia_enabled = enable;
+        g_transport_reset = true;
         return SUCCESS;
     }
 #else
