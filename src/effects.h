@@ -66,6 +66,7 @@ enum {
     ERR_ASSIGNMENT_FAILED = -304,
 
     ERR_CONTROL_CHAIN_UNAVAILABLE = -401,
+    ERR_LINK_UNAVAILABLE = -401,
 
     ERR_MEMORY_ALLOCATION = -901,
 };
@@ -147,6 +148,8 @@ int effects_cc_unmap(int effect_id, const char *control_symbol);
 float effects_jack_cpu_load(void);
 void effects_bundle_add(const char* bundlepath);
 void effects_bundle_remove(const char* bundlepath);
+int effects_link_enable(int enable);
+void effects_transport(int rolling, double bpm);
 void effects_output_data_ready(void);
 
 /*

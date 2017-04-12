@@ -22,6 +22,10 @@
 ************************************************************************************************************************
 */
 
+#ifndef HAVE_HYLIA
+#define HAVE_HYLIA
+#endif
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -91,9 +95,6 @@
 // needed because we prefer jack2 which doesn't have metadata yet
 #define JackPortIsControlVoltage 0x100
 
-// use pitchbend as midi cc, with an invalid MIDI controller number
-#define MIDI_PITCHBEND_AS_CC 131
-
 /* Local */
 #include "effects.h"
 #include "monitor.h"
@@ -120,6 +121,14 @@
 
 #define BYPASS_PORT_SYMBOL  ":bypass"
 #define PRESETS_PORT_SYMBOL ":presets"
+
+// use pitchbend as midi cc, with an invalid MIDI controller number
+#define MIDI_PITCHBEND_AS_CC 131
+
+// transport defaults
+#define TRANSPORT_BEATS_PER_BAR   4.0
+#define TRANSPORT_BEATS_PER_BAR_i 4
+#define TRANSPORT_TICKS_PER_BEAT  1920.0
 
 
 /*
@@ -179,6 +188,12 @@ enum PostPonedEventType {
     POSTPONED_OUTPUT_MONITOR,
     POSTPONED_PROGRAM_LISTEN,
     POSTPONED_MIDI_MAP
+};
+
+enum UpdatePositionFlag {
+    UPDATE_POSTION_SKIP,
+    UPDATE_POSTION_IF_CHANGED,
+    UPDATE_POSTION_FORCED,
 };
 
 
@@ -452,6 +467,12 @@ static LV2_Feature g_buf_size_features[3] = {
 static int g_midi_program_listen;
 static pthread_mutex_t g_midi_learning_mutex;
 
+#ifdef HAVE_HYLIA
+static volatile bool hylia_enabled;
+static hylia_t* g_hylia_instance;
+static hylia_time_info_t g_hylia_timeinfo;
+#endif
+
 static const char* const g_bypass_port_symbol = BYPASS_PORT_SYMBOL;
 static const char* const g_presets_port_symbol = PRESETS_PORT_SYMBOL;
 
@@ -471,7 +492,7 @@ static void RunPostPonedEvents(int ignored_effect_id);
 static void* PostPonedEventsThread(void* arg);
 static int ProcessPlugin(jack_nframes_t nframes, void *arg);
 static float UpdateValueFromMidi(midi_cc_t* mcc, uint16_t mvalue, bool highres);
-static void UpdateGlobalJackPosition(int report_changes);
+static void UpdateGlobalJackPosition(enum UpdatePositionFlag flag);
 static int ProcessMidi(jack_nframes_t nframes, void *arg);
 static void JackTimebase(jack_transport_state_t state, jack_nframes_t nframes,
                          jack_position_t* pos, int new_pos, void* arg);
@@ -488,6 +509,9 @@ static void FreeLicenseData(MOD_License_Handle handle, char *license);
 #ifdef HAVE_CONTROLCHAIN
 static void CCDataUpdate(void* arg);
 static void InitializeControlChainIfNeeded(void);
+#endif
+#ifdef HAVE_HYLIA
+static uint32_t GetHyliaOutputLatency(void);
 #endif
 
 
@@ -526,7 +550,6 @@ static void AllocatePortBuffers(effect_t* effect)
 {
     uint32_t i;
 
-    g_midi_buffer_size = jack_port_type_get_buffer_size(effect->jack_client, JACK_DEFAULT_MIDI_TYPE);
     for (i = 0; i < effect->event_ports_count; i++)
     {
         lv2_evbuf_free(effect->event_ports[i]->evbuf);
@@ -544,9 +567,21 @@ static void AllocatePortBuffers(effect_t* effect)
 
 static int BufferSize(jack_nframes_t nframes, void* data)
 {
-    effect_t *effect = data;
     g_block_length = nframes;
-    AllocatePortBuffers(effect);
+    g_midi_buffer_size = jack_port_type_get_buffer_size(g_jack_global_client, JACK_DEFAULT_MIDI_TYPE);
+
+    if (data)
+    {
+        effect_t *effect = data;
+        AllocatePortBuffers(effect);
+    }
+#ifdef HAVE_HYLIA
+    else if (g_hylia_instance)
+    {
+        hylia_set_output_latency(g_hylia_instance, GetHyliaOutputLatency());
+    }
+#endif
+
     return SUCCESS;
 }
 
@@ -1226,12 +1261,12 @@ static float UpdateValueFromMidi(midi_cc_t* mcc, uint16_t mvalue, bool highres)
     }
 }
 
-static void UpdateGlobalJackPosition(int report_changes)
+static void UpdateGlobalJackPosition(enum UpdatePositionFlag flag)
 {
     bool old_rolling;
     double old_bpm;
 
-    if (report_changes)
+    if (flag != UPDATE_POSTION_SKIP)
     {
         old_rolling = g_jack_rolling;
         old_bpm = g_transport_bpm;
@@ -1249,9 +1284,9 @@ static void UpdateGlobalJackPosition(int report_changes)
         g_jack_pos.beats_per_minute = g_transport_bpm;
     }
 
-    if (!report_changes)
+    if (flag == UPDATE_POSTION_SKIP)
         return;
-    if (old_rolling == g_jack_rolling && old_bpm == g_transport_bpm && report_changes <= 1)
+    if (flag == UPDATE_POSTION_IF_CHANGED && old_rolling == g_jack_rolling && old_bpm == g_transport_bpm)
         return;
 
     postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
@@ -1279,7 +1314,22 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
     uint16_t mvalue;
     float value;
     bool handled, highres, needs_post = false;
-    int pos_flag = 1;
+    enum UpdatePositionFlag pos_flag = UPDATE_POSTION_IF_CHANGED;
+
+#ifdef HAVE_HYLIA
+    if (hylia_enabled)
+    {
+        hylia_process(g_hylia_instance, nframes, &g_hylia_timeinfo);
+        const double new_bpm = g_hylia_timeinfo.beatsPerMinute;
+
+        if (new_bpm > 0.0 && (g_transport_bpm != new_bpm))
+        {
+            // force sending changes to UI if hylia bpm changed
+            g_transport_bpm = new_bpm;
+            pos_flag = UPDATE_POSTION_FORCED;
+        }
+    }
+#endif
 
     UpdateGlobalJackPosition(pos_flag);
 
@@ -1445,48 +1495,67 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
 static void JackTimebase(jack_transport_state_t state, jack_nframes_t nframes,
                          jack_position_t *pos, int new_pos, void *arg)
 {
+    double tick;
+
     if (new_pos || g_transport_reset)
     {
         pos->valid = JackPositionBBT;
-        pos->beats_per_bar = 4.0f;
         pos->beat_type = 4.0f;
-        pos->ticks_per_beat = 1920.0f;
+        pos->beats_per_bar = TRANSPORT_BEATS_PER_BAR;
+        pos->ticks_per_beat = TRANSPORT_TICKS_PER_BEAT;
         pos->beats_per_minute = g_transport_bpm;
 
         double abs_beat, abs_tick;
 
+        if (hylia_enabled)
+        {
+            if (g_hylia_timeinfo.beat >= 0.0)
+            {
+                const double beat = g_hylia_timeinfo.beat;
+                abs_beat = floor(beat);
+                abs_tick = beat * TRANSPORT_TICKS_PER_BEAT;
+            }
+            else
+            {
+                abs_beat = 0.0;
+                abs_tick = 0.0;
+                g_jack_rolling = false;
+            }
+        }
+        else
         {
             const double min = pos->frame / ((double) pos->frame_rate * 60.0);
-            abs_tick = min * pos->beats_per_minute * pos->ticks_per_beat;
-            abs_beat = abs_tick / pos->ticks_per_beat;
+            abs_tick = min * pos->beats_per_minute * TRANSPORT_TICKS_PER_BEAT;
+            abs_beat = abs_tick / TRANSPORT_TICKS_PER_BEAT;
             g_transport_reset = false;
         }
 
-        pos->bar  = abs_beat / pos->beats_per_bar;
-        pos->beat = abs_beat - (pos->bar * pos->beats_per_bar) + 1;
-        pos->bar_start_tick = pos->bar * pos->beats_per_bar * pos->ticks_per_beat;
+        pos->bar  = (int32_t)(floor(abs_beat / TRANSPORT_BEATS_PER_BAR) + 0.5);
+        pos->beat = abs_beat - (pos->bar * TRANSPORT_BEATS_PER_BAR_i) + 1;
+        pos->bar_start_tick = pos->bar * TRANSPORT_BEATS_PER_BAR * TRANSPORT_TICKS_PER_BEAT;
         pos->bar++;
 
-        g_transport_tick = abs_tick - (abs_beat * pos->ticks_per_beat);
+        tick = abs_tick - pos->bar_start_tick;
     }
     else
     {
-        g_transport_tick += nframes * pos->ticks_per_beat * pos->beats_per_minute / (pos->frame_rate * 60);
+        tick = g_transport_tick + nframes * TRANSPORT_TICKS_PER_BEAT * pos->beats_per_minute / (pos->frame_rate * 60);
 
-        while (g_transport_tick >= pos->ticks_per_beat)
+        while (tick >= TRANSPORT_TICKS_PER_BEAT)
         {
-            g_transport_tick -= pos->ticks_per_beat;
+            tick -= TRANSPORT_TICKS_PER_BEAT;
 
-            if (++pos->beat > pos->beats_per_bar)
+            if (++pos->beat > TRANSPORT_BEATS_PER_BAR_i)
             {
                 pos->beat = 1;
                 ++pos->bar;
-                pos->bar_start_tick += pos->beats_per_bar * pos->ticks_per_beat;
+                pos->bar_start_tick += TRANSPORT_BEATS_PER_BAR * TRANSPORT_TICKS_PER_BEAT;
             }
         }
     }
 
-    pos->tick = (int)(g_transport_tick + 0.5);
+    pos->tick = (int32_t)(tick + 0.5);
+    g_transport_tick = tick;
     return;
 
     UNUSED_PARAM(state);
@@ -1858,6 +1927,18 @@ static void InitializeControlChainIfNeeded(void)
 }
 #endif
 
+#ifdef HAVE_HYLIA
+static uint32_t GetHyliaOutputLatency(void)
+{
+    const long long int latency = llround(1.0e6 * g_block_length / g_sample_rate);
+
+    if (latency >= 0 && latency < UINT32_MAX)
+        return (uint32_t)latency;
+
+    return 0;
+}
+#endif
+
 /*
 ************************************************************************************************************************
 *           GLOBAL FUNCTIONS
@@ -1923,6 +2004,21 @@ int effects_init(void* client)
     jack_set_thread_init_callback(g_jack_global_client, JackThreadInit, NULL);
     jack_set_timebase_callback(g_jack_global_client, 1, JackTimebase, NULL);
     jack_set_process_callback(g_jack_global_client, ProcessMidi, NULL);
+    jack_set_buffer_size_callback(g_jack_global_client, BufferSize, NULL);
+
+#ifdef HAVE_HYLIA
+    /* Init hylia */
+    hylia_enabled = false;
+    g_hylia_instance = hylia_create();
+    memset(&g_hylia_timeinfo, 0, sizeof(g_hylia_timeinfo));
+
+    if (g_hylia_instance)
+    {
+        hylia_set_beats_per_bar(g_hylia_instance, 4.0);
+        hylia_set_beats_per_minute(g_hylia_instance, g_transport_bpm);
+        hylia_set_output_latency(g_hylia_instance, GetHyliaOutputLatency());
+    }
+#endif
 
     /* Register jack ports */
     g_midi_in_port = jack_port_register(g_jack_global_client, "midi_in", JACK_DEFAULT_MIDI_TYPE, JackPortIsInput, 0);
@@ -2066,7 +2162,7 @@ int effects_init(void* client)
     pthread_create(&g_postevents_thread, NULL, PostPonedEventsThread, NULL);
 
     /* get transport state */
-    UpdateGlobalJackPosition(0);
+    UpdateGlobalJackPosition(UPDATE_POSTION_SKIP);
 
     /* Try activate the jack global client */
     if (jack_activate(g_jack_global_client) != 0)
@@ -2132,6 +2228,11 @@ int effects_finish(int close_client)
     sem_destroy(&g_postevents_semaphore);
     pthread_mutex_destroy(&g_rtsafe_mutex);
     pthread_mutex_destroy(&g_midi_learning_mutex);
+
+#ifdef HAVE_HYLIA
+    hylia_cleanup(g_hylia_instance);
+    g_hylia_instance = NULL;
+#endif
 
     return SUCCESS;
 }
@@ -4035,6 +4136,51 @@ void effects_bundle_remove(const char* bpath)
     // refresh plugins
     g_plugins = lilv_world_get_all_plugins(g_lv2_data);
 #endif
+}
+
+int effects_link_enable(int enable)
+{
+#ifdef HAVE_HYLIA
+    if (g_hylia_instance)
+    {
+        hylia_enabled = enable;
+        hylia_enable(g_hylia_instance, enable);
+        return SUCCESS;
+    }
+#else
+    UNUSED_PARAM(enable);
+#endif
+
+    return ERR_LINK_UNAVAILABLE;
+}
+
+void effects_transport(int rolling, double bpm)
+{
+    g_transport_bpm = bpm;
+    g_transport_reset = true;
+
+#ifdef HAVE_HYLIA
+    if (g_hylia_instance)
+    {
+        hylia_set_beats_per_minute(g_hylia_instance, bpm);
+    }
+#endif
+
+    if ((g_jack_pos.valid & JackPositionBBT) == 0)
+    {
+        // old timebase master no longer active, make ourselves master again
+        jack_set_timebase_callback(g_jack_global_client, 1, JackTimebase, NULL);
+    }
+
+    if (g_jack_rolling != (rolling != 0) ||
+        g_jack_rolling != (jack_transport_query(g_jack_global_client, NULL) == JackTransportRolling))
+    {
+        if (rolling)
+            jack_transport_start(g_jack_global_client);
+        else
+            jack_transport_stop(g_jack_global_client);
+        // g_jack_rolling is updated on the next jack callback
+    }
 }
 
 void effects_output_data_ready(void)

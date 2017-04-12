@@ -469,6 +469,22 @@ static void bundle_remove(proto_t *proto)
     protocol_response("resp 0", proto);
 }
 
+static void link_enable_sync(proto_t *proto)
+{
+    int resp;
+    resp = effects_link_enable(atoi(proto->list[1]));
+
+    char buffer[128];
+    sprintf(buffer, "resp %i", resp);
+    protocol_response(buffer, proto);
+}
+
+static void transport(proto_t *proto)
+{
+    effects_transport(atoi(proto->list[1]), atof(proto->list[2]));
+    protocol_response("resp 0", proto);
+}
+
 static void output_data_ready(proto_t *proto)
 {
     effects_output_data_ready();
@@ -577,6 +593,8 @@ static int mod_host_init(jack_client_t* client, int socket_port)
     protocol_add_command(SAVE_COMMANDS, save_cb);
     protocol_add_command(BUNDLE_ADD, bundle_add);
     protocol_add_command(BUNDLE_REMOVE, bundle_remove);
+    protocol_add_command(LINK_ENABLE, link_enable_sync);
+    protocol_add_command(TRANSPORT, transport);
     protocol_add_command(OUTPUT_DATA_READY, output_data_ready);
 
     /* skip help and quit for internal client */
