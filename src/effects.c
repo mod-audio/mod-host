@@ -4189,9 +4189,14 @@ void effects_transport(int rolling, double bpm)
         g_jack_rolling != (jack_transport_query(g_jack_global_client, NULL) == JackTransportRolling))
     {
         if (rolling)
+        {
             jack_transport_start(g_jack_global_client);
+        }
         else
+        {
             jack_transport_stop(g_jack_global_client);
+            jack_transport_locate(g_jack_global_client, 0);
+        }
         // g_jack_rolling is updated on the next jack callback
     }
 }
