@@ -22,10 +22,6 @@
 ************************************************************************************************************************
 */
 
-#ifndef HAVE_HYLIA
-#define HAVE_HYLIA
-#endif
-
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -187,7 +183,8 @@ enum PostPonedEventType {
     POSTPONED_PARAM_SET,
     POSTPONED_OUTPUT_MONITOR,
     POSTPONED_PROGRAM_LISTEN,
-    POSTPONED_MIDI_MAP
+    POSTPONED_MIDI_MAP,
+    POSTPONED_TRANSPORT
 };
 
 enum UpdatePositionFlag {
@@ -363,8 +360,17 @@ typedef struct ASSIGNMENT_T {
     int assignment_id;
 } assignment_t;
 
-typedef struct POSTPONED_EVENT_T {
-    enum PostPonedEventType etype;
+typedef struct POSTPONED_PARAMETER_EVENT_T {
+    int effect_id;
+    const char* symbol;
+    float value;
+} postponed_parameter_event_t;
+
+typedef struct POSTPONED_PROGRAM_EVENT_T {
+    int8_t value;
+} postponed_program_event_t;
+
+typedef struct POSTPONED_MIDI_MAP_EVENT_T {
     int effect_id;
     const char* symbol;
     int8_t channel;
@@ -372,6 +378,21 @@ typedef struct POSTPONED_EVENT_T {
     float value;
     float minimum;
     float maximum;
+} postponed_midi_map_event_t;
+
+typedef struct POSTPONED_TRANSPORT_EVENT_T {
+    bool rolling;
+    float bpm;
+} postponed_transport_event_t;
+
+typedef struct POSTPONED_EVENT_T {
+    enum PostPonedEventType type;
+    union {
+        postponed_parameter_event_t parameter;
+        postponed_program_event_t program;
+        postponed_midi_map_event_t midi_map;
+        postponed_transport_event_t transport;
+    };
 } postponed_event_t;
 
 typedef struct POSTPONED_EVENT_LIST_DATA {
@@ -594,14 +615,14 @@ static void FreeWheelMode(int starting, void* data)
     }
 }
 
-static bool ShouldIgnorePostPonedEvent(postponed_event_list_data* ev, postponed_cached_events* cached_events)
+static bool ShouldIgnorePostPonedEvent(postponed_parameter_event_t* ev, postponed_cached_events* cached_events)
 {
-    // we don't have symbol-less events that need caching
-    if (ev->event.symbol == NULL)
+    // symbol must not be null
+    if (ev->symbol == NULL)
         return false;
 
-    if (ev->event.effect_id == cached_events->last_effect_id &&
-        strncmp(ev->event.symbol, cached_events->last_symbol, MAX_CHAR_BUF_SIZE) == 0)
+    if (ev->effect_id == cached_events->last_effect_id &&
+        strncmp(ev->symbol, cached_events->last_symbol, MAX_CHAR_BUF_SIZE) == 0)
     {
         // already received this event, like just now
         return true;
@@ -614,8 +635,8 @@ static bool ShouldIgnorePostPonedEvent(postponed_event_list_data* ev, postponed_
     {
         postponed_cached_symbol_list_data* const psymbol = list_entry(it, postponed_cached_symbol_list_data, siblings);
 
-        if (ev->event.effect_id == psymbol->effect_id &&
-            strncmp(ev->event.symbol, psymbol->symbol, MAX_CHAR_BUF_SIZE) == 0)
+        if (ev->effect_id == psymbol->effect_id &&
+            strncmp(ev->symbol, psymbol->symbol, MAX_CHAR_BUF_SIZE) == 0)
         {
             // haha! found you little bastard!
             return true;
@@ -628,8 +649,8 @@ static bool ShouldIgnorePostPonedEvent(postponed_event_list_data* ev, postponed_
 
     if (psymbol)
     {
-        psymbol->effect_id = ev->event.effect_id;
-        strncpy(psymbol->symbol, ev->event.symbol, MAX_CHAR_BUF_SIZE);
+        psymbol->effect_id = ev->effect_id;
+        strncpy(psymbol->symbol, ev->symbol, MAX_CHAR_BUF_SIZE);
         psymbol->symbol[MAX_CHAR_BUF_SIZE] = '\0';
         list_add_tail(&psymbol->siblings, &cached_events->symbols.siblings);
     }
@@ -660,6 +681,7 @@ static void RunPostPonedEvents(int ignored_effect_id)
 
     // cached data, to make sure we only handle similar events once
     bool got_midi_program = false;
+    bool got_transport = false;
     postponed_cached_events cached_param_set, cached_output_mon;
     postponed_cached_symbol_list_data *psymbol;
 
@@ -680,60 +702,74 @@ static void RunPostPonedEvents(int ignored_effect_id)
     {
         eventptr = list_entry(it, postponed_event_list_data, siblings);
 
-        // do not handle events for a plugin that is about to be removed
-        if (eventptr->event.effect_id == ignored_effect_id)
-            continue;
-
-        switch (eventptr->event.etype)
+        switch (eventptr->event.type)
         {
         case POSTPONED_PARAM_SET:
-            if (ShouldIgnorePostPonedEvent(eventptr, &cached_param_set))
+            if (eventptr->event.parameter.effect_id == ignored_effect_id)
+                continue;
+            if (ShouldIgnorePostPonedEvent(&eventptr->event.parameter, &cached_param_set))
                 continue;
 
-            snprintf(buf, MAX_CHAR_BUF_SIZE, "param_set %i %s %f", eventptr->event.effect_id,
-                                                                   eventptr->event.symbol,
-                                                                   eventptr->event.value);
+            snprintf(buf, MAX_CHAR_BUF_SIZE, "param_set %i %s %f", eventptr->event.parameter.effect_id,
+                                                                   eventptr->event.parameter.symbol,
+                                                                   eventptr->event.parameter.value);
             socket_send_feedback(buf);
 
             // save for fast checkup next time
-            cached_param_set.last_effect_id = eventptr->event.effect_id;
-            strncpy(cached_param_set.last_symbol, eventptr->event.symbol, MAX_CHAR_BUF_SIZE);
+            cached_param_set.last_effect_id = eventptr->event.parameter.effect_id;
+            strncpy(cached_param_set.last_symbol, eventptr->event.parameter.symbol, MAX_CHAR_BUF_SIZE);
             break;
 
         case POSTPONED_OUTPUT_MONITOR:
-            if (ShouldIgnorePostPonedEvent(eventptr, &cached_output_mon))
+            if (eventptr->event.parameter.effect_id == ignored_effect_id)
+                continue;
+            if (ShouldIgnorePostPonedEvent(&eventptr->event.parameter, &cached_output_mon))
                 continue;
 
-            snprintf(buf, MAX_CHAR_BUF_SIZE, "output_set %i %s %f", eventptr->event.effect_id,
-                                                                    eventptr->event.symbol,
-                                                                    eventptr->event.value);
+            snprintf(buf, MAX_CHAR_BUF_SIZE, "output_set %i %s %f", eventptr->event.parameter.effect_id,
+                                                                    eventptr->event.parameter.symbol,
+                                                                    eventptr->event.parameter.value);
             socket_send_feedback(buf);
 
             // save for fast checkup next time
-            cached_output_mon.last_effect_id = eventptr->event.effect_id;
-            strncpy(cached_output_mon.last_symbol, eventptr->event.symbol, MAX_CHAR_BUF_SIZE);
+            cached_output_mon.last_effect_id = eventptr->event.parameter.effect_id;
+            strncpy(cached_output_mon.last_symbol, eventptr->event.parameter.symbol, MAX_CHAR_BUF_SIZE);
+            break;
+
+        case POSTPONED_MIDI_MAP:
+            if (eventptr->event.midi_map.effect_id == ignored_effect_id)
+                continue;
+            snprintf(buf, MAX_CHAR_BUF_SIZE, "midi_mapped %i %s %i %i %f %f %f", eventptr->event.midi_map.effect_id,
+                                                                                 eventptr->event.midi_map.symbol,
+                                                                                 eventptr->event.midi_map.channel,
+                                                                                 eventptr->event.midi_map.controller,
+                                                                                 eventptr->event.midi_map.value,
+                                                                                 eventptr->event.midi_map.minimum,
+                                                                                 eventptr->event.midi_map.maximum);
+            socket_send_feedback(buf);
             break;
 
         case POSTPONED_PROGRAM_LISTEN:
             if (got_midi_program)
                 continue;
 
-            snprintf(buf, MAX_CHAR_BUF_SIZE, "midi_program %i", eventptr->event.controller);
+            snprintf(buf, MAX_CHAR_BUF_SIZE, "midi_program %i", eventptr->event.program.value);
             socket_send_feedback(buf);
 
-            // ignore next midi program
+            // ignore older midi program changes
             got_midi_program = true;
             break;
 
-        case POSTPONED_MIDI_MAP:
-            snprintf(buf, MAX_CHAR_BUF_SIZE, "midi_mapped %i %s %i %i %f %f %f", eventptr->event.effect_id,
-                                                                                 eventptr->event.symbol,
-                                                                                 eventptr->event.channel,
-                                                                                 eventptr->event.controller,
-                                                                                 eventptr->event.value,
-                                                                                 eventptr->event.minimum,
-                                                                                 eventptr->event.maximum);
+        case POSTPONED_TRANSPORT:
+            if (got_transport)
+                continue;
+
+            snprintf(buf, MAX_CHAR_BUF_SIZE, "transport %i %f", eventptr->event.transport.rolling ? 1 : 0,
+                                                                eventptr->event.transport.bpm);
             socket_send_feedback(buf);
+
+            // ignore older transport changes
+            got_transport = true;
             break;
         }
     }
@@ -1165,16 +1201,10 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
 
             effect->output_control_ports[i]->prev_value = value;
 
-            const postponed_event_t pevent = {
-                POSTPONED_OUTPUT_MONITOR,
-                effect->instance,
-                effect->output_control_ports[i]->symbol,
-                -1, -1,
-                value,
-                0.0f, 0.0f
-            };
-
-            memcpy(&posteventptr->event, &pevent, sizeof(postponed_event_t));
+            posteventptr->event.type = POSTPONED_OUTPUT_MONITOR;
+            posteventptr->event.parameter.effect_id = effect->instance;
+            posteventptr->event.parameter.symbol    = effect->output_control_ports[i]->symbol;
+            posteventptr->event.parameter.value     = value;
 
             pthread_mutex_lock(&g_rtsafe_mutex);
             list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
@@ -1294,11 +1324,9 @@ static void UpdateGlobalJackPosition(enum UpdatePositionFlag flag)
     if (!posteventptr)
         return;
 
-    /*
     posteventptr->event.type = POSTPONED_TRANSPORT;
     posteventptr->event.transport.rolling = g_jack_rolling;
     posteventptr->event.transport.bpm     = g_transport_bpm;
-    */
 
     pthread_mutex_lock(&g_rtsafe_mutex);
     list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
@@ -1353,13 +1381,8 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
 
             if (posteventptr)
             {
-                const postponed_event_t pevent = {
-                    POSTPONED_PROGRAM_LISTEN,
-                    -1, NULL, -1,
-                    event.buffer[1],
-                    0.0f, 0.0f, 0.0f
-                };
-                memcpy(&posteventptr->event, &pevent, sizeof(postponed_event_t));
+                posteventptr->event.type = POSTPONED_PROGRAM_LISTEN;
+                posteventptr->event.program.value = event.buffer[1];
 
                 pthread_mutex_lock(&g_rtsafe_mutex);
                 list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
@@ -1411,15 +1434,10 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
 
                 if (posteventptr)
                 {
-                    const postponed_event_t pevent = {
-                        POSTPONED_PARAM_SET,
-                        g_midi_cc_list[j].effect_id,
-                        g_midi_cc_list[j].symbol,
-                        -1, -1,
-                        value,
-                        0.0f, 0.0f
-                    };
-                    memcpy(&posteventptr->event, &pevent, sizeof(postponed_event_t));
+                    posteventptr->event.type = POSTPONED_PARAM_SET;
+                    posteventptr->event.parameter.effect_id = g_midi_cc_list[j].effect_id;
+                    posteventptr->event.parameter.symbol    = g_midi_cc_list[j].symbol;
+                    posteventptr->event.parameter.value     = value;
 
                     pthread_mutex_lock(&g_rtsafe_mutex);
                     list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
@@ -1462,17 +1480,14 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
 
                 if (posteventptr)
                 {
-                    const postponed_event_t pevent = {
-                        POSTPONED_MIDI_MAP,
-                        effect_id,
-                        symbol,
-                        channel,
-                        controller,
-                        value,
-                        minimum,
-                        maximum
-                    };
-                    memcpy(&posteventptr->event, &pevent, sizeof(postponed_event_t));
+                    posteventptr->event.type = POSTPONED_MIDI_MAP;
+                    posteventptr->event.midi_map.effect_id  = effect_id;
+                    posteventptr->event.midi_map.symbol     = symbol;
+                    posteventptr->event.midi_map.channel    = channel;
+                    posteventptr->event.midi_map.controller = controller;
+                    posteventptr->event.midi_map.value      = value;
+                    posteventptr->event.midi_map.minimum    = minimum;
+                    posteventptr->event.midi_map.maximum    = maximum;
 
                     pthread_mutex_lock(&g_rtsafe_mutex);
                     list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
@@ -1896,15 +1911,10 @@ static void CCDataUpdate(void* arg)
         if (posteventptr == NULL)
             continue;
 
-        const postponed_event_t pevent = {
-            POSTPONED_PARAM_SET,
-            assignment->effect_id,
-            assignment->port->symbol,
-            -1, -1,
-            data->value,
-            0.0f, 0.0f
-        };
-        memcpy(&posteventptr->event, &pevent, sizeof(postponed_event_t));
+        posteventptr->event.type = POSTPONED_PARAM_SET;
+        posteventptr->event.parameter.effect_id = assignment->effect_id;
+        posteventptr->event.parameter.symbol    = assignment->port->symbol;
+        posteventptr->event.parameter.value     = data->value;
 
         pthread_mutex_lock(&g_rtsafe_mutex);
         list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
