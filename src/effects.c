@@ -1522,6 +1522,7 @@ static void JackTimebase(jack_transport_state_t state, jack_nframes_t nframes,
 
         double abs_beat, abs_tick;
 
+#ifdef HAVE_HYLIA
         if (hylia_enabled)
         {
             if (g_hylia_timeinfo.beat >= 0.0)
@@ -1538,6 +1539,7 @@ static void JackTimebase(jack_transport_state_t state, jack_nframes_t nframes,
             }
         }
         else
+#endif
         {
             const double min = pos->frame / ((double) pos->frame_rate * 60.0);
             abs_tick = min * pos->beats_per_minute * TRANSPORT_TICKS_PER_BEAT;
