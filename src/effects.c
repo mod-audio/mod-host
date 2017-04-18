@@ -3564,6 +3564,18 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
     assignment.unit  = unit;
     assignment.list_count = scalepoints_count;
 
+    if (port->hints & HINT_TOGGLE)
+        assignment.mode = CC_MODE_TOGGLE;
+    else if (port->hints & HINT_INTEGER)
+        assignment.mode = CC_MODE_INTEGER;
+    else
+        assignment.mode = CC_MODE_REAL;
+
+    if (port->hints & HINT_TRIGGER)
+        assignment.mode |= CC_MODE_TRIGGER;
+
+    // note: logarithmic and tap-tempo missing
+
     cc_item_t *item_data;
 
     if (scalepoints_count >= 2)
@@ -3573,7 +3585,7 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
 
         if (assignment.list_items != NULL && item_data != NULL)
         {
-            assignment.mode = CC_MODE_OPTIONS;
+            assignment.mode |= CC_MODE_OPTIONS;
 
             for (int i = 0; i < scalepoints_count; i++)
             {
@@ -3593,11 +3605,6 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
     {
         item_data = NULL;
         assignment.list_items = NULL;
-
-        if (port->hints & HINT_TOGGLE)
-            assignment.mode = CC_MODE_TOGGLE;
-        if (port->hints & HINT_TRIGGER)
-            assignment.mode = CC_MODE_TRIGGER;
     }
 
     if (!strcmp(control_symbol, g_bypass_port_symbol))
