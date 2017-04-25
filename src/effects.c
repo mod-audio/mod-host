@@ -1541,22 +1541,23 @@ static void JackTimebase(jack_transport_state_t state, jack_nframes_t nframes,
         else
 #endif
         {
-            const double min = pos->frame / ((double) pos->frame_rate * 60.0);
+            const double min = (double)pos->frame / (double)(g_sample_rate * 60);
             abs_tick = min * pos->beats_per_minute * TRANSPORT_TICKS_PER_BEAT;
             abs_beat = abs_tick / TRANSPORT_TICKS_PER_BEAT;
             g_transport_reset = false;
         }
 
         pos->bar  = (int32_t)(floor(abs_beat / TRANSPORT_BEATS_PER_BAR) + 0.5);
-        pos->beat = abs_beat - (pos->bar * TRANSPORT_BEATS_PER_BAR_i) + 1;
+        pos->beat = (int32_t)(abs_beat - (double)(pos->bar * TRANSPORT_BEATS_PER_BAR_i) + 1.5);
         pos->bar_start_tick = pos->bar * TRANSPORT_BEATS_PER_BAR * TRANSPORT_TICKS_PER_BEAT;
-        pos->bar++;
+        ++pos->bar;
 
-        tick = abs_tick - pos->bar_start_tick;
+        tick = abs_tick - (abs_beat * pos->ticks_per_beat);
     }
     else
     {
-        tick = g_transport_tick + nframes * TRANSPORT_TICKS_PER_BEAT * pos->beats_per_minute / (pos->frame_rate * 60);
+        tick = g_transport_tick +
+              (nframes * TRANSPORT_TICKS_PER_BEAT * pos->beats_per_minute / (double)(g_sample_rate * 60));
 
         while (tick >= TRANSPORT_TICKS_PER_BEAT)
         {
@@ -1565,8 +1566,8 @@ static void JackTimebase(jack_transport_state_t state, jack_nframes_t nframes,
             if (++pos->beat > TRANSPORT_BEATS_PER_BAR_i)
             {
                 pos->beat = 1;
-                ++pos->bar;
                 pos->bar_start_tick += TRANSPORT_BEATS_PER_BAR * TRANSPORT_TICKS_PER_BEAT;
+                ++pos->bar;
             }
         }
     }
