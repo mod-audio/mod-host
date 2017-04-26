@@ -110,13 +110,16 @@
 ************************************************************************************************************************
 */
 
-#define REMOVE_ALL      (-1)
+#define REMOVE_ALL        (-1)
+#define GLOBAL_EFFECT_ID  (9995)
 
 #define ASSIGNMENT_UNUSED -1 // item was used before, so there might other valid items after this one
 #define ASSIGNMENT_NULL   -2 // item never used before, thus signaling the end of valid items
 
 #define BYPASS_PORT_SYMBOL  ":bypass"
 #define PRESETS_PORT_SYMBOL ":presets"
+#define BPM_PORT_SYMBOL     ":bpm"
+#define ROLLING_PORT_SYMBOL ":rolling"
 
 // use pitchbend as midi cc, with an invalid MIDI controller number
 #define MIDI_PITCHBEND_AS_CC 131
@@ -485,6 +488,7 @@ static LV2_Feature g_buf_size_features[3] = {
     { LV2_BUF_SIZE__boundedBlockLength, NULL }
     };
 
+/* MIDI Learn */
 static int g_midi_program_listen;
 static pthread_mutex_t g_midi_learning_mutex;
 
@@ -496,6 +500,8 @@ static hylia_time_info_t g_hylia_timeinfo;
 
 static const char* const g_bypass_port_symbol = BYPASS_PORT_SYMBOL;
 static const char* const g_presets_port_symbol = PRESETS_PORT_SYMBOL;
+static const char* const g_bpm_port_symbol = BPM_PORT_SYMBOL;
+static const char* const g_rolling_port_symbol = ROLLING_PORT_SYMBOL;
 
 
 /*
@@ -1240,55 +1246,70 @@ static float UpdateValueFromMidi(midi_cc_t* mcc, uint16_t mvalue, bool highres)
 
         return bypassed ? 1.0f : 0.0f;
     }
+
+    const port_t* port = mcc->port;
+    float value;
+
+    if (port->hints & HINT_TRIGGER)
+    {
+        // now triggered, always maximum
+        value = port->max_value;
+    }
+    else if (port->hints & HINT_TOGGLE)
+    {
+        // toggle, always min or max
+        value = mvalue >= mvaluediv ? port->max_value : port->min_value;
+
+        if (mcc->effect_id == GLOBAL_EFFECT_ID && !strcmp(mcc->symbol, g_rolling_port_symbol))
+        {
+            if (mvalue >= mvaluediv)
+            {
+                jack_transport_start(g_jack_global_client);
+            }
+            else
+            {
+                jack_transport_stop(g_jack_global_client);
+                jack_transport_locate(g_jack_global_client, 0);
+            }
+        }
+    }
     else
     {
-        const port_t* port;
-        float value;
+        // get percentage by dividing by max MIDI value
+        value = (float)mvalue;
 
-        port = mcc->port;
+        if (highres)
+            value /= 16383.0f;
+        else
+            value /= 127.0f;
 
-        if (port->hints & HINT_TRIGGER)
+        // make sure bounds are correct
+        if (value < 0.0f)
+            value = 0.0f;
+        else if (value > 1.0f)
+            value = 1.0f;
+
+        // real value
+        if (port->hints & HINT_LOGARITHMIC)
         {
-            // now triggered, always maximum
-            value = port->max_value;
-        }
-        else if (port->hints & HINT_TOGGLE)
-        {
-            // toggle, always min or max
-            value = mvalue >= mvaluediv ? port->max_value : port->min_value;
+            // FIXME: calculate value properly (don't do log on custom scale, use port min/max then adjust)
+            value = mcc->minimum * powf(mcc->maximum/mcc->minimum, value);
         }
         else
         {
-            // get percentage by dividing by max MIDI value
-            value = (float)mvalue;
-
-            if (highres)
-                value /= 16383.0f;
-            else
-                value /= 127.0f;
-
-            // make sure bounds are correct
-            if (value < 0.0f)
-                value = 0.0f;
-            else if (value > 1.0f)
-                value = 1.0f;
-
-            // real value
-            if (port->hints & HINT_LOGARITHMIC)
-            {
-                // FIXME: calculate value properly (don't do log on custom scale, use port min/max then adjust)
-                value = mcc->minimum * powf(mcc->maximum/mcc->minimum, value);
-            }
-            else
-            {
-                value = mcc->minimum + (mcc->maximum - mcc->minimum) * value;
-            }
+            value = mcc->minimum + (mcc->maximum - mcc->minimum) * value;
         }
 
-        // set param value
-        *(port->buffer) = value;
-        return value;
+        if (mcc->effect_id == GLOBAL_EFFECT_ID && !strcmp(mcc->symbol, g_bpm_port_symbol))
+        {
+            g_transport_bpm = value;
+            g_transport_reset = true;
+        }
     }
+
+    // set param value
+    *(port->buffer) = value;
+    return value;
 }
 
 static void UpdateGlobalJackPosition(enum UpdatePositionFlag flag)
@@ -1726,7 +1747,7 @@ static void SetParameterFromState(const char* symbol, void* user_data,
     }
     else
     {
-        printf("mod-host SetParameterFromState called with unknown type: %u %u\n", type, size);
+        fprintf(stderr, "SetParameterFromState called with unknown type: %u %u\n", type, size);
         return;
     }
 
@@ -1905,6 +1926,26 @@ static void CCDataUpdate(void* arg)
             if (effect->enabled_index >= 0)
                 *(effect->ports[effect->enabled_index]->buffer) = (data->value > 0.5f) ? 0.0f : 1.0f;
         }
+        else if (assignment->effect_id == GLOBAL_EFFECT_ID)
+        {
+            if (!strcmp(assignment->port->symbol, g_bpm_port_symbol))
+            {
+                g_transport_bpm = data->value;
+                g_transport_reset = true;
+            }
+            else if (!strcmp(assignment->port->symbol, g_rolling_port_symbol))
+            {
+                if (data->value > 0.5f)
+                {
+                    jack_transport_start(g_jack_global_client);
+                }
+                else
+                {
+                    jack_transport_stop(g_jack_global_client);
+                    jack_transport_locate(g_jack_global_client, 0);
+                }
+            }
+        }
 
         *(assignment->port->buffer) = data->value;
 
@@ -2012,6 +2053,79 @@ int effects_init(void* client)
     g_transport_reset = true;
     g_transport_bpm = 120.0;
     g_transport_tick = 0.0;
+
+    /* this fails to build if GLOBAL_EFFECT_ID >= MAX_INSTANCES */
+    char global_effect_id_static_check[GLOBAL_EFFECT_ID < MAX_INSTANCES?1:-1];
+
+    /* global ports */
+    {
+        port_t **ports = (port_t **) calloc(2, sizeof(port_t *));
+
+        port_t *port_bpm = ports[0] = calloc(1, sizeof(port_t));
+        port_bpm->buffer = &port_bpm->prev_value;
+        port_bpm->buffer_count = 1;
+        port_bpm->min_value = 0.0f;
+        port_bpm->max_value = 1.0f;
+        port_bpm->def_value = 0.0f;
+        port_bpm->type = TYPE_CONTROL;
+        port_bpm->flow = FLOW_INPUT;
+        port_bpm->hints = 0x0;
+        port_bpm->symbol = g_bpm_port_symbol;
+
+        port_t *port_rolling = ports[1] = calloc(1, sizeof(port_t));
+        port_rolling->buffer = &port_rolling->prev_value;
+        port_rolling->buffer_count = 1;
+        port_rolling->min_value = 0.0f;
+        port_rolling->max_value = 1.0f;
+        port_rolling->def_value = 0.0f;
+        port_rolling->type = TYPE_CONTROL;
+        port_rolling->flow = FLOW_INPUT;
+        port_rolling->hints = HINT_TOGGLE;
+        port_rolling->symbol = g_rolling_port_symbol;
+
+        effect_t *effect = &g_effects[GLOBAL_EFFECT_ID];
+        memset(effect, 0, sizeof(effect_t));
+
+        effect->instance = GLOBAL_EFFECT_ID;
+        effect->jack_client = g_jack_global_client;
+
+        effect->ports = effect->control_ports = effect->input_control_ports = ports;
+        effect->ports_count = effect->control_ports_count = effect->input_control_ports_count = 2;
+
+        effect->control_index = -1;
+        effect->enabled_index = -1;
+        effect->freewheel_index = -1;
+        effect->bpm_index = -1;
+        effect->speed_index = -1;
+
+        /* Default value of bypass */
+        effect->bypass = 0.0f;
+        effect->was_bypassed = false;
+
+        effect->bypass_port.buffer_count = 1;
+        effect->bypass_port.buffer = &effect->bypass;
+        effect->bypass_port.min_value = 0.0f;
+        effect->bypass_port.max_value = 1.0f;
+        effect->bypass_port.def_value = 0.0f;
+        effect->bypass_port.prev_value = 0.0f;
+        effect->bypass_port.type = TYPE_CONTROL;
+        effect->bypass_port.flow = FLOW_INPUT;
+        effect->bypass_port.hints = HINT_TOGGLE;
+        effect->bypass_port.symbol = g_bypass_port_symbol;
+
+        /* virtual presets port */
+        effect->preset_value = 0.0f;
+        effect->presets_port.buffer_count = 1;
+        effect->presets_port.buffer = &effect->preset_value;
+        effect->presets_port.min_value = 0.0f;
+        effect->presets_port.max_value = 1.0f;
+        effect->presets_port.def_value = 0.0f;
+        effect->presets_port.prev_value = 0.0f;
+        effect->presets_port.type = TYPE_CONTROL;
+        effect->presets_port.flow = FLOW_INPUT;
+        effect->presets_port.hints = HINT_ENUMERATION|HINT_INTEGER;
+        effect->presets_port.symbol = g_presets_port_symbol;
+    }
 
     /* Set jack callbacks */
     jack_set_thread_init_callback(g_jack_global_client, JackThreadInit, NULL);
@@ -2213,6 +2327,8 @@ int effects_init(void* client)
     }
 
     return SUCCESS;
+
+    UNUSED_PARAM(global_effect_id_static_check);
 }
 
 int effects_finish(int close_client)
@@ -2241,6 +2357,14 @@ int effects_finish(int close_client)
     sem_destroy(&g_postevents_semaphore);
     pthread_mutex_destroy(&g_rtsafe_mutex);
     pthread_mutex_destroy(&g_midi_learning_mutex);
+
+    effect_t *effect = &g_effects[GLOBAL_EFFECT_ID];
+    if (effect->ports)
+    {
+        for (unsigned int i=0; i < effect->ports_count; i++)
+            free(effect->ports[i]);
+        free(effect->ports);
+    }
 
 #ifdef HAVE_HYLIA
     hylia_cleanup(g_hylia_instance);
