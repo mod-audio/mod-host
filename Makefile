@@ -22,7 +22,7 @@ LDFLAGS += -Wl,--no-undefined
 
 # debug mode compiler and linker flags
 ifeq ($(DEBUG), 1)
-   CFLAGS += -O0 -g -Wall -Wextra -c -DDEBUG -std=gnu99
+   CFLAGS += -O0 -g -Wall -Wextra -c -DDEBUG
    LDFLAGS +=
 else
    CFLAGS += -fvisibility=hidden
