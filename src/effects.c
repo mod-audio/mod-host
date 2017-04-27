@@ -1301,10 +1301,7 @@ static float UpdateValueFromMidi(midi_cc_t* mcc, uint16_t mvalue, bool highres)
         }
 
         if (mcc->effect_id == GLOBAL_EFFECT_ID && !strcmp(mcc->symbol, g_bpm_port_symbol))
-        {
             g_transport_bpm = value;
-            g_transport_reset = true;
-        }
     }
 
     // set param value
@@ -1325,15 +1322,8 @@ static void UpdateGlobalJackPosition(enum UpdatePositionFlag flag)
 
     g_jack_rolling = (jack_transport_query(g_jack_global_client, &g_jack_pos) == JackTransportRolling);
 
-    if (g_jack_pos.valid & JackPositionBBT)
-    {
-        if (!g_transport_reset)
-            g_transport_bpm = g_jack_pos.beats_per_minute;
-    }
-    else
-    {
+    if ((g_jack_pos.valid & JackPositionBBT) == 0x0)
         g_jack_pos.beats_per_minute = g_transport_bpm;
-    }
 
     if (flag == UPDATE_POSTION_SKIP)
         return;
@@ -1533,13 +1523,14 @@ static void JackTimebase(jack_transport_state_t state, jack_nframes_t nframes,
 {
     double tick;
 
+    pos->beats_per_minute = g_transport_bpm;
+
     if (new_pos || g_transport_reset)
     {
         pos->valid = JackPositionBBT;
         pos->beat_type = 4.0f;
         pos->beats_per_bar = TRANSPORT_BEATS_PER_BAR;
         pos->ticks_per_beat = TRANSPORT_TICKS_PER_BEAT;
-        pos->beats_per_minute = g_transport_bpm;
 
         double abs_beat, abs_tick;
 
@@ -1931,7 +1922,6 @@ static void CCDataUpdate(void* arg)
             if (!strcmp(assignment->port->symbol, g_bpm_port_symbol))
             {
                 g_transport_bpm = data->value;
-                g_transport_reset = true;
             }
             else if (!strcmp(assignment->port->symbol, g_rolling_port_symbol))
             {
@@ -4302,7 +4292,6 @@ int effects_link_enable(int enable)
 void effects_transport(int rolling, double bpm)
 {
     g_transport_bpm = bpm;
-    g_transport_reset = true;
 
 #ifdef HAVE_HYLIA
     if (g_hylia_instance)
@@ -4330,6 +4319,7 @@ void effects_transport(int rolling, double bpm)
             jack_transport_locate(g_jack_global_client, 0);
         }
         // g_jack_rolling is updated on the next jack callback
+        g_transport_reset = true;
     }
 }
 
