@@ -118,6 +118,7 @@
 
 #define BYPASS_PORT_SYMBOL  ":bypass"
 #define PRESETS_PORT_SYMBOL ":presets"
+#define BPB_PORT_SYMBOL     ":bpb"
 #define BPM_PORT_SYMBOL     ":bpm"
 #define ROLLING_PORT_SYMBOL ":rolling"
 
@@ -125,9 +126,7 @@
 #define MIDI_PITCHBEND_AS_CC 131
 
 // transport defaults
-#define TRANSPORT_BEATS_PER_BAR   4.0
-#define TRANSPORT_BEATS_PER_BAR_i 4
-#define TRANSPORT_TICKS_PER_BEAT  1920.0
+#define TRANSPORT_TICKS_PER_BEAT 1920.0
 
 
 /*
@@ -286,6 +285,7 @@ typedef struct EFFECT_T {
     int32_t control_index; // control/event input
     int32_t enabled_index;
     int32_t freewheel_index;
+    int32_t bpb_index;
     int32_t bpm_index;
     int32_t speed_index;
 
@@ -303,6 +303,7 @@ typedef struct EFFECT_T {
     // previous transport state
     bool transport_rolling;
     uint32_t transport_frame;
+    double transport_bpb;
     double transport_bpm;
 
     // current and previous bypass state
@@ -385,6 +386,7 @@ typedef struct POSTPONED_MIDI_MAP_EVENT_T {
 
 typedef struct POSTPONED_TRANSPORT_EVENT_T {
     bool rolling;
+    float bpb;
     float bpm;
 } postponed_transport_event_t;
 
@@ -458,6 +460,7 @@ static size_t g_midi_buffer_size;
 static jack_port_t *g_midi_in_port;
 static jack_position_t g_jack_pos;
 static bool g_jack_rolling;
+static volatile double g_transport_bpb;
 static volatile double g_transport_bpm;
 static volatile bool g_transport_reset;
 static double g_transport_tick;
@@ -500,6 +503,7 @@ static hylia_time_info_t g_hylia_timeinfo;
 
 static const char* const g_bypass_port_symbol = BYPASS_PORT_SYMBOL;
 static const char* const g_presets_port_symbol = PRESETS_PORT_SYMBOL;
+static const char* const g_bpb_port_symbol = BPB_PORT_SYMBOL;
 static const char* const g_bpm_port_symbol = BPM_PORT_SYMBOL;
 static const char* const g_rolling_port_symbol = ROLLING_PORT_SYMBOL;
 
@@ -770,8 +774,9 @@ static void RunPostPonedEvents(int ignored_effect_id)
             if (got_transport)
                 continue;
 
-            snprintf(buf, MAX_CHAR_BUF_SIZE, "transport %i %f", eventptr->event.transport.rolling ? 1 : 0,
-                                                                eventptr->event.transport.bpm);
+            snprintf(buf, MAX_CHAR_BUF_SIZE, "transport %i %f %f", eventptr->event.transport.rolling ? 1 : 0,
+                                                                   eventptr->event.transport.bpb,
+                                                                   eventptr->event.transport.bpm);
             socket_send_feedback(buf);
 
             // ignore older transport changes
@@ -844,16 +849,19 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
 
         if ((pos.valid & JackPositionBBT) == 0)
         {
+            pos.beats_per_bar    = g_transport_bpb;
             pos.beats_per_minute = g_transport_bpm;
         }
 
         if (effect->transport_rolling != rolling ||
             effect->transport_frame != pos.frame ||
+            effect->transport_bpb != (double)pos.beats_per_bar ||
             effect->transport_bpm != pos.beats_per_minute ||
             (effect->bypass < 0.5f && effect->was_bypassed))
         {
             effect->transport_rolling = rolling;
             effect->transport_frame = pos.frame;
+            effect->transport_bpb = pos.beats_per_bar;
             effect->transport_bpm = pos.beats_per_minute;
 
             LV2_Atom_Forge forge = g_lv2_atom_forge;
@@ -898,6 +906,10 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
         {
             lv2_pos->size = 0;
         }
+    }
+    if (effect->bpb_index >= 0)
+    {
+        *(effect->ports[effect->bpb_index]->buffer) = g_transport_bpb;
     }
     if (effect->bpm_index >= 0)
     {
@@ -1300,8 +1312,13 @@ static float UpdateValueFromMidi(midi_cc_t* mcc, uint16_t mvalue, bool highres)
             value = mcc->minimum + (mcc->maximum - mcc->minimum) * value;
         }
 
-        if (mcc->effect_id == GLOBAL_EFFECT_ID && !strcmp(mcc->symbol, g_bpm_port_symbol))
-            g_transport_bpm = value;
+        if (mcc->effect_id == GLOBAL_EFFECT_ID)
+        {
+            if (!strcmp(mcc->symbol, g_bpb_port_symbol))
+                g_transport_bpb = value;
+            else if (!strcmp(mcc->symbol, g_bpm_port_symbol))
+                g_transport_bpm = value;
+        }
     }
 
     // set param value
@@ -1312,22 +1329,27 @@ static float UpdateValueFromMidi(midi_cc_t* mcc, uint16_t mvalue, bool highres)
 static void UpdateGlobalJackPosition(enum UpdatePositionFlag flag)
 {
     bool old_rolling;
-    double old_bpm;
+    double old_bpb, old_bpm;
 
     if (flag != UPDATE_POSTION_SKIP)
     {
         old_rolling = g_jack_rolling;
+        old_bpb = g_transport_bpb;
         old_bpm = g_transport_bpm;
     }
 
     g_jack_rolling = (jack_transport_query(g_jack_global_client, &g_jack_pos) == JackTransportRolling);
 
     if ((g_jack_pos.valid & JackPositionBBT) == 0x0)
+    {
+        g_jack_pos.beats_per_bar    = g_transport_bpb;
         g_jack_pos.beats_per_minute = g_transport_bpm;
+    }
 
     if (flag == UPDATE_POSTION_SKIP)
         return;
-    if (flag == UPDATE_POSTION_IF_CHANGED && old_rolling == g_jack_rolling && old_bpm == g_transport_bpm)
+    if (flag == UPDATE_POSTION_IF_CHANGED &&
+        old_rolling == g_jack_rolling && old_bpb == g_transport_bpb && old_bpm == g_transport_bpm)
         return;
 
     postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
@@ -1337,6 +1359,7 @@ static void UpdateGlobalJackPosition(enum UpdatePositionFlag flag)
 
     posteventptr->event.type = POSTPONED_TRANSPORT;
     posteventptr->event.transport.rolling = g_jack_rolling;
+    posteventptr->event.transport.bpb     = g_transport_bpb;
     posteventptr->event.transport.bpm     = g_transport_bpm;
 
     pthread_mutex_lock(&g_rtsafe_mutex);
@@ -1359,11 +1382,16 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
     if (hylia_enabled)
     {
         hylia_process(g_hylia_instance, nframes, &g_hylia_timeinfo);
+        const double new_bpb = g_hylia_timeinfo.beatsPerBar;
         const double new_bpm = g_hylia_timeinfo.beatsPerMinute;
 
+        if (new_bpb > 0.0 && (g_transport_bpb != new_bpb))
+        {
+            g_transport_bpb = new_bpb;
+            pos_flag = UPDATE_POSTION_FORCED;
+        }
         if (new_bpm > 0.0 && (g_transport_bpm != new_bpm))
         {
-            // force sending changes to UI if hylia bpm changed
             g_transport_bpm = new_bpm;
             pos_flag = UPDATE_POSTION_FORCED;
         }
@@ -1523,13 +1551,15 @@ static void JackTimebase(jack_transport_state_t state, jack_nframes_t nframes,
 {
     double tick;
 
+    pos->beats_per_bar = g_transport_bpb;
     pos->beats_per_minute = g_transport_bpm;
+
+    const int32_t beats_per_bar_int = (int32_t)(pos->beats_per_bar + 0.5f);
 
     if (new_pos || g_transport_reset)
     {
         pos->valid = JackPositionBBT;
         pos->beat_type = 4.0f;
-        pos->beats_per_bar = TRANSPORT_BEATS_PER_BAR;
         pos->ticks_per_beat = TRANSPORT_TICKS_PER_BEAT;
 
         double abs_beat, abs_tick;
@@ -1559,9 +1589,9 @@ static void JackTimebase(jack_transport_state_t state, jack_nframes_t nframes,
             g_transport_reset = false;
         }
 
-        pos->bar  = (int32_t)(floor(abs_beat / TRANSPORT_BEATS_PER_BAR) + 0.5);
-        pos->beat = (int32_t)(abs_beat - (double)(pos->bar * TRANSPORT_BEATS_PER_BAR_i) + 1.5);
-        pos->bar_start_tick = pos->bar * TRANSPORT_BEATS_PER_BAR * TRANSPORT_TICKS_PER_BEAT;
+        pos->bar  = (int32_t)(floor(abs_beat / pos->beats_per_bar) + 0.5);
+        pos->beat = (int32_t)(abs_beat - (double)(pos->bar * beats_per_bar_int) + 1.5);
+        pos->bar_start_tick = pos->bar * pos->beats_per_bar * TRANSPORT_TICKS_PER_BEAT;
         ++pos->bar;
 
         tick = abs_tick - (abs_beat * pos->ticks_per_beat);
@@ -1575,10 +1605,10 @@ static void JackTimebase(jack_transport_state_t state, jack_nframes_t nframes,
         {
             tick -= TRANSPORT_TICKS_PER_BEAT;
 
-            if (++pos->beat > TRANSPORT_BEATS_PER_BAR_i)
+            if (++pos->beat > beats_per_bar_int)
             {
                 pos->beat = 1;
-                pos->bar_start_tick += TRANSPORT_BEATS_PER_BAR * TRANSPORT_TICKS_PER_BEAT;
+                pos->bar_start_tick += pos->beats_per_bar * TRANSPORT_TICKS_PER_BEAT;
                 ++pos->bar;
             }
         }
@@ -1919,7 +1949,11 @@ static void CCDataUpdate(void* arg)
         }
         else if (assignment->effect_id == GLOBAL_EFFECT_ID)
         {
-            if (!strcmp(assignment->port->symbol, g_bpm_port_symbol))
+            if (!strcmp(assignment->port->symbol, g_bpb_port_symbol))
+            {
+                g_transport_bpb = data->value;
+            }
+            else if (!strcmp(assignment->port->symbol, g_bpm_port_symbol))
             {
                 g_transport_bpm = data->value;
             }
@@ -2041,6 +2075,7 @@ int effects_init(void* client)
 
     /* initial transport state */
     g_transport_reset = true;
+    g_transport_bpb = 4.0;
     g_transport_bpm = 120.0;
     g_transport_tick = 0.0;
 
@@ -2049,9 +2084,20 @@ int effects_init(void* client)
 
     /* global ports */
     {
-        port_t **ports = (port_t **) calloc(2, sizeof(port_t *));
+        port_t **ports = (port_t **) calloc(3, sizeof(port_t *));
 
-        port_t *port_bpm = ports[0] = calloc(1, sizeof(port_t));
+        port_t *port_bpb = ports[0] = calloc(1, sizeof(port_t));
+        port_bpb->buffer = &port_bpb->prev_value;
+        port_bpb->buffer_count = 1;
+        port_bpb->min_value = 0.0f;
+        port_bpb->max_value = 1.0f;
+        port_bpb->def_value = 0.0f;
+        port_bpb->type = TYPE_CONTROL;
+        port_bpb->flow = FLOW_INPUT;
+        port_bpb->hints = 0x0;
+        port_bpb->symbol = g_bpb_port_symbol;
+
+        port_t *port_bpm = ports[1] = calloc(1, sizeof(port_t));
         port_bpm->buffer = &port_bpm->prev_value;
         port_bpm->buffer_count = 1;
         port_bpm->min_value = 0.0f;
@@ -2062,7 +2108,7 @@ int effects_init(void* client)
         port_bpm->hints = 0x0;
         port_bpm->symbol = g_bpm_port_symbol;
 
-        port_t *port_rolling = ports[1] = calloc(1, sizeof(port_t));
+        port_t *port_rolling = ports[2] = calloc(1, sizeof(port_t));
         port_rolling->buffer = &port_rolling->prev_value;
         port_rolling->buffer_count = 1;
         port_rolling->min_value = 0.0f;
@@ -2080,11 +2126,12 @@ int effects_init(void* client)
         effect->jack_client = g_jack_global_client;
 
         effect->ports = effect->control_ports = effect->input_control_ports = ports;
-        effect->ports_count = effect->control_ports_count = effect->input_control_ports_count = 2;
+        effect->ports_count = effect->control_ports_count = effect->input_control_ports_count = 3;
 
         effect->control_index = -1;
         effect->enabled_index = -1;
         effect->freewheel_index = -1;
+        effect->bpb_index = -1;
         effect->bpm_index = -1;
         effect->speed_index = -1;
 
@@ -2131,7 +2178,7 @@ int effects_init(void* client)
 
     if (g_hylia_instance)
     {
-        hylia_set_beats_per_bar(g_hylia_instance, 4.0);
+        hylia_set_beats_per_bar(g_hylia_instance, g_transport_bpb);
         hylia_set_beats_per_minute(g_hylia_instance, g_transport_bpm);
         hylia_set_output_latency(g_hylia_instance, GetHyliaOutputLatency());
     }
@@ -2390,7 +2437,7 @@ int effects_add(const char *uid, int instance)
     LilvInstance *lilv_instance;
     LilvNode *plugin_uri;
     LilvNode *lilv_input, *lilv_control_in, *lilv_enabled, *lilv_freeWheeling, *lilv_output;
-    LilvNode *lilv_timePosition, *lilv_timeBeatsPerMinute, *lilv_timeSpeed;
+    LilvNode *lilv_timePosition, *lilv_timeBeatsPerBar, *lilv_timeBeatsPerMinute, *lilv_timeSpeed;
     LilvNode *lilv_enumeration, *lilv_integer, *lilv_toggled, *lilv_trigger, *lilv_logarithmic;
     LilvNode *lilv_control, *lilv_audio, *lilv_cv, *lilv_event, *lilv_midi;
     LilvNode *lilv_default, *lilv_mod_default;
@@ -2418,6 +2465,7 @@ int effects_add(const char *uid, int instance)
     lilv_enumeration = NULL;
     lilv_freeWheeling = NULL;
     lilv_timePosition = NULL;
+    lilv_timeBeatsPerBar = NULL;
     lilv_timeBeatsPerMinute = NULL;
     lilv_timeSpeed = NULL;
     lilv_integer = NULL;
@@ -2534,6 +2582,7 @@ int effects_add(const char *uid, int instance)
     lilv_enumeration = lilv_new_uri(g_lv2_data, LV2_CORE__enumeration);
     lilv_freeWheeling = lilv_new_uri(g_lv2_data, LV2_CORE__freeWheeling);
     lilv_timePosition = lilv_new_uri(g_lv2_data, LV2_TIME__Position);
+    lilv_timeBeatsPerBar = lilv_new_uri(g_lv2_data, LV2_TIME__beatsPerBar);
     lilv_timeBeatsPerMinute = lilv_new_uri(g_lv2_data, LV2_TIME__beatsPerMinute);
     lilv_timeSpeed = lilv_new_uri(g_lv2_data, LV2_TIME__speed);
     lilv_integer = lilv_new_uri(g_lv2_data, LV2_CORE__integer);
@@ -2833,6 +2882,17 @@ int effects_add(const char *uid, int instance)
         effect->freewheel_index = -1;
     }
 
+    const LilvPort* bpb_port = lilv_plugin_get_port_by_designation(plugin, lilv_input, lilv_timeBeatsPerBar);
+    if (bpb_port)
+    {
+        effect->bpb_index = lilv_port_get_index(plugin, bpb_port);
+        *(effect->ports[effect->bpb_index]->buffer) = g_transport_bpb;
+    }
+    else
+    {
+        effect->bpb_index = -1;
+    }
+
     const LilvPort* bpm_port = lilv_plugin_get_port_by_designation(plugin, lilv_input, lilv_timeBeatsPerMinute);
     if (bpm_port)
     {
@@ -3084,6 +3144,7 @@ int effects_add(const char *uid, int instance)
     lilv_node_free(lilv_enumeration);
     lilv_node_free(lilv_freeWheeling);
     lilv_node_free(lilv_timePosition);
+    lilv_node_free(lilv_timeBeatsPerBar);
     lilv_node_free(lilv_timeBeatsPerMinute);
     lilv_node_free(lilv_timeSpeed);
     lilv_node_free(lilv_integer);
@@ -3139,6 +3200,7 @@ int effects_add(const char *uid, int instance)
         lilv_node_free(lilv_enumeration);
         lilv_node_free(lilv_freeWheeling);
         lilv_node_free(lilv_timePosition);
+        lilv_node_free(lilv_timeBeatsPerBar);
         lilv_node_free(lilv_timeBeatsPerMinute);
         lilv_node_free(lilv_timeSpeed);
         lilv_node_free(lilv_integer);
@@ -3191,6 +3253,10 @@ int effects_preset_load(int effect_id, const char *uri)
             if (effect->freewheel_index >= 0)
             {
                 *(effect->ports[effect->freewheel_index]->buffer) = 0.0f;
+            }
+            if (effect->bpb_index >= 0)
+            {
+                *(effect->ports[effect->bpb_index]->buffer) = g_transport_bpb;
             }
             if (effect->bpm_index >= 0)
             {
@@ -4289,14 +4355,16 @@ int effects_link_enable(int enable)
     return ERR_LINK_UNAVAILABLE;
 }
 
-void effects_transport(int rolling, double bpm)
+void effects_transport(int rolling, double beats_per_bar, double beats_per_minute)
 {
-    g_transport_bpm = bpm;
+    g_transport_bpb = beats_per_bar;
+    g_transport_bpm = beats_per_minute;
 
 #ifdef HAVE_HYLIA
     if (g_hylia_instance)
     {
-        hylia_set_beats_per_minute(g_hylia_instance, bpm);
+        hylia_set_beats_per_bar(g_hylia_instance, beats_per_bar);
+        hylia_set_beats_per_minute(g_hylia_instance, beats_per_minute);
     }
 #endif
 

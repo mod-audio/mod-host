@@ -481,7 +481,7 @@ static void link_enable_sync(proto_t *proto)
 
 static void transport(proto_t *proto)
 {
-    effects_transport(atoi(proto->list[1]), atof(proto->list[2]));
+    effects_transport(atoi(proto->list[1]), atof(proto->list[2]), atof(proto->list[3]));
     protocol_response("resp 0", proto);
 }
 

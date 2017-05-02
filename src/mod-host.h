@@ -77,7 +77,7 @@
 #define BUNDLE_ADD          "bundle_add %s"
 #define BUNDLE_REMOVE       "bundle_remove %s"
 #define LINK_ENABLE         "link_enable %i"
-#define TRANSPORT           "transport %i %f"
+#define TRANSPORT           "transport %i %f %f"
 #define OUTPUT_DATA_READY   "output_data_ready"
 #define HELP                "help"
 #define QUIT                "quit"

@@ -149,7 +149,7 @@ float effects_jack_cpu_load(void);
 void effects_bundle_add(const char* bundlepath);
 void effects_bundle_remove(const char* bundlepath);
 int effects_link_enable(int enable);
-void effects_transport(int rolling, double bpm);
+void effects_transport(int rolling, double beats_per_bar, double beats_per_minute);
 void effects_output_data_ready(void);
 
 /*
