@@ -1593,6 +1593,9 @@ static void CCDataUpdate(void* arg)
         // invert value if bypass
         if ((is_bypass = !strcmp(assignment->port->symbol, g_bypass_port_symbol)))
             data->value = 1.0f - data->value;
+        // force value to maximum if trigger
+        else if (assignment->port->hints & HINT_TRIGGER)
+            data->value = assignment->port->max_value;
 
         // ignore requests for same value
         if (!floats_differ_enough(*(assignment->port->buffer), data->value))
