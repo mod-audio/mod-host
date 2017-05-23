@@ -22,12 +22,16 @@
 ************************************************************************************************************************
 */
 
+#include <lv2/lv2plug.in/ns/ext/atom/forge.h>
+#include <lv2/lv2plug.in/ns/ext/urid/urid.h>
+
 /*
 ************************************************************************************************************************
 *           LOCAL DEFINES
 ************************************************************************************************************************
 */
 
+#define MAX_ATOM_JSON 16384
 
 /*
 ************************************************************************************************************************
@@ -41,6 +45,14 @@
 *           LOCAL DATA TYPES
 ************************************************************************************************************************
 */
+
+typedef struct {
+    LV2_Atom_Forge*   forge;
+    LV2_URID_Unmap*   unmap;
+    size_t            len;
+    bool              overflow;
+    uint8_t           buf[MAX_ATOM_JSON];
+} ModAtomWriter;
 
 
 /*
@@ -89,3 +101,7 @@ int monitor_stop(void);
 
 int monitor_send(int instance, const char *symbol, float value);
 int monitor_check_condition(int op, float cond_value, float value);
+
+void init_atom_writer (ModAtomWriter* w, LV2_Atom_Forge* forge, LV2_URID_Unmap* unmap);
+int monitor_format_atom (ModAtomWriter* w, int instance, const char *symbol, uint32_t type_urid, uint32_t size, uint8_t* body);
+int monitor_send_atom (ModAtomWriter* w, int instance, const char *symbol, uint32_t type_urid, uint32_t size, uint8_t* body);
