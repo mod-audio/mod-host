@@ -4359,6 +4359,11 @@ int effects_link_enable(int enable)
     return ERR_LINK_UNAVAILABLE;
 }
 
+int effects_processing_enable(int enable)
+{
+    return SUCCESS;
+}
+
 void effects_transport(int rolling, double beats_per_bar, double beats_per_minute)
 {
     g_transport_bpb = beats_per_bar;

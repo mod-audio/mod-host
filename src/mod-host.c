@@ -469,10 +469,18 @@ static void bundle_remove(proto_t *proto)
     protocol_response("resp 0", proto);
 }
 
-static void link_enable_sync(proto_t *proto)
+static void feature_enable(proto_t *proto)
 {
+    const char* feature = proto->list[0];
+    int enabled = atoi(proto->list[1]);
     int resp;
-    resp = effects_link_enable(atoi(proto->list[1]));
+
+    if (!strcmp(feature, "link"))
+        resp = effects_link_enable(enabled);
+    else if (!strcmp(feature, "processing"))
+        resp = effects_processing_enable(enabled);
+    else
+        resp = ERR_INVALID_OPERATION;
 
     char buffer[128];
     sprintf(buffer, "resp %i", resp);
@@ -593,7 +601,7 @@ static int mod_host_init(jack_client_t* client, int socket_port)
     protocol_add_command(SAVE_COMMANDS, save_cb);
     protocol_add_command(BUNDLE_ADD, bundle_add);
     protocol_add_command(BUNDLE_REMOVE, bundle_remove);
-    protocol_add_command(LINK_ENABLE, link_enable_sync);
+    protocol_add_command(FEATURE_ENABLE, feature_enable);
     protocol_add_command(TRANSPORT, transport);
     protocol_add_command(OUTPUT_DATA_READY, output_data_ready);
 
