@@ -3418,6 +3418,9 @@ int effects_remove(int effect_id)
             free(effect->input_audio_ports);
             free(effect->output_audio_ports);
             free(effect->control_ports);
+            if (effect->events_buffer) {
+                jack_ringbuffer_free (effect->events_buffer);
+            }
 
             if (effect->presets)
             {
