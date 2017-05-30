@@ -464,6 +464,7 @@ static volatile double g_transport_bpb;
 static volatile double g_transport_bpm;
 static volatile bool g_transport_reset;
 static double g_transport_tick;
+static bool g_processing_enabled;
 
 /* LV2 and Lilv */
 static LilvWorld *g_lv2_data;
@@ -837,6 +838,28 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
 
     if (arg == NULL) return 0;
     effect = arg;
+
+    if (!g_processing_enabled)
+    {
+        port_t *port;
+        for (i = 0; i < effect->output_audio_ports_count; i++)
+        {
+            memset(jack_port_get_buffer(effect->output_audio_ports[i]->jack_port, nframes),
+                   0, (sizeof(float) * nframes));
+        }
+        for (i = 0; i < effect->output_cv_ports_count; i++)
+        {
+            memset(jack_port_get_buffer(effect->output_cv_ports[i]->jack_port, nframes),
+                   0, (sizeof(float) * nframes));
+        }
+        for (i = 0; i < effect->output_event_ports_count; i++)
+        {
+            port = effect->output_event_ports[i];
+            if (port->jack_port && port->flow == FLOW_OUTPUT && port->type == TYPE_EVENT)
+                jack_midi_clear_buffer(jack_port_get_buffer(port->jack_port, nframes));
+        }
+        return 0;
+    }
 
     /* transport */
     uint8_t pos_buf[256];
@@ -2366,6 +2389,8 @@ int effects_init(void* client)
         jack_free(midihwports);
     }
 
+    g_processing_enabled = true;
+
     return SUCCESS;
 
     UNUSED_PARAM(global_effect_id_static_check);
@@ -2410,6 +2435,8 @@ int effects_finish(int close_client)
     hylia_cleanup(g_hylia_instance);
     g_hylia_instance = NULL;
 #endif
+
+    g_processing_enabled = false;
 
     return SUCCESS;
 }
@@ -4364,6 +4391,7 @@ int effects_link_enable(int enable)
 
 int effects_processing_enable(int enable)
 {
+    g_processing_enabled = enable;
     return SUCCESS;
 }
 
