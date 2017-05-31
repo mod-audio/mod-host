@@ -1306,6 +1306,7 @@ static float UpdateValueFromMidi(midi_cc_t* mcc, uint16_t mvalue, bool highres)
                 jack_transport_stop(g_jack_global_client);
                 jack_transport_locate(g_jack_global_client, 0);
             }
+            g_transport_reset = true;
         }
     }
     else
@@ -1999,6 +2000,7 @@ static void CCDataUpdate(void* arg)
                     jack_transport_stop(g_jack_global_client);
                     jack_transport_locate(g_jack_global_client, 0);
                 }
+                g_transport_reset = true;
             }
         }
 
