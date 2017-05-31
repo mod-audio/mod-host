@@ -26,6 +26,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include <jack/jack.h>
 
@@ -61,6 +62,9 @@ enum Ports {
 typedef struct MONITOR_CLIENT_T {
     jack_client_t *client;
     jack_port_t *ports[PORT_COUNT];
+    bool mono_copy;
+    bool in1_connected;
+    bool in2_connected;
 } monitor_client_t;
 
 /*
@@ -105,15 +109,87 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
 {
     monitor_client_t *const mon = arg;
 
-    memcpy(jack_port_get_buffer(mon->ports[PORT_OUT1], nframes),
-           jack_port_get_buffer(mon->ports[PORT_IN1], nframes),
-           sizeof(float)*nframes);
+    if (mon->in1_connected)
+    {
+        if (mon->in2_connected)
+        {
+            // input1 and input2 have connections
+            memcpy(jack_port_get_buffer(mon->ports[PORT_OUT1], nframes),
+                   jack_port_get_buffer(mon->ports[PORT_IN1], nframes),
+                   sizeof(float)*nframes);
 
-    memcpy(jack_port_get_buffer(mon->ports[PORT_OUT2], nframes),
-           jack_port_get_buffer(mon->ports[PORT_IN2], nframes),
-           sizeof(float)*nframes);
+            memcpy(jack_port_get_buffer(mon->ports[PORT_OUT2], nframes),
+                   jack_port_get_buffer(mon->ports[PORT_IN2], nframes),
+                   sizeof(float)*nframes);
+        }
+        else
+        {
+            // only input1 has connections
+            memcpy(jack_port_get_buffer(mon->ports[PORT_OUT1], nframes),
+                   jack_port_get_buffer(mon->ports[PORT_IN1], nframes),
+                   sizeof(float)*nframes);
+
+            if (mon->mono_copy)
+            {
+                memcpy(jack_port_get_buffer(mon->ports[PORT_OUT2], nframes),
+                       jack_port_get_buffer(mon->ports[PORT_IN1], nframes),
+                       sizeof(float)*nframes);
+            }
+            else
+            {
+                memset(jack_port_get_buffer(mon->ports[PORT_OUT2], nframes),
+                       0, sizeof(float)*nframes);
+            }
+        }
+    }
+    else if (jack_port_connected(mon->ports[PORT_IN2]) > 0)
+    {
+        // only input2 has connections
+        memcpy(jack_port_get_buffer(mon->ports[PORT_OUT2], nframes),
+               jack_port_get_buffer(mon->ports[PORT_IN2], nframes),
+               sizeof(float)*nframes);
+
+        if (mon->mono_copy)
+        {
+            memcpy(jack_port_get_buffer(mon->ports[PORT_OUT1], nframes),
+                   jack_port_get_buffer(mon->ports[PORT_IN2], nframes),
+                   sizeof(float)*nframes);
+        }
+        else
+        {
+            memset(jack_port_get_buffer(mon->ports[PORT_OUT1], nframes),
+                   0, sizeof(float)*nframes);
+        }
+    }
+    else
+    {
+        // nothing connected in input1 or input2
+        memset(jack_port_get_buffer(mon->ports[PORT_OUT1], nframes),
+               0, sizeof(float)*nframes);
+
+        memset(jack_port_get_buffer(mon->ports[PORT_OUT2], nframes),
+               0, sizeof(float)*nframes);
+    }
 
     return 0;
+}
+
+static void PortConnectMonitor(jack_port_id_t a, jack_port_id_t b, int connect, void* arg)
+{
+    monitor_client_t *const mon = arg;
+
+    jack_port_t *const port_a = jack_port_by_id(mon->client, a);
+    jack_port_t *const port_b = jack_port_by_id(mon->client, b);
+
+    if (port_a == mon->ports[PORT_IN1] || port_b == mon->ports[PORT_IN1])
+        mon->in1_connected = jack_port_connected(mon->ports[PORT_IN1]) > 0;
+    else if (port_a == mon->ports[PORT_IN2] || port_b == mon->ports[PORT_IN2])
+        mon->in2_connected = jack_port_connected(mon->ports[PORT_IN2]) > 0;
+
+    return;
+
+    // unused
+    (void)connect;
 }
 
 __attribute__ ((visibility("default")))
@@ -138,6 +214,10 @@ int jack_initialize(jack_client_t* client, const char* load_init)
     }
 
     mon->client = client;
+    mon->in1_connected = false;
+    mon->in2_connected = false;
+
+    mon->mono_copy = (load_init && !strcmp(load_init, "1")) || access("/data/jack-mono-copy", F_OK) != -1;
 
     /* Register jack ports */
     mon->ports[PORT_IN1 ] = jack_port_register(client, "in_1", JACK_DEFAULT_AUDIO_TYPE, JackPortIsInput, 0);
@@ -156,6 +236,7 @@ int jack_initialize(jack_client_t* client, const char* load_init)
     }
 
     /* Set jack callbacks */
+    jack_set_port_connect_callback(client, PortConnectMonitor, mon);
     jack_set_process_callback(client, ProcessMonitor, mon);
 
     /* Activate the jack client */
@@ -187,9 +268,6 @@ int jack_initialize(jack_client_t* client, const char* load_init)
         jack_connect(client, ourportname, "mod-peakmeter:in_4");
 
     return 0;
-
-    // unused
-    (void)load_init;
 }
 
 __attribute__ ((visibility("default")))
