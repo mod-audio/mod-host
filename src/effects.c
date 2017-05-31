@@ -1089,20 +1089,28 @@ static float UpdateValueFromMidi(midi_cc_t* mcc, uint16_t mvalue, bool highres)
                 value /= 127.0f;
 
             // make sure bounds are correct
-            if (value < 0.0f)
-                value = 0.0f;
-            else if (value > 1.0f)
-                value = 1.0f;
-
-            // real value
-            if (port->hints & HINT_LOGARITHMIC)
+            if (value <= 0.0f)
             {
-                // FIXME: calculate value properly (don't do log on custom scale, use port min/max then adjust)
-                value = mcc->minimum * powf(mcc->maximum/mcc->minimum, value);
+                value = mcc->minimum;
+            }
+            else if (value >= 1.0f)
+            {
+                value = mcc->maximum;
             }
             else
             {
-                value = mcc->minimum + (mcc->maximum - mcc->minimum) * value;
+                if (port->hints & HINT_LOGARITHMIC)
+                {
+                    // FIXME: calculate value properly (don't do log on custom scale, use port min/max then adjust)
+                    value = mcc->minimum * powf(mcc->maximum/mcc->minimum, value);
+                }
+                else
+                {
+                    value = mcc->minimum + (mcc->maximum - mcc->minimum) * value;
+                }
+
+                if (port->hints & HINT_INTEGER)
+                    value = rintf(value);
             }
         }
 
@@ -1593,9 +1601,6 @@ static void CCDataUpdate(void* arg)
         // invert value if bypass
         if ((is_bypass = !strcmp(assignment->port->symbol, g_bypass_port_symbol)))
             data->value = 1.0f - data->value;
-        // force value to maximum if trigger
-        else if (assignment->port->hints & HINT_TRIGGER)
-            data->value = assignment->port->max_value;
 
         // ignore requests for same value
         if (!floats_differ_enough(*(assignment->port->buffer), data->value))
@@ -3588,8 +3593,7 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
 
         if (assignment.list_items != NULL && item_data != NULL)
         {
-            // FIXME: allow CC_MODE_TOGGLE|CC_MODE_OPTIONS
-            assignment.mode = CC_MODE_OPTIONS;
+            assignment.mode |= CC_MODE_OPTIONS;
 
             for (int i = 0; i < scalepoints_count; i++)
             {
