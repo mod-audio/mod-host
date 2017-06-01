@@ -469,6 +469,30 @@ static void bundle_remove(proto_t *proto)
     protocol_response("resp 0", proto);
 }
 
+static void feature_enable(proto_t *proto)
+{
+    const char* feature = proto->list[0];
+    int enabled = atoi(proto->list[1]);
+    int resp;
+
+    if (!strcmp(feature, "link"))
+        resp = effects_link_enable(enabled);
+    else if (!strcmp(feature, "processing"))
+        resp = effects_processing_enable(enabled);
+    else
+        resp = ERR_INVALID_OPERATION;
+
+    char buffer[128];
+    sprintf(buffer, "resp %i", resp);
+    protocol_response(buffer, proto);
+}
+
+static void transport(proto_t *proto)
+{
+    effects_transport(atoi(proto->list[1]), atof(proto->list[2]), atof(proto->list[3]));
+    protocol_response("resp 0", proto);
+}
+
 static void output_data_ready(proto_t *proto)
 {
     effects_output_data_ready();
@@ -577,6 +601,8 @@ static int mod_host_init(jack_client_t* client, int socket_port)
     protocol_add_command(SAVE_COMMANDS, save_cb);
     protocol_add_command(BUNDLE_ADD, bundle_add);
     protocol_add_command(BUNDLE_REMOVE, bundle_remove);
+    protocol_add_command(FEATURE_ENABLE, feature_enable);
+    protocol_add_command(TRANSPORT, transport);
     protocol_add_command(OUTPUT_DATA_READY, output_data_ready);
 
     /* skip help and quit for internal client */

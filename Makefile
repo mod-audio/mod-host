@@ -22,7 +22,7 @@ LDFLAGS += -Wl,--no-undefined
 
 # debug mode compiler and linker flags
 ifeq ($(DEBUG), 1)
-   CFLAGS += -O0 -g -Wall -Wextra -c -DDEBUG -std=gnu99
+   CFLAGS += -O0 -g -Wall -Wextra -c -DDEBUG
    LDFLAGS +=
 else
    CFLAGS += -fvisibility=hidden
@@ -64,6 +64,12 @@ endif
 ifeq ($(shell pkg-config --exists cc_client && echo true), true)
 LIBS += $(shell pkg-config --libs cc_client)
 INCS += $(shell pkg-config --cflags cc_client) -DHAVE_CONTROLCHAIN
+endif
+
+# hylia/link support
+ifeq ($(shell pkg-config --exists hylia && echo true), true)
+LIBS += $(shell pkg-config --libs hylia)
+INCS += $(shell pkg-config --cflags hylia) -DHAVE_HYLIA
 endif
 
 # source and object files

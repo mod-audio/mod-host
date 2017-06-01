@@ -11,11 +11,17 @@ int main (void)
     int ret;
     const char *action;
 
-    if (effects_init() == 0)
+    if (effects_init(NULL) == 0)
     {
         action = "add: http://lv2plug.in/plugins/eg-amp";
         ret = effects_add("http://lv2plug.in/plugins/eg-amp", 0);
         printf("%s, ret: %i\n", action, ret);
+
+        if (ret != 0)
+        {
+            effects_finish(1);
+            return 1;
+        }
 
         action = "connect system:capture_1 effect_0:in";
         ret = effects_connect("system:capture_1", "effect_0:in");
@@ -54,7 +60,7 @@ int main (void)
         ret = effects_remove(0);
         printf("%s, ret: %i\n", action, ret);
 
-        effects_finish();
+        effects_finish(1);
     }
 
     return 0;

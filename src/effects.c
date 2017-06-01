@@ -35,6 +35,7 @@
 /* Jack */
 #include <jack/jack.h>
 #include <jack/midiport.h>
+#include <jack/transport.h>
 
 /* LV2 and Lilv */
 #include <lilv/lilv.h>
@@ -60,6 +61,11 @@
 #include <cc/cc_client.h>
 #endif
 
+#ifdef HAVE_HYLIA
+/* Hylia / Link */
+#include <hylia.h>
+#endif
+
 #ifndef HAVE_NEW_LILV
 #define lilv_free(x) free(x)
 #warning Your current lilv version does not support loading or unloading bundles
@@ -79,12 +85,11 @@
 
 #define LILV_NS_MOD "http://moddevices.com/ns/mod#"
 
+#define KX_TIME__TicksPerBeat "http://kxstudio.sf.net/ns/lv2ext/props#TimePositionTicksPerBeat"
+
 // custom jack flag used for cv
 // needed because we prefer jack2 which doesn't have metadata yet
 #define JackPortIsControlVoltage 0x100
-
-// use pitchbend as midi cc, with an invalid MIDI controller number
-#define MIDI_PITCHBEND_AS_CC 131
 
 /* Local */
 #include "effects.h"
@@ -105,13 +110,23 @@
 ************************************************************************************************************************
 */
 
-#define REMOVE_ALL      (-1)
+#define REMOVE_ALL        (-1)
+#define GLOBAL_EFFECT_ID  (9995)
 
 #define ASSIGNMENT_UNUSED -1 // item was used before, so there might other valid items after this one
 #define ASSIGNMENT_NULL   -2 // item never used before, thus signaling the end of valid items
 
 #define BYPASS_PORT_SYMBOL  ":bypass"
 #define PRESETS_PORT_SYMBOL ":presets"
+#define BPB_PORT_SYMBOL     ":bpb"
+#define BPM_PORT_SYMBOL     ":bpm"
+#define ROLLING_PORT_SYMBOL ":rolling"
+
+// use pitchbend as midi cc, with an invalid MIDI controller number
+#define MIDI_PITCHBEND_AS_CC 131
+
+// transport defaults
+#define TRANSPORT_TICKS_PER_BEAT 1920.0
 
 
 /*
@@ -143,7 +158,14 @@ enum PortHints {
     HINT_LOGARITHMIC   = 1 << 4,
     HINT_MONITORED     = 1 << 5, // outputs only
     // events
-    HINT_OLD_EVENT_API = 1 << 0,
+    HINT_TRANSPORT     = 1 << 0,
+    HINT_OLD_EVENT_API = 1 << 1,
+};
+
+enum PluginHints {
+    //HINT_TRANSPORT     = 1 << 0,
+    HINT_TRIGGERS        = 1 << 1,
+    HINT_OUTPUT_MONITORS = 1 << 2,
 };
 
 enum {
@@ -163,7 +185,14 @@ enum PostPonedEventType {
     POSTPONED_PARAM_SET,
     POSTPONED_OUTPUT_MONITOR,
     POSTPONED_PROGRAM_LISTEN,
-    POSTPONED_MIDI_MAP
+    POSTPONED_MIDI_MAP,
+    POSTPONED_TRANSPORT
+};
+
+enum UpdatePositionFlag {
+    UPDATE_POSTION_SKIP,
+    UPDATE_POSTION_IF_CHANGED,
+    UPDATE_POSTION_FORCED,
 };
 
 
@@ -256,6 +285,9 @@ typedef struct EFFECT_T {
     int32_t control_index; // control/event input
     int32_t enabled_index;
     int32_t freewheel_index;
+    int32_t bpb_index;
+    int32_t bpm_index;
+    int32_t speed_index;
 
     preset_t **presets;
     uint32_t presets_count;
@@ -268,18 +300,23 @@ typedef struct EFFECT_T {
 
     jack_ringbuffer_t *events_buffer;
 
+    // previous transport state
+    bool transport_rolling;
+    uint32_t transport_frame;
+    double transport_bpb;
+    double transport_bpm;
+
     // current and previous bypass state
     port_t bypass_port;
     float bypass;
     bool was_bypassed;
 
+    // cached plugin information, avoids itenerating controls each cycle
+    enum PluginHints hints;
+
     // virtual presets port
     port_t presets_port;
     float preset_value;
-
-    // avoids itenerating controls each cycle
-    bool has_triggers;
-    bool has_output_monitors;
 } effect_t;
 
 typedef struct URIDS_T {
@@ -301,9 +338,11 @@ typedef struct URIDS_T {
     LV2_URID time_Position;
     LV2_URID time_bar;
     LV2_URID time_barBeat;
+    LV2_URID time_beat;
     LV2_URID time_beatUnit;
     LV2_URID time_beatsPerBar;
     LV2_URID time_beatsPerMinute;
+    LV2_URID time_ticksPerBeat;
     LV2_URID time_frame;
     LV2_URID time_speed;
 } urids_t;
@@ -325,8 +364,17 @@ typedef struct ASSIGNMENT_T {
     int assignment_id;
 } assignment_t;
 
-typedef struct POSTPONED_EVENT_T {
-    enum PostPonedEventType etype;
+typedef struct POSTPONED_PARAMETER_EVENT_T {
+    int effect_id;
+    const char* symbol;
+    float value;
+} postponed_parameter_event_t;
+
+typedef struct POSTPONED_PROGRAM_EVENT_T {
+    int8_t value;
+} postponed_program_event_t;
+
+typedef struct POSTPONED_MIDI_MAP_EVENT_T {
     int effect_id;
     const char* symbol;
     int8_t channel;
@@ -334,6 +382,22 @@ typedef struct POSTPONED_EVENT_T {
     float value;
     float minimum;
     float maximum;
+} postponed_midi_map_event_t;
+
+typedef struct POSTPONED_TRANSPORT_EVENT_T {
+    bool rolling;
+    float bpb;
+    float bpm;
+} postponed_transport_event_t;
+
+typedef struct POSTPONED_EVENT_T {
+    enum PostPonedEventType type;
+    union {
+        postponed_parameter_event_t parameter;
+        postponed_program_event_t program;
+        postponed_midi_map_event_t midi_map;
+        postponed_transport_event_t transport;
+    };
 } postponed_event_t;
 
 typedef struct POSTPONED_EVENT_LIST_DATA {
@@ -394,6 +458,13 @@ static jack_nframes_t g_sample_rate, g_block_length;
 static const char **g_capture_ports, **g_playback_ports;
 static size_t g_midi_buffer_size;
 static jack_port_t *g_midi_in_port;
+static jack_position_t g_jack_pos;
+static bool g_jack_rolling;
+static volatile double g_transport_bpb;
+static volatile double g_transport_bpm;
+static volatile bool g_transport_reset;
+static double g_transport_tick;
+static bool g_processing_enabled;
 
 /* LV2 and Lilv */
 static LilvWorld *g_lv2_data;
@@ -421,11 +492,21 @@ static LV2_Feature g_buf_size_features[3] = {
     { LV2_BUF_SIZE__boundedBlockLength, NULL }
     };
 
+/* MIDI Learn */
 static int g_midi_program_listen;
 static pthread_mutex_t g_midi_learning_mutex;
 
+#ifdef HAVE_HYLIA
+static volatile bool hylia_enabled;
+static hylia_t* g_hylia_instance;
+static hylia_time_info_t g_hylia_timeinfo;
+#endif
+
 static const char* const g_bypass_port_symbol = BYPASS_PORT_SYMBOL;
 static const char* const g_presets_port_symbol = PRESETS_PORT_SYMBOL;
+static const char* const g_bpb_port_symbol = BPB_PORT_SYMBOL;
+static const char* const g_bpm_port_symbol = BPM_PORT_SYMBOL;
+static const char* const g_rolling_port_symbol = ROLLING_PORT_SYMBOL;
 
 
 /*
@@ -443,7 +524,10 @@ static void RunPostPonedEvents(int ignored_effect_id);
 static void* PostPonedEventsThread(void* arg);
 static int ProcessPlugin(jack_nframes_t nframes, void *arg);
 static float UpdateValueFromMidi(midi_cc_t* mcc, uint16_t mvalue, bool highres);
+static void UpdateGlobalJackPosition(enum UpdatePositionFlag flag);
 static int ProcessMidi(jack_nframes_t nframes, void *arg);
+static void JackTimebase(jack_transport_state_t state, jack_nframes_t nframes,
+                         jack_position_t* pos, int new_pos, void* arg);
 static void JackThreadInit(void *arg);
 static void GetFeatures(effect_t *effect);
 static property_t *FindEffectPropertyByLabel(effect_t *effect, const char *label);
@@ -457,6 +541,9 @@ static void FreeLicenseData(MOD_License_Handle handle, char *license);
 #ifdef HAVE_CONTROLCHAIN
 static void CCDataUpdate(void* arg);
 static void InitializeControlChainIfNeeded(void);
+#endif
+#ifdef HAVE_HYLIA
+static uint32_t GetHyliaOutputLatency(void);
 #endif
 
 
@@ -495,7 +582,6 @@ static void AllocatePortBuffers(effect_t* effect)
 {
     uint32_t i;
 
-    g_midi_buffer_size = jack_port_type_get_buffer_size(effect->jack_client, JACK_DEFAULT_MIDI_TYPE);
     for (i = 0; i < effect->event_ports_count; i++)
     {
         lv2_evbuf_free(effect->event_ports[i]->evbuf);
@@ -513,9 +599,21 @@ static void AllocatePortBuffers(effect_t* effect)
 
 static int BufferSize(jack_nframes_t nframes, void* data)
 {
-    effect_t *effect = data;
     g_block_length = nframes;
-    AllocatePortBuffers(effect);
+    g_midi_buffer_size = jack_port_type_get_buffer_size(g_jack_global_client, JACK_DEFAULT_MIDI_TYPE);
+
+    if (data)
+    {
+        effect_t *effect = data;
+        AllocatePortBuffers(effect);
+    }
+#ifdef HAVE_HYLIA
+    else if (g_hylia_instance)
+    {
+        hylia_set_output_latency(g_hylia_instance, GetHyliaOutputLatency());
+    }
+#endif
+
     return SUCCESS;
 }
 
@@ -528,14 +626,14 @@ static void FreeWheelMode(int starting, void* data)
     }
 }
 
-static bool ShouldIgnorePostPonedEvent(postponed_event_list_data* ev, postponed_cached_events* cached_events)
+static bool ShouldIgnorePostPonedEvent(postponed_parameter_event_t* ev, postponed_cached_events* cached_events)
 {
-    // we don't have symbol-less events that need caching
-    if (ev->event.symbol == NULL)
+    // symbol must not be null
+    if (ev->symbol == NULL)
         return false;
 
-    if (ev->event.effect_id == cached_events->last_effect_id &&
-        strncmp(ev->event.symbol, cached_events->last_symbol, MAX_CHAR_BUF_SIZE) == 0)
+    if (ev->effect_id == cached_events->last_effect_id &&
+        strncmp(ev->symbol, cached_events->last_symbol, MAX_CHAR_BUF_SIZE) == 0)
     {
         // already received this event, like just now
         return true;
@@ -548,8 +646,8 @@ static bool ShouldIgnorePostPonedEvent(postponed_event_list_data* ev, postponed_
     {
         postponed_cached_symbol_list_data* const psymbol = list_entry(it, postponed_cached_symbol_list_data, siblings);
 
-        if (ev->event.effect_id == psymbol->effect_id &&
-            strncmp(ev->event.symbol, psymbol->symbol, MAX_CHAR_BUF_SIZE) == 0)
+        if (ev->effect_id == psymbol->effect_id &&
+            strncmp(ev->symbol, psymbol->symbol, MAX_CHAR_BUF_SIZE) == 0)
         {
             // haha! found you little bastard!
             return true;
@@ -562,8 +660,8 @@ static bool ShouldIgnorePostPonedEvent(postponed_event_list_data* ev, postponed_
 
     if (psymbol)
     {
-        psymbol->effect_id = ev->event.effect_id;
-        strncpy(psymbol->symbol, ev->event.symbol, MAX_CHAR_BUF_SIZE);
+        psymbol->effect_id = ev->effect_id;
+        strncpy(psymbol->symbol, ev->symbol, MAX_CHAR_BUF_SIZE);
         psymbol->symbol[MAX_CHAR_BUF_SIZE] = '\0';
         list_add_tail(&psymbol->siblings, &cached_events->symbols.siblings);
     }
@@ -594,12 +692,15 @@ static void RunPostPonedEvents(int ignored_effect_id)
 
     // cached data, to make sure we only handle similar events once
     bool got_midi_program = false;
+    bool got_transport = false;
     postponed_cached_events cached_param_set, cached_output_mon;
     postponed_cached_symbol_list_data *psymbol;
 
     cached_param_set.last_effect_id = -1;
     cached_output_mon.last_effect_id = -1;
+    cached_param_set.last_symbol[0] = '\0';
     cached_param_set.last_symbol[MAX_CHAR_BUF_SIZE] = '\0';
+    cached_output_mon.last_symbol[0] = '\0';
     cached_output_mon.last_symbol[MAX_CHAR_BUF_SIZE] = '\0';
     INIT_LIST_HEAD(&cached_param_set.symbols.siblings);
     INIT_LIST_HEAD(&cached_output_mon.symbols.siblings);
@@ -612,60 +713,75 @@ static void RunPostPonedEvents(int ignored_effect_id)
     {
         eventptr = list_entry(it, postponed_event_list_data, siblings);
 
-        // do not handle events for a plugin that is about to be removed
-        if (eventptr->event.effect_id == ignored_effect_id)
-            continue;
-
-        switch (eventptr->event.etype)
+        switch (eventptr->event.type)
         {
         case POSTPONED_PARAM_SET:
-            if (ShouldIgnorePostPonedEvent(eventptr, &cached_param_set))
+            if (eventptr->event.parameter.effect_id == ignored_effect_id)
+                continue;
+            if (ShouldIgnorePostPonedEvent(&eventptr->event.parameter, &cached_param_set))
                 continue;
 
-            snprintf(buf, MAX_CHAR_BUF_SIZE, "param_set %i %s %f", eventptr->event.effect_id,
-                                                                   eventptr->event.symbol,
-                                                                   eventptr->event.value);
+            snprintf(buf, MAX_CHAR_BUF_SIZE, "param_set %i %s %f", eventptr->event.parameter.effect_id,
+                                                                   eventptr->event.parameter.symbol,
+                                                                   eventptr->event.parameter.value);
             socket_send_feedback(buf);
 
             // save for fast checkup next time
-            cached_param_set.last_effect_id = eventptr->event.effect_id;
-            strncpy(cached_param_set.last_symbol, eventptr->event.symbol, MAX_CHAR_BUF_SIZE);
+            cached_param_set.last_effect_id = eventptr->event.parameter.effect_id;
+            strncpy(cached_param_set.last_symbol, eventptr->event.parameter.symbol, MAX_CHAR_BUF_SIZE);
             break;
 
         case POSTPONED_OUTPUT_MONITOR:
-            if (ShouldIgnorePostPonedEvent(eventptr, &cached_output_mon))
+            if (eventptr->event.parameter.effect_id == ignored_effect_id)
+                continue;
+            if (ShouldIgnorePostPonedEvent(&eventptr->event.parameter, &cached_output_mon))
                 continue;
 
-            snprintf(buf, MAX_CHAR_BUF_SIZE, "output_set %i %s %f", eventptr->event.effect_id,
-                                                                    eventptr->event.symbol,
-                                                                    eventptr->event.value);
+            snprintf(buf, MAX_CHAR_BUF_SIZE, "output_set %i %s %f", eventptr->event.parameter.effect_id,
+                                                                    eventptr->event.parameter.symbol,
+                                                                    eventptr->event.parameter.value);
             socket_send_feedback(buf);
 
             // save for fast checkup next time
-            cached_output_mon.last_effect_id = eventptr->event.effect_id;
-            strncpy(cached_output_mon.last_symbol, eventptr->event.symbol, MAX_CHAR_BUF_SIZE);
+            cached_output_mon.last_effect_id = eventptr->event.parameter.effect_id;
+            strncpy(cached_output_mon.last_symbol, eventptr->event.parameter.symbol, MAX_CHAR_BUF_SIZE);
+            break;
+
+        case POSTPONED_MIDI_MAP:
+            if (eventptr->event.midi_map.effect_id == ignored_effect_id)
+                continue;
+            snprintf(buf, MAX_CHAR_BUF_SIZE, "midi_mapped %i %s %i %i %f %f %f", eventptr->event.midi_map.effect_id,
+                                                                                 eventptr->event.midi_map.symbol,
+                                                                                 eventptr->event.midi_map.channel,
+                                                                                 eventptr->event.midi_map.controller,
+                                                                                 eventptr->event.midi_map.value,
+                                                                                 eventptr->event.midi_map.minimum,
+                                                                                 eventptr->event.midi_map.maximum);
+            socket_send_feedback(buf);
             break;
 
         case POSTPONED_PROGRAM_LISTEN:
             if (got_midi_program)
                 continue;
 
-            snprintf(buf, MAX_CHAR_BUF_SIZE, "midi_program %i", eventptr->event.controller);
+            snprintf(buf, MAX_CHAR_BUF_SIZE, "midi_program %i", eventptr->event.program.value);
             socket_send_feedback(buf);
 
-            // ignore next midi program
+            // ignore older midi program changes
             got_midi_program = true;
             break;
 
-        case POSTPONED_MIDI_MAP:
-            snprintf(buf, MAX_CHAR_BUF_SIZE, "midi_mapped %i %s %i %i %f %f %f", eventptr->event.effect_id,
-                                                                                 eventptr->event.symbol,
-                                                                                 eventptr->event.channel,
-                                                                                 eventptr->event.controller,
-                                                                                 eventptr->event.value,
-                                                                                 eventptr->event.minimum,
-                                                                                 eventptr->event.maximum);
+        case POSTPONED_TRANSPORT:
+            if (got_transport)
+                continue;
+
+            snprintf(buf, MAX_CHAR_BUF_SIZE, "transport %i %f %f", eventptr->event.transport.rolling ? 1 : 0,
+                                                                   eventptr->event.transport.bpb,
+                                                                   eventptr->event.transport.bpm);
             socket_send_feedback(buf);
+
+            // ignore older transport changes
+            got_transport = true;
             break;
         }
     }
@@ -723,6 +839,110 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
     if (arg == NULL) return 0;
     effect = arg;
 
+    if (!g_processing_enabled)
+    {
+        port_t *port;
+        for (i = 0; i < effect->output_audio_ports_count; i++)
+        {
+            memset(jack_port_get_buffer(effect->output_audio_ports[i]->jack_port, nframes),
+                   0, (sizeof(float) * nframes));
+        }
+        for (i = 0; i < effect->output_cv_ports_count; i++)
+        {
+            memset(jack_port_get_buffer(effect->output_cv_ports[i]->jack_port, nframes),
+                   0, (sizeof(float) * nframes));
+        }
+        for (i = 0; i < effect->output_event_ports_count; i++)
+        {
+            port = effect->output_event_ports[i];
+            if (port->jack_port && port->flow == FLOW_OUTPUT && port->type == TYPE_EVENT)
+                jack_midi_clear_buffer(jack_port_get_buffer(port->jack_port, nframes));
+        }
+        return 0;
+    }
+
+    /* transport */
+    uint8_t pos_buf[256];
+    LV2_Atom* lv2_pos = (LV2_Atom*)pos_buf;
+
+    if (effect->hints & HINT_TRANSPORT)
+    {
+        jack_position_t pos;
+        const bool rolling = (jack_transport_query(effect->jack_client, &pos) == JackTransportRolling);
+
+        if ((pos.valid & JackPositionBBT) == 0)
+        {
+            pos.beats_per_bar    = g_transport_bpb;
+            pos.beats_per_minute = g_transport_bpm;
+        }
+
+        if (effect->transport_rolling != rolling ||
+            effect->transport_frame != pos.frame ||
+            effect->transport_bpb != (double)pos.beats_per_bar ||
+            effect->transport_bpm != pos.beats_per_minute ||
+            (effect->bypass < 0.5f && effect->was_bypassed))
+        {
+            effect->transport_rolling = rolling;
+            effect->transport_frame = pos.frame;
+            effect->transport_bpb = pos.beats_per_bar;
+            effect->transport_bpm = pos.beats_per_minute;
+
+            LV2_Atom_Forge forge = g_lv2_atom_forge;
+            lv2_atom_forge_set_buffer(&forge, pos_buf, sizeof(pos_buf));
+
+            LV2_Atom_Forge_Frame frame;
+            lv2_atom_forge_object(&forge, &frame, 0, g_urids.time_Position);
+
+            lv2_atom_forge_key(&forge, g_urids.time_speed);
+            lv2_atom_forge_float(&forge, rolling ? 1.0f : 0.0f);
+
+            lv2_atom_forge_key(&forge, g_urids.time_frame);
+            lv2_atom_forge_long(&forge, pos.frame);
+
+            if (pos.valid & JackPositionBBT)
+            {
+                lv2_atom_forge_key(&forge, g_urids.time_bar);
+                lv2_atom_forge_long(&forge, pos.bar - 1);
+
+                lv2_atom_forge_key(&forge, g_urids.time_barBeat);
+                lv2_atom_forge_float(&forge, pos.beat - 1 + (pos.tick / pos.ticks_per_beat));
+
+                lv2_atom_forge_key(&forge, g_urids.time_beat);
+                lv2_atom_forge_double(&forge, pos.beat - 1);
+
+                lv2_atom_forge_key(&forge, g_urids.time_beatUnit);
+                lv2_atom_forge_int(&forge, pos.beat_type);
+
+                lv2_atom_forge_key(&forge, g_urids.time_beatsPerBar);
+                lv2_atom_forge_float(&forge, pos.beats_per_bar);
+
+                lv2_atom_forge_key(&forge, g_urids.time_beatsPerMinute);
+                lv2_atom_forge_float(&forge, pos.beats_per_minute);
+
+                lv2_atom_forge_key(&forge, g_urids.time_ticksPerBeat);
+                lv2_atom_forge_double(&forge, pos.ticks_per_beat);
+            }
+
+            lv2_atom_forge_pop(&forge, &frame);
+        }
+        else
+        {
+            lv2_pos->size = 0;
+        }
+    }
+    if (effect->bpb_index >= 0)
+    {
+        *(effect->ports[effect->bpb_index]->buffer) = g_transport_bpb;
+    }
+    if (effect->bpm_index >= 0)
+    {
+        *(effect->ports[effect->bpm_index]->buffer) = g_transport_bpm;
+    }
+    if (effect->speed_index >= 0)
+    {
+        *(effect->ports[effect->speed_index]->buffer) = g_jack_rolling ? 1.0f : 0.0f;
+    }
+
     /* Prepare midi/event ports */
     for (i = 0; i < effect->input_event_ports_count; i++)
     {
@@ -774,6 +994,12 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
                 {
                     fprintf(stderr, "lv2 evbuf write failed\n");
                 }
+            }
+
+            /* Write time position */
+            if (lv2_pos->size > 0 && (effect->input_event_ports[i]->hints & HINT_TRANSPORT) != 0)
+            {
+                lv2_evbuf_write(&iter, 0, 0, lv2_pos->type, lv2_pos->size, LV2_ATOM_BODY_CONST(lv2_pos));
             }
         }
     }
@@ -985,7 +1211,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
         }
     }
 
-    if (effect->has_triggers)
+    if (effect->hints & HINT_TRIGGERS)
     {
         for (i = 0; i < effect->input_control_ports_count; i++)
         {
@@ -994,7 +1220,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
         }
     }
 
-    if (effect->has_output_monitors)
+    if (effect->hints & HINT_OUTPUT_MONITORS)
     {
         bool needs_post = false;
         float value;
@@ -1016,16 +1242,10 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
 
             effect->output_control_ports[i]->prev_value = value;
 
-            const postponed_event_t pevent = {
-                POSTPONED_OUTPUT_MONITOR,
-                effect->instance,
-                effect->output_control_ports[i]->symbol,
-                -1, -1,
-                value,
-                0.0f, 0.0f
-            };
-
-            memcpy(&posteventptr->event, &pevent, sizeof(postponed_event_t));
+            posteventptr->event.type = POSTPONED_OUTPUT_MONITOR;
+            posteventptr->event.parameter.effect_id = effect->instance;
+            posteventptr->event.parameter.symbol    = effect->output_control_ports[i]->symbol;
+            posteventptr->event.parameter.value     = value;
 
             pthread_mutex_lock(&g_rtsafe_mutex);
             list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
@@ -1061,63 +1281,124 @@ static float UpdateValueFromMidi(midi_cc_t* mcc, uint16_t mvalue, bool highres)
 
         return bypassed ? 1.0f : 0.0f;
     }
+
+    const port_t* port = mcc->port;
+    float value;
+
+    if (port->hints & HINT_TRIGGER)
+    {
+        // now triggered, always maximum
+        value = port->max_value;
+    }
+    else if (port->hints & HINT_TOGGLE)
+    {
+        // toggle, always min or max
+        value = mvalue >= mvaluediv ? port->max_value : port->min_value;
+
+        if (mcc->effect_id == GLOBAL_EFFECT_ID && !strcmp(mcc->symbol, g_rolling_port_symbol))
+        {
+            if (mvalue >= mvaluediv)
+            {
+                jack_transport_start(g_jack_global_client);
+            }
+            else
+            {
+                jack_transport_stop(g_jack_global_client);
+                jack_transport_locate(g_jack_global_client, 0);
+            }
+            g_transport_reset = true;
+        }
+    }
     else
     {
-        const port_t* port;
-        float value;
+        // get percentage by dividing by max MIDI value
+        value = (float)mvalue;
 
-        port = mcc->port;
+        if (highres)
+            value /= 16383.0f;
+        else
+            value /= 127.0f;
 
-        if (port->hints & HINT_TRIGGER)
+        // make sure bounds are correct
+        if (value <= 0.0f)
         {
-            // now triggered, always maximum
-            value = port->max_value;
+            value = mcc->minimum;
         }
-        else if (port->hints & HINT_TOGGLE)
+        else if (value >= 1.0f)
         {
-            // toggle, always min or max
-            value = mvalue >= mvaluediv ? port->max_value : port->min_value;
+            value = mcc->maximum;
         }
         else
         {
-            // get percentage by dividing by max MIDI value
-            value = (float)mvalue;
-
-            if (highres)
-                value /= 16383.0f;
-            else
-                value /= 127.0f;
-
-            // make sure bounds are correct
-            if (value <= 0.0f)
+            if (port->hints & HINT_LOGARITHMIC)
             {
-                value = mcc->minimum;
-            }
-            else if (value >= 1.0f)
-            {
-                value = mcc->maximum;
+                // FIXME: calculate value properly (don't do log on custom scale, use port min/max then adjust)
+                value = mcc->minimum * powf(mcc->maximum/mcc->minimum, value);
             }
             else
             {
-                if (port->hints & HINT_LOGARITHMIC)
-                {
-                    // FIXME: calculate value properly (don't do log on custom scale, use port min/max then adjust)
-                    value = mcc->minimum * powf(mcc->maximum/mcc->minimum, value);
-                }
-                else
-                {
-                    value = mcc->minimum + (mcc->maximum - mcc->minimum) * value;
-                }
-
-                if (port->hints & HINT_INTEGER)
-                    value = rintf(value);
+                value = mcc->minimum + (mcc->maximum - mcc->minimum) * value;
             }
+
+            if (port->hints & HINT_INTEGER)
+                value = rintf(value);
         }
 
-        // set param value
-        *(port->buffer) = value;
-        return value;
+        if (mcc->effect_id == GLOBAL_EFFECT_ID)
+        {
+            if (!strcmp(mcc->symbol, g_bpb_port_symbol))
+                g_transport_bpb = value;
+            else if (!strcmp(mcc->symbol, g_bpm_port_symbol))
+                g_transport_bpm = value;
+        }
     }
+
+    // set param value
+    *(port->buffer) = value;
+    return value;
+}
+
+static void UpdateGlobalJackPosition(enum UpdatePositionFlag flag)
+{
+    bool old_rolling;
+    double old_bpb, old_bpm;
+
+    if (flag != UPDATE_POSTION_SKIP)
+    {
+        old_rolling = g_jack_rolling;
+        old_bpb = g_transport_bpb;
+        old_bpm = g_transport_bpm;
+    }
+
+    g_jack_rolling = (jack_transport_query(g_jack_global_client, &g_jack_pos) == JackTransportRolling);
+
+    if ((g_jack_pos.valid & JackPositionBBT) == 0x0)
+    {
+        g_jack_pos.beats_per_bar    = g_transport_bpb;
+        g_jack_pos.beats_per_minute = g_transport_bpm;
+    }
+
+    if (flag == UPDATE_POSTION_SKIP)
+        return;
+    if (flag == UPDATE_POSTION_IF_CHANGED &&
+        old_rolling == g_jack_rolling && old_bpb == g_transport_bpb && old_bpm == g_transport_bpm)
+        return;
+
+    postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
+
+    if (!posteventptr)
+        return;
+
+    posteventptr->event.type = POSTPONED_TRANSPORT;
+    posteventptr->event.transport.rolling = g_jack_rolling;
+    posteventptr->event.transport.bpb     = g_transport_bpb;
+    posteventptr->event.transport.bpm     = g_transport_bpm;
+
+    pthread_mutex_lock(&g_rtsafe_mutex);
+    list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
+    pthread_mutex_unlock(&g_rtsafe_mutex);
+
+    sem_post(&g_postevents_semaphore);
 }
 
 static int ProcessMidi(jack_nframes_t nframes, void *arg)
@@ -1127,6 +1408,29 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
     uint16_t mvalue;
     float value;
     bool handled, highres, needs_post = false;
+    enum UpdatePositionFlag pos_flag = UPDATE_POSTION_IF_CHANGED;
+
+#ifdef HAVE_HYLIA
+    if (hylia_enabled)
+    {
+        hylia_process(g_hylia_instance, nframes, &g_hylia_timeinfo);
+        const double new_bpb = g_hylia_timeinfo.beatsPerBar;
+        const double new_bpm = g_hylia_timeinfo.beatsPerMinute;
+
+        if (new_bpb > 0.0 && (g_transport_bpb != new_bpb))
+        {
+            g_transport_bpb = new_bpb;
+            pos_flag = UPDATE_POSTION_FORCED;
+        }
+        if (new_bpm > 0.0 && (g_transport_bpm != new_bpm))
+        {
+            g_transport_bpm = new_bpm;
+            pos_flag = UPDATE_POSTION_FORCED;
+        }
+    }
+#endif
+
+    UpdateGlobalJackPosition(pos_flag);
 
     void *const port_buf = jack_port_get_buffer(g_midi_in_port, nframes);
     const jack_nframes_t event_count = jack_midi_get_event_count(port_buf);
@@ -1148,13 +1452,8 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
 
             if (posteventptr)
             {
-                const postponed_event_t pevent = {
-                    POSTPONED_PROGRAM_LISTEN,
-                    -1, NULL, -1,
-                    event.buffer[1],
-                    0.0f, 0.0f, 0.0f
-                };
-                memcpy(&posteventptr->event, &pevent, sizeof(postponed_event_t));
+                posteventptr->event.type = POSTPONED_PROGRAM_LISTEN;
+                posteventptr->event.program.value = event.buffer[1];
 
                 pthread_mutex_lock(&g_rtsafe_mutex);
                 list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
@@ -1206,15 +1505,10 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
 
                 if (posteventptr)
                 {
-                    const postponed_event_t pevent = {
-                        POSTPONED_PARAM_SET,
-                        g_midi_cc_list[j].effect_id,
-                        g_midi_cc_list[j].symbol,
-                        -1, -1,
-                        value,
-                        0.0f, 0.0f
-                    };
-                    memcpy(&posteventptr->event, &pevent, sizeof(postponed_event_t));
+                    posteventptr->event.type = POSTPONED_PARAM_SET;
+                    posteventptr->event.parameter.effect_id = g_midi_cc_list[j].effect_id;
+                    posteventptr->event.parameter.symbol    = g_midi_cc_list[j].symbol;
+                    posteventptr->event.parameter.value     = value;
 
                     pthread_mutex_lock(&g_rtsafe_mutex);
                     list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
@@ -1257,17 +1551,14 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
 
                 if (posteventptr)
                 {
-                    const postponed_event_t pevent = {
-                        POSTPONED_MIDI_MAP,
-                        effect_id,
-                        symbol,
-                        channel,
-                        controller,
-                        value,
-                        minimum,
-                        maximum
-                    };
-                    memcpy(&posteventptr->event, &pevent, sizeof(postponed_event_t));
+                    posteventptr->event.type = POSTPONED_MIDI_MAP;
+                    posteventptr->event.midi_map.effect_id  = effect_id;
+                    posteventptr->event.midi_map.symbol     = symbol;
+                    posteventptr->event.midi_map.channel    = channel;
+                    posteventptr->event.midi_map.controller = controller;
+                    posteventptr->event.midi_map.value      = value;
+                    posteventptr->event.midi_map.minimum    = minimum;
+                    posteventptr->event.midi_map.maximum    = maximum;
 
                     pthread_mutex_lock(&g_rtsafe_mutex);
                     list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
@@ -1284,6 +1575,82 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
 
     return 0;
 
+    UNUSED_PARAM(arg);
+}
+
+static void JackTimebase(jack_transport_state_t state, jack_nframes_t nframes,
+                         jack_position_t *pos, int new_pos, void *arg)
+{
+    double tick;
+
+    pos->beats_per_bar = g_transport_bpb;
+    pos->beats_per_minute = g_transport_bpm;
+
+    const int32_t beats_per_bar_int = (int32_t)(pos->beats_per_bar + 0.5f);
+
+    if (new_pos || g_transport_reset)
+    {
+        pos->valid = JackPositionBBT;
+        pos->beat_type = 4.0f;
+        pos->ticks_per_beat = TRANSPORT_TICKS_PER_BEAT;
+
+        double abs_beat, abs_tick;
+
+#ifdef HAVE_HYLIA
+        if (hylia_enabled)
+        {
+            if (g_hylia_timeinfo.beat >= 0.0)
+            {
+                const double beat = g_hylia_timeinfo.beat;
+                abs_beat = floor(beat);
+                abs_tick = beat * TRANSPORT_TICKS_PER_BEAT;
+            }
+            else
+            {
+                abs_beat = 0.0;
+                abs_tick = 0.0;
+                g_jack_rolling = false;
+            }
+        }
+        else
+#endif
+        {
+            const double min = (double)pos->frame / (double)(g_sample_rate * 60);
+            abs_tick = min * pos->beats_per_minute * TRANSPORT_TICKS_PER_BEAT;
+            abs_beat = abs_tick / TRANSPORT_TICKS_PER_BEAT;
+            g_transport_reset = false;
+        }
+
+        pos->bar  = (int32_t)(floor(abs_beat / pos->beats_per_bar) + 0.5);
+        pos->beat = (int32_t)(abs_beat - (double)(pos->bar * beats_per_bar_int) + 1.5);
+        pos->bar_start_tick = pos->bar * pos->beats_per_bar * TRANSPORT_TICKS_PER_BEAT;
+        ++pos->bar;
+
+        tick = abs_tick - (abs_beat * pos->ticks_per_beat);
+    }
+    else
+    {
+        tick = g_transport_tick +
+              (nframes * TRANSPORT_TICKS_PER_BEAT * pos->beats_per_minute / (double)(g_sample_rate * 60));
+
+        while (tick >= TRANSPORT_TICKS_PER_BEAT)
+        {
+            tick -= TRANSPORT_TICKS_PER_BEAT;
+
+            if (++pos->beat > beats_per_bar_int)
+            {
+                pos->beat = 1;
+                pos->bar_start_tick += pos->beats_per_bar * TRANSPORT_TICKS_PER_BEAT;
+                ++pos->bar;
+            }
+        }
+    }
+
+    pos->tick = (int32_t)(tick + 0.5);
+    g_transport_tick = tick;
+    return;
+
+    UNUSED_PARAM(state);
     UNUSED_PARAM(arg);
 }
 
@@ -1433,7 +1800,7 @@ static void SetParameterFromState(const char* symbol, void* user_data,
     }
     else
     {
-        printf("mod-host SetParameterFromState called with unknown type: %u %u\n", type, size);
+        fprintf(stderr, "SetParameterFromState called with unknown type: %u %u\n", type, size);
         return;
     }
 
@@ -1612,6 +1979,30 @@ static void CCDataUpdate(void* arg)
             if (effect->enabled_index >= 0)
                 *(effect->ports[effect->enabled_index]->buffer) = (data->value > 0.5f) ? 0.0f : 1.0f;
         }
+        else if (assignment->effect_id == GLOBAL_EFFECT_ID)
+        {
+            if (!strcmp(assignment->port->symbol, g_bpb_port_symbol))
+            {
+                g_transport_bpb = data->value;
+            }
+            else if (!strcmp(assignment->port->symbol, g_bpm_port_symbol))
+            {
+                g_transport_bpm = data->value;
+            }
+            else if (!strcmp(assignment->port->symbol, g_rolling_port_symbol))
+            {
+                if (data->value > 0.5f)
+                {
+                    jack_transport_start(g_jack_global_client);
+                }
+                else
+                {
+                    jack_transport_stop(g_jack_global_client);
+                    jack_transport_locate(g_jack_global_client, 0);
+                }
+                g_transport_reset = true;
+            }
+        }
 
         *(assignment->port->buffer) = data->value;
 
@@ -1621,15 +2012,10 @@ static void CCDataUpdate(void* arg)
         if (posteventptr == NULL)
             continue;
 
-        const postponed_event_t pevent = {
-            POSTPONED_PARAM_SET,
-            assignment->effect_id,
-            assignment->port->symbol,
-            -1, -1,
-            data->value,
-            0.0f, 0.0f
-        };
-        memcpy(&posteventptr->event, &pevent, sizeof(postponed_event_t));
+        posteventptr->event.type = POSTPONED_PARAM_SET;
+        posteventptr->event.parameter.effect_id = assignment->effect_id;
+        posteventptr->event.parameter.symbol    = assignment->port->symbol;
+        posteventptr->event.parameter.value     = data->value;
 
         pthread_mutex_lock(&g_rtsafe_mutex);
         list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
@@ -1649,6 +2035,18 @@ static void InitializeControlChainIfNeeded(void)
 
     if ((g_cc_client = cc_client_new("/tmp/control-chain.sock")) != NULL)
         cc_client_data_update_cb(g_cc_client, CCDataUpdate);
+}
+#endif
+
+#ifdef HAVE_HYLIA
+static uint32_t GetHyliaOutputLatency(void)
+{
+    const long long int latency = llround(1.0e6 * g_block_length / g_sample_rate);
+
+    if (latency >= 0 && latency < UINT32_MAX)
+        return (uint32_t)latency;
+
+    return 0;
 }
 #endif
 
@@ -1698,15 +2096,6 @@ int effects_init(void* client)
     pthread_mutexattr_destroy(&atts);
 
     sem_init(&g_postevents_semaphore, 0, 0);
-    /*
-    if (!)
-    {
-        fprintf(stderr, "can't initialize post-events semaphore, errno:%i\n", errno);
-        if (client == NULL)
-            jack_client_close(g_jack_global_client);
-        return ERR_MEMORY_ALLOCATION;
-    }
-    */
 
     /* Get the system ports */
     g_capture_ports = jack_get_ports(g_jack_global_client, "system", JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput);
@@ -1714,11 +2103,119 @@ int effects_init(void* client)
 
     /* Get buffers size */
     g_block_length = jack_get_buffer_size(g_jack_global_client);
+    g_sample_rate = jack_get_sample_rate(g_jack_global_client);
     g_midi_buffer_size = jack_port_type_get_buffer_size(g_jack_global_client, JACK_DEFAULT_MIDI_TYPE);
+
+    /* initial transport state */
+    g_transport_reset = true;
+    g_transport_bpb = 4.0;
+    g_transport_bpm = 120.0;
+    g_transport_tick = 0.0;
+
+    /* this fails to build if GLOBAL_EFFECT_ID >= MAX_INSTANCES */
+    char global_effect_id_static_check[GLOBAL_EFFECT_ID < MAX_INSTANCES?1:-1];
+
+    /* global ports */
+    {
+        port_t **ports = (port_t **) calloc(3, sizeof(port_t *));
+
+        port_t *port_bpb = ports[0] = calloc(1, sizeof(port_t));
+        port_bpb->buffer = &port_bpb->prev_value;
+        port_bpb->buffer_count = 1;
+        port_bpb->min_value = 0.0f;
+        port_bpb->max_value = 1.0f;
+        port_bpb->def_value = 0.0f;
+        port_bpb->type = TYPE_CONTROL;
+        port_bpb->flow = FLOW_INPUT;
+        port_bpb->hints = 0x0;
+        port_bpb->symbol = g_bpb_port_symbol;
+
+        port_t *port_bpm = ports[1] = calloc(1, sizeof(port_t));
+        port_bpm->buffer = &port_bpm->prev_value;
+        port_bpm->buffer_count = 1;
+        port_bpm->min_value = 0.0f;
+        port_bpm->max_value = 1.0f;
+        port_bpm->def_value = 0.0f;
+        port_bpm->type = TYPE_CONTROL;
+        port_bpm->flow = FLOW_INPUT;
+        port_bpm->hints = 0x0;
+        port_bpm->symbol = g_bpm_port_symbol;
+
+        port_t *port_rolling = ports[2] = calloc(1, sizeof(port_t));
+        port_rolling->buffer = &port_rolling->prev_value;
+        port_rolling->buffer_count = 1;
+        port_rolling->min_value = 0.0f;
+        port_rolling->max_value = 1.0f;
+        port_rolling->def_value = 0.0f;
+        port_rolling->type = TYPE_CONTROL;
+        port_rolling->flow = FLOW_INPUT;
+        port_rolling->hints = HINT_TOGGLE;
+        port_rolling->symbol = g_rolling_port_symbol;
+
+        effect_t *effect = &g_effects[GLOBAL_EFFECT_ID];
+        memset(effect, 0, sizeof(effect_t));
+
+        effect->instance = GLOBAL_EFFECT_ID;
+        effect->jack_client = g_jack_global_client;
+
+        effect->ports = effect->control_ports = effect->input_control_ports = ports;
+        effect->ports_count = effect->control_ports_count = effect->input_control_ports_count = 3;
+
+        effect->control_index = -1;
+        effect->enabled_index = -1;
+        effect->freewheel_index = -1;
+        effect->bpb_index = -1;
+        effect->bpm_index = -1;
+        effect->speed_index = -1;
+
+        /* Default value of bypass */
+        effect->bypass = 0.0f;
+        effect->was_bypassed = false;
+
+        effect->bypass_port.buffer_count = 1;
+        effect->bypass_port.buffer = &effect->bypass;
+        effect->bypass_port.min_value = 0.0f;
+        effect->bypass_port.max_value = 1.0f;
+        effect->bypass_port.def_value = 0.0f;
+        effect->bypass_port.prev_value = 0.0f;
+        effect->bypass_port.type = TYPE_CONTROL;
+        effect->bypass_port.flow = FLOW_INPUT;
+        effect->bypass_port.hints = HINT_TOGGLE;
+        effect->bypass_port.symbol = g_bypass_port_symbol;
+
+        /* virtual presets port */
+        effect->preset_value = 0.0f;
+        effect->presets_port.buffer_count = 1;
+        effect->presets_port.buffer = &effect->preset_value;
+        effect->presets_port.min_value = 0.0f;
+        effect->presets_port.max_value = 1.0f;
+        effect->presets_port.def_value = 0.0f;
+        effect->presets_port.prev_value = 0.0f;
+        effect->presets_port.type = TYPE_CONTROL;
+        effect->presets_port.flow = FLOW_INPUT;
+        effect->presets_port.hints = HINT_ENUMERATION|HINT_INTEGER;
+        effect->presets_port.symbol = g_presets_port_symbol;
+    }
 
     /* Set jack callbacks */
     jack_set_thread_init_callback(g_jack_global_client, JackThreadInit, NULL);
+    jack_set_timebase_callback(g_jack_global_client, 1, JackTimebase, NULL);
     jack_set_process_callback(g_jack_global_client, ProcessMidi, NULL);
+    jack_set_buffer_size_callback(g_jack_global_client, BufferSize, NULL);
+
+#ifdef HAVE_HYLIA
+    /* Init hylia */
+    hylia_enabled = false;
+    g_hylia_instance = hylia_create();
+    memset(&g_hylia_timeinfo, 0, sizeof(g_hylia_timeinfo));
+
+    if (g_hylia_instance)
+    {
+        hylia_set_beats_per_bar(g_hylia_instance, g_transport_bpb);
+        hylia_set_beats_per_minute(g_hylia_instance, g_transport_bpm);
+        hylia_set_output_latency(g_hylia_instance, GetHyliaOutputLatency());
+    }
+#endif
 
     /* Register jack ports */
     g_midi_in_port = jack_port_register(g_jack_global_client, "midi_in", JACK_DEFAULT_MIDI_TYPE, JackPortIsInput, 0);
@@ -1731,48 +2228,12 @@ int effects_init(void* client)
         return ERR_JACK_PORT_REGISTER;
     }
 
-    /* Try activate the jack global client */
-    if (jack_activate(g_jack_global_client) != 0)
-    {
-        fprintf(stderr, "can't activate global jack client\n");
-        if (client == NULL)
-            jack_client_close(g_jack_global_client);
-        return ERR_JACK_CLIENT_ACTIVATION;
-    }
-
-    /* Connect to all good hw ports (system, ttymidi and nooice) */
-    const char** const midihwports = jack_get_ports(g_jack_global_client, "", JACK_DEFAULT_MIDI_TYPE,
-                                                                              JackPortIsOutput|JackPortIsPhysical);
-    if (midihwports != NULL)
-    {
-        char ourportname[MAX_CHAR_BUF_SIZE+1];
-        ourportname[MAX_CHAR_BUF_SIZE] = '\0';
-
-        const char* const ourclientname = jack_get_client_name(g_jack_global_client);
-
-        snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:midi_in", ourclientname);
-
-        for (int i=0; midihwports[i] != NULL; ++i)
-        {
-            const char* const portname = midihwports[i];
-            if (strncmp(portname, "ttymidi:", 8) != 0 &&
-                strncmp(portname, "system:", 7) != 0 &&
-                strncmp(portname, "nooice", 5) != 0)
-                continue;
-
-            jack_connect(g_jack_global_client, portname, ourportname);
-        }
-
-        jack_free(midihwports);
-    }
-
     /* Load all LV2 data */
     g_lv2_data = lilv_world_new();
     lilv_world_load_all(g_lv2_data);
     g_plugins = lilv_world_get_all_plugins(g_lv2_data);
 
     /* Get sample rate */
-    g_sample_rate = jack_get_sample_rate(g_jack_global_client);
     g_sample_rate_node = lilv_new_uri(g_lv2_data, LV2_CORE__sampleRate);
 
     /* URI and URID Feature initialization */
@@ -1805,9 +2266,11 @@ int effects_init(void* client)
     g_urids.time_Position        = urid_to_id(g_symap, LV2_TIME__Position);
     g_urids.time_bar             = urid_to_id(g_symap, LV2_TIME__bar);
     g_urids.time_barBeat         = urid_to_id(g_symap, LV2_TIME__barBeat);
+    g_urids.time_beat            = urid_to_id(g_symap, LV2_TIME__beat);
     g_urids.time_beatUnit        = urid_to_id(g_symap, LV2_TIME__beatUnit);
     g_urids.time_beatsPerBar     = urid_to_id(g_symap, LV2_TIME__beatsPerBar);
     g_urids.time_beatsPerMinute  = urid_to_id(g_symap, LV2_TIME__beatsPerMinute);
+    g_urids.time_ticksPerBeat    = urid_to_id(g_symap, KX_TIME__TicksPerBeat);
     g_urids.time_frame           = urid_to_id(g_symap, LV2_TIME__frame);
     g_urids.time_speed           = urid_to_id(g_symap, LV2_TIME__speed);
 
@@ -1895,7 +2358,49 @@ int effects_init(void* client)
     g_postevents_ready = true;
     pthread_create(&g_postevents_thread, NULL, PostPonedEventsThread, NULL);
 
+    /* get transport state */
+    UpdateGlobalJackPosition(UPDATE_POSTION_SKIP);
+
+    /* Try activate the jack global client */
+    if (jack_activate(g_jack_global_client) != 0)
+    {
+        fprintf(stderr, "can't activate global jack client\n");
+        if (client == NULL)
+            jack_client_close(g_jack_global_client);
+        return ERR_JACK_CLIENT_ACTIVATION;
+    }
+
+    /* Connect to all good hw ports (system, ttymidi and nooice) */
+    const char** const midihwports = jack_get_ports(g_jack_global_client, "", JACK_DEFAULT_MIDI_TYPE,
+                                                                              JackPortIsOutput|JackPortIsPhysical);
+    if (midihwports != NULL)
+    {
+        char ourportname[MAX_CHAR_BUF_SIZE+1];
+        ourportname[MAX_CHAR_BUF_SIZE] = '\0';
+
+        const char* const ourclientname = jack_get_client_name(g_jack_global_client);
+
+        snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:midi_in", ourclientname);
+
+        for (int i=0; midihwports[i] != NULL; ++i)
+        {
+            const char* const portname = midihwports[i];
+            if (strncmp(portname, "ttymidi:", 8) != 0 &&
+                strncmp(portname, "system:", 7) != 0 &&
+                strncmp(portname, "nooice", 5) != 0)
+                continue;
+
+            jack_connect(g_jack_global_client, portname, ourportname);
+        }
+
+        jack_free(midihwports);
+    }
+
+    g_processing_enabled = true;
+
     return SUCCESS;
+
+    UNUSED_PARAM(global_effect_id_static_check);
 }
 
 int effects_finish(int close_client)
@@ -1924,6 +2429,21 @@ int effects_finish(int close_client)
     sem_destroy(&g_postevents_semaphore);
     pthread_mutex_destroy(&g_rtsafe_mutex);
     pthread_mutex_destroy(&g_midi_learning_mutex);
+
+    effect_t *effect = &g_effects[GLOBAL_EFFECT_ID];
+    if (effect->ports)
+    {
+        for (unsigned int i=0; i < effect->ports_count; i++)
+            free(effect->ports[i]);
+        free(effect->ports);
+    }
+
+#ifdef HAVE_HYLIA
+    hylia_cleanup(g_hylia_instance);
+    g_hylia_instance = NULL;
+#endif
+
+    g_processing_enabled = false;
 
     return SUCCESS;
 }
@@ -1954,6 +2474,7 @@ int effects_add(const char *uid, int instance)
     LilvInstance *lilv_instance;
     LilvNode *plugin_uri;
     LilvNode *lilv_input, *lilv_control_in, *lilv_enabled, *lilv_freeWheeling, *lilv_output;
+    LilvNode *lilv_timePosition, *lilv_timeBeatsPerBar, *lilv_timeBeatsPerMinute, *lilv_timeSpeed;
     LilvNode *lilv_enumeration, *lilv_integer, *lilv_toggled, *lilv_trigger, *lilv_logarithmic;
     LilvNode *lilv_control, *lilv_audio, *lilv_cv, *lilv_event, *lilv_midi;
     LilvNode *lilv_default, *lilv_mod_default;
@@ -1980,6 +2501,10 @@ int effects_add(const char *uid, int instance)
     lilv_enabled = NULL;
     lilv_enumeration = NULL;
     lilv_freeWheeling = NULL;
+    lilv_timePosition = NULL;
+    lilv_timeBeatsPerBar = NULL;
+    lilv_timeBeatsPerMinute = NULL;
+    lilv_timeSpeed = NULL;
     lilv_integer = NULL;
     lilv_toggled = NULL;
     lilv_trigger = NULL;
@@ -2093,6 +2618,10 @@ int effects_add(const char *uid, int instance)
     lilv_enabled = lilv_new_uri(g_lv2_data, LV2_CORE__enabled);
     lilv_enumeration = lilv_new_uri(g_lv2_data, LV2_CORE__enumeration);
     lilv_freeWheeling = lilv_new_uri(g_lv2_data, LV2_CORE__freeWheeling);
+    lilv_timePosition = lilv_new_uri(g_lv2_data, LV2_TIME__Position);
+    lilv_timeBeatsPerBar = lilv_new_uri(g_lv2_data, LV2_TIME__beatsPerBar);
+    lilv_timeBeatsPerMinute = lilv_new_uri(g_lv2_data, LV2_TIME__beatsPerMinute);
+    lilv_timeSpeed = lilv_new_uri(g_lv2_data, LV2_TIME__speed);
     lilv_integer = lilv_new_uri(g_lv2_data, LV2_CORE__integer);
     lilv_toggled = lilv_new_uri(g_lv2_data, LV2_CORE__toggled);
     lilv_trigger = lilv_new_uri(g_lv2_data, LV2_PORT_PROPS__trigger);
@@ -2276,7 +2805,7 @@ int effects_add(const char *uid, int instance)
             if (lilv_port_has_property(plugin, lilv_port, lilv_trigger))
             {
                 effect->ports[i]->hints |= HINT_TRIGGER;
-                effect->has_triggers = true;
+                effect->hints |= HINT_TRIGGERS;
             }
             if (lilv_port_has_property(plugin, lilv_port, lilv_logarithmic))
             {
@@ -2334,7 +2863,15 @@ int effects_add(const char *uid, int instance)
         {
             effect->ports[i]->type = TYPE_EVENT;
             if (lilv_port_is_a(plugin, lilv_port, lilv_event))
+            {
                 effect->ports[i]->hints |= HINT_OLD_EVENT_API;
+            }
+            else if (lilv_port_supports_event(plugin, lilv_port, lilv_timePosition))
+            {
+                effect->ports[i]->hints |= HINT_TRANSPORT;
+                effect->hints |= HINT_TRANSPORT;
+            }
+
             jack_port = jack_port_register(jack_client, port_name, JACK_DEFAULT_MIDI_TYPE, jack_flags, 0);
             if (jack_port == NULL)
             {
@@ -2382,6 +2919,38 @@ int effects_add(const char *uid, int instance)
         effect->freewheel_index = -1;
     }
 
+    const LilvPort* bpb_port = lilv_plugin_get_port_by_designation(plugin, lilv_input, lilv_timeBeatsPerBar);
+    if (bpb_port)
+    {
+        effect->bpb_index = lilv_port_get_index(plugin, bpb_port);
+        *(effect->ports[effect->bpb_index]->buffer) = g_transport_bpb;
+    }
+    else
+    {
+        effect->bpb_index = -1;
+    }
+
+    const LilvPort* bpm_port = lilv_plugin_get_port_by_designation(plugin, lilv_input, lilv_timeBeatsPerMinute);
+    if (bpm_port)
+    {
+        effect->bpm_index = lilv_port_get_index(plugin, bpm_port);
+        *(effect->ports[effect->bpm_index]->buffer) = g_transport_bpm;
+    }
+    else
+    {
+        effect->bpm_index = -1;
+    }
+
+    const LilvPort* speed_port = lilv_plugin_get_port_by_designation(plugin, lilv_input, lilv_timeSpeed);
+    if (speed_port)
+    {
+        effect->speed_index = lilv_port_get_index(plugin, speed_port);
+        *(effect->ports[effect->speed_index]->buffer) = g_jack_rolling ? 1.0f : 0.0f;
+    }
+    else
+    {
+        effect->speed_index = -1;
+    }
 
     /* Allocate memory to indexes */
     /* Audio ports */
@@ -2611,6 +3180,10 @@ int effects_add(const char *uid, int instance)
     lilv_node_free(lilv_enabled);
     lilv_node_free(lilv_enumeration);
     lilv_node_free(lilv_freeWheeling);
+    lilv_node_free(lilv_timePosition);
+    lilv_node_free(lilv_timeBeatsPerBar);
+    lilv_node_free(lilv_timeBeatsPerMinute);
+    lilv_node_free(lilv_timeSpeed);
     lilv_node_free(lilv_integer);
     lilv_node_free(lilv_toggled);
     lilv_node_free(lilv_trigger);
@@ -2663,6 +3236,10 @@ int effects_add(const char *uid, int instance)
         lilv_node_free(lilv_enabled);
         lilv_node_free(lilv_enumeration);
         lilv_node_free(lilv_freeWheeling);
+        lilv_node_free(lilv_timePosition);
+        lilv_node_free(lilv_timeBeatsPerBar);
+        lilv_node_free(lilv_timeBeatsPerMinute);
+        lilv_node_free(lilv_timeSpeed);
         lilv_node_free(lilv_integer);
         lilv_node_free(lilv_toggled);
         lilv_node_free(lilv_trigger);
@@ -2713,6 +3290,18 @@ int effects_preset_load(int effect_id, const char *uri)
             if (effect->freewheel_index >= 0)
             {
                 *(effect->ports[effect->freewheel_index]->buffer) = 0.0f;
+            }
+            if (effect->bpb_index >= 0)
+            {
+                *(effect->ports[effect->bpb_index]->buffer) = g_transport_bpb;
+            }
+            if (effect->bpm_index >= 0)
+            {
+                *(effect->ports[effect->bpm_index]->buffer) = g_transport_bpm;
+            }
+            if (effect->speed_index >= 0)
+            {
+                *(effect->ports[effect->speed_index]->buffer) = g_jack_rolling ? 1.0f : 0.0f;
             }
 
             return SUCCESS;
@@ -2863,6 +3452,9 @@ int effects_remove(int effect_id)
             free(effect->input_audio_ports);
             free(effect->output_audio_ports);
             free(effect->control_ports);
+            if (effect->events_buffer) {
+                jack_ringbuffer_free (effect->events_buffer);
+            }
 
             if (effect->presets)
             {
@@ -3200,7 +3792,7 @@ int effects_monitor_output_parameter(int effect_id, const char *control_symbol)
     port->hints |= HINT_MONITORED;
 
     // activate output monitor
-    g_effects[effect_id].has_output_monitors = true;
+    g_effects[effect_id].hints |= HINT_OUTPUT_MONITORS;
 
     return SUCCESS;
 }
@@ -3784,6 +4376,65 @@ void effects_bundle_remove(const char* bpath)
     // refresh plugins
     g_plugins = lilv_world_get_all_plugins(g_lv2_data);
 #endif
+}
+
+int effects_link_enable(int enable)
+{
+#ifdef HAVE_HYLIA
+    if (g_hylia_instance)
+    {
+        hylia_enable(g_hylia_instance, enable);
+        hylia_enabled = enable;
+        g_transport_reset = true;
+        return SUCCESS;
+    }
+#else
+    UNUSED_PARAM(enable);
+#endif
+
+    return ERR_LINK_UNAVAILABLE;
+}
+
+int effects_processing_enable(int enable)
+{
+    g_processing_enabled = enable;
+    return SUCCESS;
+}
+
+void effects_transport(int rolling, double beats_per_bar, double beats_per_minute)
+{
+    g_transport_bpb = beats_per_bar;
+    g_transport_bpm = beats_per_minute;
+
+#ifdef HAVE_HYLIA
+    if (g_hylia_instance)
+    {
+        hylia_set_beats_per_bar(g_hylia_instance, beats_per_bar);
+        hylia_set_beats_per_minute(g_hylia_instance, beats_per_minute);
+    }
+#endif
+
+    if ((g_jack_pos.valid & JackPositionBBT) == 0)
+    {
+        // old timebase master no longer active, make ourselves master again
+        jack_set_timebase_callback(g_jack_global_client, 1, JackTimebase, NULL);
+    }
+
+    if (g_jack_rolling != (rolling != 0) ||
+        g_jack_rolling != (jack_transport_query(g_jack_global_client, NULL) == JackTransportRolling))
+    {
+        if (rolling)
+        {
+            jack_transport_start(g_jack_global_client);
+        }
+        else
+        {
+            jack_transport_stop(g_jack_global_client);
+            jack_transport_locate(g_jack_global_client, 0);
+        }
+        // g_jack_rolling is updated on the next jack callback
+        g_transport_reset = true;
+    }
 }
 
 void effects_output_data_ready(void)
