@@ -1023,7 +1023,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
             const port_t *port = effect->ports[effect->control_index];
             LV2_Evbuf_Iterator e = lv2_evbuf_end(port->evbuf);
             const LV2_Atom* const ratom = (const LV2_Atom*)fatom;
-            lv2_evbuf_write(&e, nframes, 0, ratom->type, ratom->size,
+            lv2_evbuf_write(&e, nframes - 1, 0, ratom->type, ratom->size,
                                 LV2_ATOM_BODY_CONST(ratom));
         }
     }
