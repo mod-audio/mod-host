@@ -4398,6 +4398,11 @@ int effects_link_enable(int enable)
 int effects_processing_enable(int enable)
 {
     g_processing_enabled = enable;
+
+    if (enable > 1) {
+        effects_output_data_ready();
+    }
+
     return SUCCESS;
 }
 

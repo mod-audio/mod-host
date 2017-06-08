@@ -471,8 +471,8 @@ static void bundle_remove(proto_t *proto)
 
 static void feature_enable(proto_t *proto)
 {
-    const char* feature = proto->list[0];
-    int enabled = atoi(proto->list[1]);
+    const char* feature = proto->list[1];
+    int enabled = atoi(proto->list[2]);
     int resp;
 
     if (!strcmp(feature, "link"))
