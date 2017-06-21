@@ -2691,9 +2691,8 @@ int effects_preset_load(int effect_id, const char *uri)
     if (InstanceExist(effect_id))
     {
         LilvNode* preset_uri = lilv_new_uri(g_lv2_data, uri);
-        effect = &g_effects[effect_id];
 
-        if (lilv_world_load_resource(g_lv2_data, preset_uri) >= 0)
+        if (preset_uri && lilv_world_load_resource(g_lv2_data, preset_uri) >= 0)
         {
             LilvState* state = lilv_state_new_from_world(g_lv2_data, &g_urid_map, preset_uri);
             if (!state)
@@ -2701,6 +2700,9 @@ int effects_preset_load(int effect_id, const char *uri)
                 lilv_node_free(preset_uri);
                 return ERR_LV2_CANT_LOAD_STATE;
             }
+
+            effect = &g_effects[effect_id];
+
             lilv_state_restore(state, effect->lilv_instance, SetParameterFromState, effect, 0, NULL);
             lilv_state_free(state);
             lilv_node_free(preset_uri);
