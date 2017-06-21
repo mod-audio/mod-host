@@ -733,7 +733,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    /* Interactice mode */
+    /* Interactive mode */
     if (interactive)
     {
         interactive_mode();
