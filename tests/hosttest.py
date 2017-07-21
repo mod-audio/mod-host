@@ -56,7 +56,7 @@ host = None
 def run_jack():
     global jack
     if jack is None:
-        jack_is_running = os.system("ps auxw | grep jackd | grep -v grep")
+        jack_is_running = os.system("ps auxw | grep -v jackdbus | grep jackd | grep -v grep")
         assert jack_is_running != 0, "jackd is already running, please stop it before running the tests"
         jack = subprocess.Popen(["jackd", "-ddummy"], env=env)
         assert jack.poll() == None
