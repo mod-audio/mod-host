@@ -137,7 +137,11 @@ int socket_start(int port, int buffer_size)
     struct sockaddr_in serv_addr;
     memset((char *) &serv_addr, 0, sizeof(serv_addr));
     serv_addr.sin_family = AF_INET;
+#ifdef __MOD_DEVICES__
     serv_addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+#else
+    serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+#endif
 
     /* Try assign the server address */
     serv_addr.sin_port = htons(port);
