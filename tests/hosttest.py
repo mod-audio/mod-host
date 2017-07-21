@@ -1,8 +1,9 @@
 #!/usr/bin/python
 
 import socket, time, subprocess, os, shutil
-sock  = socket.socket()
-sockr = socket.socket()
+
+global sock
+sock = socket.socket()
 
 env = os.environ.copy()
 env['LV2_PATH'] = "/usr/lib/lv2:/tmp/lv2path"
@@ -40,15 +41,13 @@ egamp_preset = """@prefix atom: <http://lv2plug.in/ns/ext/atom#> .
 """
 
 def connect_socket():
+    global sock
     sock.connect(('localhost', 5555))
     sock.settimeout(0.2)
-    sockr.connect(('localhost', 5556))
-    sockr.settimeout(0.2)
 
 def reset_socket():
-    global sock, sockr
-    sock  = socket.socket()
-    sockr = socket.socket()
+    global sock
+    sock = socket.socket()
 
 jack = None
 host = None
