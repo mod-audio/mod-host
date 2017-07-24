@@ -2086,7 +2086,7 @@ int effects_init(void* client)
 
     pthread_mutexattr_t atts;
     pthread_mutexattr_init(&atts);
-#ifdef __ARM_ARCH_7A__
+#ifdef __MOD_DEVICES__
     pthread_mutexattr_setprotocol(&atts, PTHREAD_PRIO_INHERIT);
 #endif
 
