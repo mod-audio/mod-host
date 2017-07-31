@@ -285,7 +285,6 @@ void socket_run(int exit_on_failure)
         perror("accept error");
         exit(EXIT_FAILURE);
     }
-    g_clientfd = clientfd;
 
     if (g_fbserverfd != -1)
     {
@@ -301,8 +300,13 @@ void socket_run(int exit_on_failure)
             perror("accept error");
             exit(EXIT_FAILURE);
         }
+    }
+    else
+    {
         fbclientfd = -1;
     }
+
+    g_clientfd = clientfd;
     g_fbclientfd = fbclientfd;
 
     while (g_serverfd >= 0)
