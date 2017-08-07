@@ -106,12 +106,13 @@ static void parse_quote(char *str)
 static void trim_spaces(char *str)
 {
     char *pstr = str;
+    char c;
 
     while (*pstr) pstr++;
     while (1)
     {
-        pstr--;
-        if ((*pstr) == ' ') *pstr = 0;
+        c = *(--pstr);
+        if (c == ' ' || c == '\t' || c == '\n') *pstr = 0;
         else break;
     }
 }
