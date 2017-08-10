@@ -112,7 +112,7 @@ static void trim_spaces(char *str)
     while (1)
     {
         c = *(--pstr);
-        if (c == ' ' || c == '\t' || c == '\n') *pstr = 0;
+        if (c == ' ' || c == '\t' || c == '\r' || c == '\n') *pstr = 0;
         else break;
     }
 }
