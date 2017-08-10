@@ -3633,6 +3633,40 @@ int effects_disconnect(const char *portA, const char *portB)
     return ret;
 }
 
+int effects_list_uris(int *instances, const char **effects)
+{
+    int i;
+    int n=0;
+    for (i=0;i<MAX_INSTANCES;i++) {
+        if (InstanceExist(i)) {
+            const LilvNode *lilv_uri = lilv_plugin_get_uri(g_effects[i].lilv_plugin);
+            if (lilv_uri) {
+                instances[n]=i;
+                effects[n++] = lilv_node_as_uri(lilv_uri);
+            }
+        }
+    }
+    effects[n] = NULL;
+    return n;
+}
+
+int effects_list_bundles(int *instances, const char **effects)
+{
+    int i;
+    int n=0;
+    for (i=0;i<MAX_INSTANCES;i++) {
+        if (InstanceExist(i)) {
+            const LilvNode *lilv_uri = lilv_plugin_get_bundle_uri(g_effects[i].lilv_plugin);
+            if (lilv_uri) {
+                instances[n]=i;
+                effects[n++] = lilv_node_as_uri(lilv_uri);
+            }
+        }
+    }
+    effects[n] = NULL;
+    return n;
+}
+
 int effects_set_parameter(int effect_id, const char *control_symbol, float value)
 {
     port_t *port;
@@ -3856,7 +3890,7 @@ int effects_get_presets_uris(int effect_id, const char **uris)
 
     uris[i] = NULL;
 
-    return SUCCESS;
+    return effect->presets_count;
 }
 
 int effects_get_parameter_info(int effect_id, const char *control_symbol, float **range, const char **scale_points)
