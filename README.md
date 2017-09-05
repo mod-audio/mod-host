@@ -10,14 +10,15 @@ Currently the host supports the following LV2 features:
 
 * lv2core
 * atom
-* event
 * buf-size
+* event
 * midi
 * options
+* presets
+* time
 * uri-map
 * urid
 * worker
-* presets
 
 mod-host is part of the [MOD project](http://moddevices.com).
 
@@ -68,6 +69,9 @@ Options
     -p, --socket-port=<port>
         socket port definition
 
+    -f, --feedback-port<port>
+        feedback port definition
+
     -i, --interactive
         interactive shell mode
 
@@ -92,14 +96,6 @@ The commands supported by mod-host are:
         * remove an LV2 plugin instance (and also the jack client)
         e.g.: remove 0
 
-    connect <origin_port> <destination_port>
-        * connect two effect audio ports
-        e.g.: connect system:capture_1 effect_0:in
-
-    disconnect <origin_port> <destination_port>
-        * disconnect two effect audio ports
-        e.g.: disconnect system:capture_1 effect_0:in
-
     preset_load <instance_number> <preset_uri>
         * load a preset state to given effect instance
         e.g.: preset_load 0 "http://drobilla.net/plugins/mda/presets#JX10-moogcury-lite"
@@ -111,6 +107,20 @@ The commands supported by mod-host are:
     preset_show <instance_number> <preset_uri>
         * show the preset information of requested instance / URI
         e.g.: preset_show 0 http://drobilla.net/plugins/mda/presets#EPiano-bright
+
+    connect <origin_port> <destination_port>
+        * connect two effect audio ports
+        e.g.: connect system:capture_1 effect_0:in
+
+    disconnect <origin_port> <destination_port>
+        * disconnect two effect audio ports
+        e.g.: disconnect system:capture_1 effect_0:in
+
+    bypass <instance_number> <bypass_value>
+        * toggle effect processing
+        e.g.: bypass 0 1
+        if bypass_value = 1 bypass effect
+        if bypass_value = 0 process effect
 
     param_set <instance_number> <param_symbol> <param_value>
         * set a value to given control
@@ -124,29 +134,46 @@ The commands supported by mod-host are:
         * do monitoring a effect instance control port according given condition
         e.g: param_monitor 0 gain > 2.50
 
+    licensee <instance_number>
+        * get the licensee name for a commercial plugin
+        e.g.: licensee 0
+
     monitor <addr> <port> <status>
         * open a socket port to monitoring parameters
         e.g: monitor localhost 12345 1
         if status = 1 start monitoring
         if status = 0 stop monitoring
 
-    midi_learn <instance_number> <param_symbol>
-        This command maps starts MIDI learn for a parameter
-        e.g.: midi_learn 0 gain
+    monitor_output <instance_number> <param_symbol>
+        * request monitoring of an output control port in the feedback port
+        e.g.: monitor_output 0 meter
 
-    midi_map <instance_number> <param_symbol> <midi_channel> <midi_cc>
-        This command maps a MIDI controller to a parameter
-        e.g.: midi_map 0 gain 0 7
+    midi_learn <instance_number> <param_symbol> <minimum> <maximum>
+        * start MIDI learn for a parameter
+        e.g.: midi_learn 0 gain 0.0 1.0
+
+    midi_map <instance_number> <param_symbol> <midi_channel> <midi_cc> <minimum> <maximum>
+        * map a MIDI controller to a parameter
+        e.g.: midi_map 0 gain 0 7 0.0 1.0
 
     midi_unmap <instance_number> <param_symbol>
-        This command unmaps the MIDI controller from a parameter
+        * unmap the MIDI controller from a parameter
         e.g.: unmap 0 gain
 
-    bypass <instance_number> <bypass_value>
-        * toggle effect processing
-        e.g.: bypass 0 1
-        if bypass_value = 1 bypass effect
-        if bypass_value = 0 process effect
+    midi_program_listen <enable> <midi_channel>
+        * listen for MIDI program messages for the specified midi channel in the feedback port
+        e.g.: midi_program_listen 1 0
+
+    cc_map <instance_number> <param_symbol> <device_id> <actuator_id> <label> <value> <minimum> <maximum> <steps> <unit> <scalepoints_count> <scalepoints...>
+        * map a Control Chain actuator to a parameter
+        e.g.: midi_map 0 gain 0 1 "Gain" 0.0 -24.0 3.0 33 "dB" 0
+
+    cc_unmap <instance_number> <param_symbol>
+        * unmap the Control Chain actuator from a parameter
+        e.g.: unmap 0 gain
+
+    cpu_load
+        * return current jack cpu load
 
     load <file_name>
         * load a history command file
@@ -157,6 +184,26 @@ The commands supported by mod-host are:
         * saves the history of typed commands
         * dummy way to save/load workspace state
         e.g.: save my_setup
+
+    bundle_add <bundle_path>
+        * add a bundle to the running lv2 world
+        e.g.: bundle_add /path/to/bundle.lv2
+
+    bundle_remove <bundle_path>
+        * remove a bundle from the running lv2 world
+        e.g.: bundle_remove /path/to/bundle.lv2
+
+    feature_enable <feature> <enable>
+        * enable or disable a feature
+        e.g.: feature_enable link 1
+        current features are "link" and "processing"
+
+    transport <rolling> <beats_per_bar> <beats_per_minute>
+        * change the current transport state
+        e.g.: transport 1 4 120
+
+    output_data_ready
+        * report feedback port ready for more messages
 
     help
         * show a help message
@@ -178,6 +225,7 @@ If status is a negative number an error has occurred. The table below shows the 
 | -1      | ERR\_INSTANCE\_INVALID           |
 | -2      | ERR\_INSTANCE\_ALREADY\_EXISTS   |
 | -3      | ERR\_INSTANCE\_NON\_EXISTS       |
+| -4      | ERR\_INSTANCE\_UNLICENSED        |
 | -101    | ERR\_LV2\_INVALID\_URI           |
 | -102    | ERR\_LV2\_INSTANTIATION          |
 | -103    | ERR\_LV2\_INVALID\_PARAM\_SYMBOL |
@@ -189,7 +237,14 @@ If status is a negative number an error has occurred. The table below shows the 
 | -204    | ERR\_JACK\_PORT\_REGISTER        |
 | -205    | ERR\_JACK\_PORT\_CONNECTION      |
 | -206    | ERR\_JACK\_PORT\_DISCONNECTION   |
-| -301    | ERR\_MEMORY\_ALLOCATION          |
+| -301    | ERR\_ASSIGNMENT\_ALREADY\_EXISTS |
+| -302    | ERR\_ASSIGNMENT\_INVALID\_OP     |
+| -303    | ERR\_ASSIGNMENT\_LIST\_FULL      |
+| -304    | ERR\_ASSIGNMENT\_FAILED          |
+| -401    | ERR\_CONTROL\_CHAIN\_UNAVAILABLE |
+| -402    | ERR\_LINK\_UNAVAILABLE           |
+| -901    | ERR\_MEMORY\_ALLOCATION          |
+| -902    | ERR\_INVALID\_OPERATION          |
 
 A status zero or positive means that the command was executed successfully.
 In case of the add command, the status returned is the instance number.
