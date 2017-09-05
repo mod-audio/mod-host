@@ -58,12 +58,23 @@ static const char *g_commands[] = {
     "param_set",
     "param_get",
     "param_monitor",
+    "licensee",
     "monitor",
+    "monitor_output",
     "midi_learn",
     "midi_map",
     "midi_unmap",
+    "midi_program_listen",
+#define CC_MAP              "cc_map %i %s %i %i %s %f %f %f %i %s %i ..."
+#define CC_UNMAP            "cc_unmap %i %s"
+    "cpu_load",
     "load",
     "save",
+    "bundle_add",
+    "bundle_remove",
+    "feature_enable",
+    "transport",
+    "output_data_ready",
     "help",
     "quit",
     NULL
@@ -76,6 +87,12 @@ static const char *g_condition[] = {
     "<=",
     "==",
     "!=",
+    NULL
+};
+
+static const char *g_features[] = {
+    "link",
+    "processing",
     NULL
 };
 
@@ -211,16 +228,20 @@ static char **completion(const char *text, int start, int end)
         cmd = strarr_split(line);
         uint32_t count = spaces_count(rl_line_buffer);
 
-        uint8_t get_instances = 0, get_symbols = 0, get_param_info = 0, get_presets = 0;
+        uint8_t get_instances = 0, get_symbols = 0, get_symbols_output = 0, get_param_info = 0, get_presets = 0;
 
         if (count > 0)
         {
             if (strcmp(cmd[0], "add") == 0)
             {
-                if (count == 1) g_list = g_plugins_list;
+                if (count == 1)
+                {
+                    g_list = g_plugins_list;
+                }
             }
             else if ((strcmp(cmd[0], "remove") == 0) ||
-                     (strcmp(cmd[0], "bypass") == 0))
+                     (strcmp(cmd[0], "bypass") == 0) ||
+                     (strcmp(cmd[0], "licensee") == 0))
             {
                 if (count == 1)
                 {
@@ -260,7 +281,9 @@ static char **completion(const char *text, int start, int end)
                     get_instances = 1;
                 }
             }
-            else if (strcmp(cmd[0], "param_get") == 0)
+            else if (strcmp(cmd[0], "param_get") == 0 ||
+                     strcmp(cmd[0], "midi_unmap") == 0 ||
+                     strcmp(cmd[0], "cc_unmap") == 0)
             {
                 if (count == 1)
                 {
@@ -286,6 +309,36 @@ static char **completion(const char *text, int start, int end)
                     get_param_info = 1;
                 }
             }
+            else if (strcmp(cmd[0], "midi_learn") == 0)
+            {
+                if (count == 1)
+                {
+                    get_instances = 1;
+                }
+                else if (count == 2)
+                {
+                    get_symbols = 1;
+                }
+                else if (count == 3 || count == 4)
+                {
+                    get_param_info = 1;
+                }
+            }
+            else if (strcmp(cmd[0], "cc_map") == 0)
+            {
+                if (count == 1)
+                {
+                    get_instances = 1;
+                }
+                else if (count == 2)
+                {
+                    get_symbols = 1;
+                }
+                else if (count == 6)
+                {
+                    get_param_info = 1;
+                }
+            }
             else if (strcmp(cmd[0], "param_monitor") == 0)
             {
                 if (count == 1)
@@ -305,6 +358,25 @@ static char **completion(const char *text, int start, int end)
                     get_param_info = 1;
                 }
             }
+            else if (strcmp(cmd[0], "monitor_output") == 0)
+            {
+                if (count == 1)
+                {
+                    get_instances = 1;
+                }
+                else if (count == 2)
+                {
+                    get_symbols = 1;
+                    get_symbols_output = 1;
+                }
+            }
+            else if (strcmp(cmd[0], "feature_enable") == 0)
+            {
+                if (count == 1)
+                {
+                    g_list = g_features;
+                }
+            }
 
             if (get_instances)
             {
@@ -318,7 +390,7 @@ static char **completion(const char *text, int start, int end)
             }
             if (get_symbols)
             {
-                effects_get_parameter_symbols(atoi(cmd[1]), g_symbols);
+                effects_get_parameter_symbols(atoi(cmd[1]), get_symbols_output, g_symbols);
                 g_list = g_symbols;
             }
             if (get_param_info)
