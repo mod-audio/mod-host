@@ -3817,7 +3817,7 @@ int effects_bypass(int effect_id, int value)
     return SUCCESS;
 }
 
-int effects_get_parameter_symbols(int effect_id, const char** symbols)
+int effects_get_parameter_symbols(int effect_id, int output_ports, const char** symbols)
 {
     if (!InstanceExist(effect_id))
     {
@@ -3825,15 +3825,26 @@ int effects_get_parameter_symbols(int effect_id, const char** symbols)
         return ERR_INSTANCE_NON_EXISTS;
     }
 
-    uint32_t i;
+    uint32_t i, j;
     effect_t *effect = &g_effects[effect_id];
 
-    for (i = 0; i < effect->control_ports_count; i++)
+    for (i = 0, j = 0; i < effect->control_ports_count && j < 127; i++)
     {
-        symbols[i] = (const char *) effect->control_ports[i]->symbol;
+        if (output_ports)
+        {
+            if (effect->control_ports[i]->flow != FLOW_OUTPUT)
+                continue;
+        }
+        else
+        {
+            if (effect->control_ports[i]->flow != FLOW_INPUT)
+                continue;
+        }
+
+        symbols[j++] = (const char *) effect->control_ports[i]->symbol;
     }
 
-    symbols[i] = NULL;
+    symbols[j] = NULL;
 
     return SUCCESS;
 }
