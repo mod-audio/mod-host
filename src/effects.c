@@ -1578,18 +1578,39 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
     UNUSED_PARAM(arg);
 }
 
+/**
+ * If the transport is rolling and if we are the Jack Timebase Master
+ * then this callback acts once per cycle and effects the following
+ * cycle.
+ *
+ * This realtime function must not wait.
+ *
+ * Read: http://jackaudio.org/files/docs/html/transport-design.html
+ */
 static void JackTimebase(jack_transport_state_t state, jack_nframes_t nframes,
                          jack_position_t *pos, int new_pos, void *arg)
 {
     double tick;
 
+    // Who sets these global variables?
+
+    // g_transport_bpb, g_transport_bpm, g_transport_reset are static
+    // volatile and meant to be set from anywhere.
+
+    // g_transport_bpm is only set on lines 1352
+    // (UpdateValueFromMIDI), 1427 (ProcessMidi), 2016 (CCDataUpdate)
+    // and 4451 (effects_transport).
+    
+    // Update the extended position information.    
     pos->beats_per_bar = g_transport_bpb;
     pos->beats_per_minute = g_transport_bpm;
 
+    // Is this a hacky way to express rounding? Better use nearbyint()?
     const int32_t beats_per_bar_int = (int32_t)(pos->beats_per_bar + 0.5f);
 
-    if (new_pos || g_transport_reset)
+    if (new_pos || g_transport_reset) // Is caching involved? No.
     {
+      // Do we have to set every "constant" data field every time?
         pos->valid = JackPositionBBT;
         pos->beat_type = 4.0f;
         pos->ticks_per_beat = TRANSPORT_TICKS_PER_BEAT;
@@ -1615,6 +1636,10 @@ static void JackTimebase(jack_transport_state_t state, jack_nframes_t nframes,
         else
 #endif
         {
+	  /// ????
+	  // 1. analyse frame position. 2. calculate ticks. 3. derive values for everything else???
+	  
+	  // What is min? why 60?
             const double min = (double)pos->frame / (double)(g_sample_rate * 60);
             abs_tick = min * pos->beats_per_minute * TRANSPORT_TICKS_PER_BEAT;
             abs_beat = abs_tick / TRANSPORT_TICKS_PER_BEAT;
@@ -1628,11 +1653,14 @@ static void JackTimebase(jack_transport_state_t state, jack_nframes_t nframes,
 
         tick = abs_tick - (abs_beat * pos->ticks_per_beat);
     }
-    else
+    else // not new_pos nor g_transport_reset
     {
+      // update the current tick with the beat.
         tick = g_transport_tick +
-              (nframes * TRANSPORT_TICKS_PER_BEAT * pos->beats_per_minute / (double)(g_sample_rate * 60));
-
+              (nframes * TRANSPORT_TICKS_PER_BEAT *
+	       pos->beats_per_minute / (double)(g_sample_rate * 60));
+	
+	// why adjust? why can overflow happen?
         while (tick >= TRANSPORT_TICKS_PER_BEAT)
         {
             tick -= TRANSPORT_TICKS_PER_BEAT;
