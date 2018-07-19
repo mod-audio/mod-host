@@ -466,6 +466,12 @@ static volatile bool g_transport_reset;
 static double g_transport_tick;
 static bool g_processing_enabled;
 
+// Wall clock time since program startup;
+static unsigned long long monotonic_frame_count = 0;
+// Used for the MIDI Beat Clock Slave:
+static unsigned long long t_current = 0;
+static unsigned long long t_previous = 0;
+
 /* LV2 and Lilv */
 static LilvWorld *g_lv2_data;
 static const LilvPlugins *g_plugins;
@@ -1358,6 +1364,18 @@ static float UpdateValueFromMidi(midi_cc_t* mcc, uint16_t mvalue, bool highres)
     return value;
 }
 
+
+/**
+ * Calculate the BPM from the time difference of two adjacent MIDI
+ * Beat Clock signals.
+ *
+ * \text{bpm} = \frac{120}{2\cdot{}24}\cdot{}\cfrac{\text{SR}}{\delta t}
+ */
+float beats_per_minute(const size_t delta_t, const jack_nframes_t sample_rate) {
+  return (2.5 * (sample_rate)) / delta_t;
+}
+
+
 static void UpdateGlobalJackPosition(enum UpdatePositionFlag flag)
 {
     bool old_rolling;
@@ -1409,7 +1427,7 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
     float value;
     bool handled, highres, needs_post = false;
     enum UpdatePositionFlag pos_flag = UPDATE_POSTION_IF_CHANGED;
-
+    
 #ifdef HAVE_HYLIA
     if (hylia_enabled)
     {
@@ -1432,6 +1450,7 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
 
     UpdateGlobalJackPosition(pos_flag);
 
+    // Handle input MIDI events
     void *const port_buf = jack_port_get_buffer(g_midi_in_port, nframes);
     const jack_nframes_t event_count = jack_midi_get_event_count(port_buf);
 
@@ -1440,6 +1459,29 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
         if (jack_midi_event_get(&event, port_buf, i) != 0)
             break;
 
+	//  unsigned long long int wall_clock_time; monotonic increasing number.
+	
+	// Handle MIDI Beat Clock
+	if (event.buffer[0] == 0xF8) {
+	  // Calculate the timestamp difference to the previous MBC
+	  // event
+	  t_current = monotonic_frame_count + event.time;
+	  const long long unsigned delta_t = t_current - t_previous;	 
+
+	  printf("CHECK, %lld, +%lld, %f\n",
+		 t_current, delta_t,
+		 beats_per_minute(delta_t, g_sample_rate));
+	  
+	  fflush(stdout);
+	  
+	  // TODO: filter and update the global BPM state
+	  //g_transport_bpm = beats_per_minute(delta_t, g_sample_rate);
+	  // TODO: spelling mistake in pos>I<tion!
+	  //UpdateGlobalJackPosition(UPDATE_POSTION_FORCED); //???
+	  
+	  t_previous = t_current;
+	}
+	
         status = event.buffer[0] & 0xF0;
 
         // check if it's a program event
@@ -1573,6 +1615,9 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
     if (needs_post)
         sem_post(&g_postevents_semaphore);
 
+    // Increase by one period
+    monotonic_frame_count += nframes;
+    
     return 0;
 
     UNUSED_PARAM(arg);
