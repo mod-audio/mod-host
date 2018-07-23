@@ -196,7 +196,7 @@ The commands supported by mod-host are:
     feature_enable <feature> <enable>
         * enable or disable a feature
         e.g.: feature_enable link 1
-        current features are "link" and "processing"
+        current features are "link", "processing" and "midi_clock_slave"
 
     transport <rolling> <beats_per_bar> <beats_per_minute>
         * change the current transport state
