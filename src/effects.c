@@ -466,7 +466,7 @@ static volatile bool g_transport_reset;
 static double g_transport_tick;
 static bool g_processing_enabled;
 
-static volatile bool midi_beat_clock_slave_enabled; // TODO: Join with other states!
+static volatile bool midi_beat_clock_slave_enabled; // TODO: Join with other states, e.g. Hylia!
 // Wall clock time since program startup;
 static unsigned long long monotonic_frame_count = 0;
 // Used for the MIDI Beat Clock Slave:
@@ -1462,25 +1462,35 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
 
 	// Handle MIDI Beat Clock
 	if (midi_beat_clock_slave_enabled) {
-	  if (event.buffer[0] == 0xF8) {
+	  switch(event.buffer[0]) {
+	  case 0xF8: // Clock tick  
 	    // Calculate the timestamp difference to the previous MBC
 	    // event
 	    t_current = monotonic_frame_count + event.time;
 	    const long long unsigned delta_t = t_current - t_previous;	 
-	    
-	    printf("CHECK, %lld, +%lld, %f\n",
-		   t_current, delta_t,
-		   beats_per_minute(delta_t, g_sample_rate));
-	    
-	    fflush(stdout);
-	    
-	    // TODO: filter and update the global BPM state
+	        
+	    // TODO: filter the measured BPM
 	    g_transport_bpm = beats_per_minute(delta_t, g_sample_rate);
-	  // TODO: spelling mistake in pos>I<tion!
-	  UpdateGlobalJackPosition(UPDATE_POSTION_FORCED); // TODO: Use pos_flag to minimize function calls.
 	    
-	  t_previous = t_current;
+	    t_previous = t_current;
+	    break;
+	  case 0xFA: // Start
+	  case 0xFB: // Continue
+	    jack_transport_start(g_jack_global_client);
+	    break;
+
+	  case 0xFC: // Stop
+	    jack_transport_stop(g_jack_global_client);
+	    jack_transport_locate(g_jack_global_client, 0);
+	    break;
+	    
+	  default:
+	    // TODO: Handle MIDI Song Position Pointer
+	    break;
 	  }
+	  // TODO: spelling mistake in pos>I<tion!
+	  // TODO: Use pos_flag to minimize function calls.
+	  UpdateGlobalJackPosition(UPDATE_POSTION_FORCED);
 	}
 	  
 	status = event.buffer[0] & 0xF0;
