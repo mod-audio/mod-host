@@ -479,7 +479,9 @@ static void feature_enable(proto_t *proto)
         resp = effects_link_enable(enabled);
     else if (!strcmp(feature, "processing"))
         resp = effects_processing_enable(enabled);
-    else
+    else if (!strcmp(feature, "midi_clock_slave")) {
+      resp = effects_midi_clock_slave_enable(enabled);
+    } else
         resp = ERR_INVALID_OPERATION;
 
     char buffer[128];

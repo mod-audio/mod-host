@@ -466,7 +466,7 @@ static volatile bool g_transport_reset;
 static double g_transport_tick;
 static bool g_processing_enabled;
 
-static volatile bool midi_beat_clock_slave_enabled; // TODO: Join with other states, e.g. Hylia!
+static volatile bool g_midi_clock_slave_enabled; // TODO: Join with other states, e.g. Hylia, Processing!
 // Wall clock time since program startup;
 static unsigned long long monotonic_frame_count = 0;
 // Used for the MIDI Beat Clock Slave:
@@ -1461,7 +1461,7 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
 	  break;
 
 	// Handle MIDI Beat Clock
-	if (midi_beat_clock_slave_enabled) {
+	if (g_midi_clock_slave_enabled) {
 	  switch(event.buffer[0]) {
 	  case 0xF8: // Clock tick  
 	    // Calculate the timestamp difference to the previous MBC
@@ -2301,7 +2301,7 @@ int effects_init(void* client)
     }
 #endif
 
-    midi_beat_clock_slave_enabled = false;
+    g_midi_clock_slave_enabled = false;
     
     /* Register jack ports */
     g_midi_in_port = jack_port_register(g_jack_global_client, "midi_in", JACK_DEFAULT_MIDI_TYPE, JackPortIsInput, 0);
@@ -4504,6 +4504,18 @@ int effects_processing_enable(int enable)
 
     return SUCCESS;
 }
+
+int effects_midi_clock_slave_enable(int enable)
+{
+    g_midi_clock_slave_enabled = enable;
+
+    if (enable > 1) {
+        effects_output_data_ready();
+    }
+
+    return SUCCESS;
+}
+
 
 void effects_transport(int rolling, double beats_per_bar, double beats_per_minute)
 {
