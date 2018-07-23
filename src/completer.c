@@ -93,6 +93,7 @@ static const char *g_condition[] = {
 static const char *g_features[] = {
     "link",
     "processing",
+    "midi_clock_slave",
     NULL
 };
 
