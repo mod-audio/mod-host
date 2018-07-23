@@ -466,6 +466,7 @@ static volatile bool g_transport_reset;
 static double g_transport_tick;
 static bool g_processing_enabled;
 
+static volatile bool midi_beat_clock_slave_enabled; // TODO: Join with other states!
 // Wall clock time since program startup;
 static unsigned long long monotonic_frame_count = 0;
 // Used for the MIDI Beat Clock Slave:
@@ -1449,42 +1450,42 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
 #endif
 
     UpdateGlobalJackPosition(pos_flag);
-
+    
     // Handle input MIDI events
     void *const port_buf = jack_port_get_buffer(g_midi_in_port, nframes);
     const jack_nframes_t event_count = jack_midi_get_event_count(port_buf);
-
+    
     for (jack_nframes_t i = 0 ; i < event_count; i++)
-    {
-        if (jack_midi_event_get(&event, port_buf, i) != 0)
-            break;
+      {
+	if (jack_midi_event_get(&event, port_buf, i) != 0)
+	  break;
 
-	//  unsigned long long int wall_clock_time; monotonic increasing number.
-	
 	// Handle MIDI Beat Clock
-	if (event.buffer[0] == 0xF8) {
-	  // Calculate the timestamp difference to the previous MBC
-	  // event
-	  t_current = monotonic_frame_count + event.time;
-	  const long long unsigned delta_t = t_current - t_previous;	 
-
-	  printf("CHECK, %lld, +%lld, %f\n",
-		 t_current, delta_t,
-		 beats_per_minute(delta_t, g_sample_rate));
-	  
-	  fflush(stdout);
-	  
-	  // TODO: filter and update the global BPM state
-	  //g_transport_bpm = beats_per_minute(delta_t, g_sample_rate);
+	if (midi_beat_clock_slave_enabled) {
+	  if (event.buffer[0] == 0xF8) {
+	    // Calculate the timestamp difference to the previous MBC
+	    // event
+	    t_current = monotonic_frame_count + event.time;
+	    const long long unsigned delta_t = t_current - t_previous;	 
+	    
+	    printf("CHECK, %lld, +%lld, %f\n",
+		   t_current, delta_t,
+		   beats_per_minute(delta_t, g_sample_rate));
+	    
+	    fflush(stdout);
+	    
+	    // TODO: filter and update the global BPM state
+	    g_transport_bpm = beats_per_minute(delta_t, g_sample_rate);
 	  // TODO: spelling mistake in pos>I<tion!
-	  //UpdateGlobalJackPosition(UPDATE_POSTION_FORCED); //???
-	  
+	  UpdateGlobalJackPosition(UPDATE_POSTION_FORCED); // TODO: Use pos_flag to minimize function calls.
+	    
 	  t_previous = t_current;
+	  }
 	}
+	  
+	status = event.buffer[0] & 0xF0;
 	
-        status = event.buffer[0] & 0xF0;
-
-        // check if it's a program event
+	// check if it's a program event
         if (status == 0xC0)
         {
             if (event.size != 2 || g_midi_program_listen != (event.buffer[0] & 0x0F))
@@ -2290,6 +2291,8 @@ int effects_init(void* client)
     }
 #endif
 
+    midi_beat_clock_slave_enabled = false;
+    
     /* Register jack ports */
     g_midi_in_port = jack_port_register(g_jack_global_client, "midi_in", JACK_DEFAULT_MIDI_TYPE, JackPortIsInput, 0);
 
