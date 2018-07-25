@@ -108,6 +108,18 @@ The commands supported by mod-host are:
         * show the preset information of requested instance / URI
         e.g.: preset_show 0 http://drobilla.net/plugins/mda/presets#EPiano-bright
 
+    list_uris
+        * list current effect instances with its URIs
+
+    list_bundles
+        * list current effect instances with its bundle names
+
+    list_uris
+        * list current effect instances with its URIs
+
+    list_bundles
+        * list current effect instances with its bundle names
+
     connect <origin_port> <destination_port>
         * connect two effect audio ports
         e.g.: connect system:capture_1 effect_0:in
@@ -122,6 +134,14 @@ The commands supported by mod-host are:
         if bypass_value = 1 bypass effect
         if bypass_value = 0 process effect
 
+    preset_list <instance_number>
+        * show the preset list of requested instance
+        e.g.: preset_list 0
+
+    preset_list <instance_number>
+        * show the preset list of requested instance
+        e.g.: preset_list 0
+
     param_set <instance_number> <param_symbol> <param_value>
         * set a value to given control
         e.g.: param_set 0 gain 2.50
@@ -129,6 +149,14 @@ The commands supported by mod-host are:
     param_get <instance_number> <param_symbol>
         * get the value of the request control
         e.g.: param_get 0 gain
+
+    param_info <instance_number> <param_symbol>
+        * get range info and scale points for a given instance's parameter
+        e.g.: param_info 0 gain
+
+    param_info <instance_number> <param_symbol>
+        * get range info and scale points for a given instance's parameter
+        e.g.: param_info 0 gain
 
     param_monitor <instance_number> <param_symbol> <cond_op> <value>
         * do monitoring a effect instance control port according given condition
