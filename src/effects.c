@@ -184,7 +184,7 @@ enum {
 enum PostPonedEventType {
     POSTPONED_PARAM_SET,
     POSTPONED_OUTPUT_MONITOR,
-    POSTPONED_PROGRAM_LISTEN,
+    POSTPONED_MIDI_PROGRAM_CHANGE,
     POSTPONED_MIDI_MAP,
     POSTPONED_TRANSPORT
 };
@@ -370,9 +370,10 @@ typedef struct POSTPONED_PARAMETER_EVENT_T {
     float value;
 } postponed_parameter_event_t;
 
-typedef struct POSTPONED_PROGRAM_EVENT_T {
+typedef struct POSTPONED_MIDI_PROGRAM_CHANGE_EVENT_T {
     int8_t value;
-} postponed_program_event_t;
+    int8_t channel;
+} postponed_midi_program_change_event_t;
 
 typedef struct POSTPONED_MIDI_MAP_EVENT_T {
     int effect_id;
@@ -394,7 +395,7 @@ typedef struct POSTPONED_EVENT_T {
     enum PostPonedEventType type;
     union {
         postponed_parameter_event_t parameter;
-        postponed_program_event_t program;
+        postponed_midi_program_change_event_t program_change;
         postponed_midi_map_event_t midi_map;
         postponed_transport_event_t transport;
     };
@@ -768,11 +769,11 @@ static void RunPostPonedEvents(int ignored_effect_id)
             socket_send_feedback(buf);
             break;
 
-        case POSTPONED_PROGRAM_LISTEN:
+        case POSTPONED_MIDI_PROGRAM_CHANGE:
             if (got_midi_program)
                 continue;
 
-            snprintf(buf, MAX_CHAR_BUF_SIZE, "midi_program %i", eventptr->event.program.value);
+            snprintf(buf, MAX_CHAR_BUF_SIZE, "midi_program %i", eventptr->event.program_change.value);
             socket_send_feedback(buf);
 
             // ignore older midi program changes
@@ -1460,8 +1461,9 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
 	    // Append to the queue
             postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
             if (posteventptr) {
-	      posteventptr->event.type = POSTPONED_PROGRAM_LISTEN;
-	      posteventptr->event.program.value = event.buffer[1];
+	      posteventptr->event.type = POSTPONED_MIDI_PROGRAM_CHANGE;
+	      posteventptr->event.program_change.value = event.buffer[1];
+	      posteventptr->event.program_change.channel = event.buffer[2];
 
 	      pthread_mutex_lock(&g_rtsafe_mutex);
 	      list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
