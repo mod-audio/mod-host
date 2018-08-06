@@ -1455,7 +1455,8 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
 	// Handle MIDI program change
         if (status_nibble == 0xC0) {
 	  channel_nibble = (event.buffer[0] & 0x0F);
-	  if (channel_nibble == g_midi_control_listen.channel_pedalboard_bank
+	  if ( (channel_nibble == g_midi_control_listen.channel_pedalboard_bank ||
+		channel_nibble == g_midi_control_listen.channel_pedalboard_preset)
 	      && event.size == 2) {
 
 	    // Append to the queue
