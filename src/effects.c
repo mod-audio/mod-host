@@ -371,7 +371,7 @@ typedef struct POSTPONED_PARAMETER_EVENT_T {
 } postponed_parameter_event_t;
 
 typedef struct POSTPONED_MIDI_PROGRAM_CHANGE_EVENT_T {
-    int8_t value;
+    int8_t program;
     int8_t channel;
 } postponed_midi_program_change_event_t;
 
@@ -773,7 +773,9 @@ static void RunPostPonedEvents(int ignored_effect_id)
             if (got_midi_program)
                 continue;
 
-            snprintf(buf, MAX_CHAR_BUF_SIZE, "midi_program %i", eventptr->event.program_change.value);
+            snprintf(buf, MAX_CHAR_BUF_SIZE, "midi_program_change %i %i",
+		     eventptr->event.program_change.program,
+		     eventptr->event.program_change.channel);
             socket_send_feedback(buf);
 
             // ignore older midi program changes
@@ -1463,8 +1465,8 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
             postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
             if (posteventptr) {
 	      posteventptr->event.type = POSTPONED_MIDI_PROGRAM_CHANGE;
-	      posteventptr->event.program_change.value = event.buffer[1];
-	      posteventptr->event.program_change.channel = event.buffer[2];
+	      posteventptr->event.program_change.program = event.buffer[1];
+	      posteventptr->event.program_change.channel = channel_nibble;
 
 	      pthread_mutex_lock(&g_rtsafe_mutex);
 	      list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
