@@ -417,6 +417,12 @@ typedef struct POSTPONED_CACHED_EVENTS {
     postponed_cached_symbol_list_data symbols;
 } postponed_cached_events;
 
+typedef struct MIDI_CONTROL_LISTEN_T {
+  int channel_pedalboard_bank;
+  int channel_pedalboard_preset;
+  // TODO: Think about plugin bundle presets
+} midi_control_listen_t;
+
 
 /*
 ************************************************************************************************************************
@@ -493,8 +499,10 @@ static LV2_Feature g_buf_size_features[3] = {
     };
 
 /* MIDI Learn */
-static int g_midi_program_listen;
 static pthread_mutex_t g_midi_learning_mutex;
+
+/* MIDI control */
+static midi_control_listen_t g_midi_control_listen;
 
 #ifdef HAVE_HYLIA
 static volatile bool hylia_enabled;
@@ -1445,7 +1453,7 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
         // check if it's a program event
         if (status == 0xC0)
         {
-            if (event.size != 2 || g_midi_program_listen != (event.buffer[0] & 0x0F))
+            if (event.size != 2 || g_midi_control_listen.channel_pedalboard_bank != (event.buffer[0] & 0x0F))
                 continue;
 
             postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
@@ -2339,7 +2347,13 @@ int effects_init(void* client)
         g_midi_cc_list[i].port = NULL;
     }
     g_midi_learning = NULL;
-    g_midi_program_listen = 0;
+
+    /*
+     * Initialize the MIDI channels to filter. Note that mod-ui overrides these.
+     */
+    g_midi_control_listen.channel_pedalboard_bank = 15;
+    g_midi_control_listen.channel_pedalboard_preset = 14;
+    
 
 #ifdef HAVE_CONTROLCHAIN
     /* Init the control chain variables */
@@ -4141,7 +4155,7 @@ void effects_midi_program_listen(int enable, int channel)
     if (enable == 0 || channel < 0 || channel > 15)
         channel = -1;
 
-    g_midi_program_listen = channel;
+    g_midi_control_listen.channel_pedalboard_bank = channel;
 }
 
 int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int actuator_id,
