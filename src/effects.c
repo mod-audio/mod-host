@@ -4159,12 +4159,20 @@ int effects_licensee(int effect_id, char **licensee_ptr)
     return ERR_INSTANCE_UNLICENSED;
 }
 
-void effects_midi_program_listen(int enable, int channel)
-{
-    if (enable == 0 || channel < 0 || channel > 15)
-        channel = -1;
+void effects_set_midi_program_change_pedalboard_bank_channel(int enable, int channel) {
+  if (enable == 0 || channel < 0 || channel > 15) {
+    channel = -1;
+  }
 
-    g_midi_control_listen.channel_pedalboard_bank = channel;
+  g_midi_control_listen.channel_pedalboard_bank = channel;
+}
+
+void effects_set_midi_program_change_pedalboard_preset_channel(int enable, int channel) {
+  if (enable == 0 || channel < 0 || channel > 15) {
+    channel = -1;
+  }
+
+  g_midi_control_listen.channel_pedalboard_preset = channel;
 }
 
 int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int actuator_id,

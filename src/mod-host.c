@@ -324,10 +324,16 @@ static void midi_unmap_cb(proto_t *proto)
     protocol_response(buffer, proto);
 }
 
-static void midi_program_listen_cb(proto_t *proto)
+static void set_midi_program_change_pedalboard_bank_channel_cb(proto_t *proto)
 {
-    effects_midi_program_listen(atoi(proto->list[1]), atoi(proto->list[2]));
-    protocol_response("resp 0", proto);
+  effects_set_midi_program_change_pedalboard_bank_channel(atoi(proto->list[1]), atoi(proto->list[2]));
+  protocol_response("resp 0", proto);
+}
+
+static void set_midi_program_change_pedalboard_preset_channel_cb(proto_t *proto)
+{
+  effects_set_midi_program_change_pedalboard_preset_channel(atoi(proto->list[1]), atoi(proto->list[2]));
+  protocol_response("resp 0", proto);
 }
 
 static void cc_map_cb(proto_t *proto)
@@ -593,7 +599,10 @@ static int mod_host_init(jack_client_t* client, int socket_port, int feedback_po
     protocol_add_command(MIDI_LEARN, midi_learn_cb);
     protocol_add_command(MIDI_MAP, midi_map_cb);
     protocol_add_command(MIDI_UNMAP, midi_unmap_cb);
-    protocol_add_command(MIDI_PROGRAM_LISTEN, midi_program_listen_cb);
+    protocol_add_command(SET_MIDI_PROGRAM_CHANGE_PEDALBOARD_BANK_CHANNEL,
+			 set_midi_program_change_pedalboard_bank_channel_cb);
+    protocol_add_command(SET_MIDI_PROGRAM_CHANGE_PEDALBOARD_PRESET_CHANNEL,
+			 set_midi_program_change_pedalboard_preset_channel_cb);
     protocol_add_command(CC_MAP, cc_map_cb);
     protocol_add_command(CC_UNMAP, cc_unmap_cb);
     protocol_add_command(CPU_LOAD, cpu_load_cb);

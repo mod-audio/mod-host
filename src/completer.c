@@ -64,7 +64,8 @@ static const char *g_commands[] = {
     "midi_learn",
     "midi_map",
     "midi_unmap",
-    "midi_program_listen",
+    "set_midi_program_change_pedalboard_bank_channel",
+    "set_midi_program_change_pedalboard_preset_channel",
 #define CC_MAP              "cc_map %i %s %i %i %s %f %f %f %i %s %i ..."
 #define CC_UNMAP            "cc_unmap %i %s"
     "cpu_load",
