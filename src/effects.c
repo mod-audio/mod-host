@@ -1412,7 +1412,8 @@ static void UpdateGlobalJackPosition(enum UpdatePositionFlag flag)
 static int ProcessMidi(jack_nframes_t nframes, void *arg)
 {
     jack_midi_event_t event;
-    uint8_t channel, controller, status;
+    uint8_t channel, controller;
+    uint8_t status_nibble, channel_nibble;
     uint16_t mvalue;
     float value;
     bool handled, highres, needs_post = false;
@@ -1448,40 +1449,43 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
         if (jack_midi_event_get(&event, port_buf, i) != 0)
             break;
 
-        status = event.buffer[0] & 0xF0;
+        status_nibble = event.buffer[0] & 0xF0;
 
-        // check if it's a program event
-        if (status == 0xC0)
-        {
-            if (event.size != 2 || g_midi_control_listen.channel_pedalboard_bank != (event.buffer[0] & 0x0F))
-                continue;
+	// Handle MIDI program change
+        if (status_nibble == 0xC0) {
+	  channel_nibble = (event.buffer[0] & 0x0F);
+	  if (channel_nibble == g_midi_control_listen.channel_pedalboard_bank
+	      && event.size == 2) {
 
+	    // Append to the queue
             postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
+            if (posteventptr) {
+	      posteventptr->event.type = POSTPONED_PROGRAM_LISTEN;
+	      posteventptr->event.program.value = event.buffer[1];
 
-            if (posteventptr)
-            {
-                posteventptr->event.type = POSTPONED_PROGRAM_LISTEN;
-                posteventptr->event.program.value = event.buffer[1];
+	      pthread_mutex_lock(&g_rtsafe_mutex);
+	      list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
+	      pthread_mutex_unlock(&g_rtsafe_mutex);
 
-                pthread_mutex_lock(&g_rtsafe_mutex);
-                list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
-                pthread_mutex_unlock(&g_rtsafe_mutex);
-
-                needs_post = true;
+	      needs_post = true;
             }
-        }
+	  } else {
+	    // Wrong channel or size. Discard.
+	    continue;
+	  }
+        } // endif MIDI program change
 
         if (event.size != 3)
             continue;
 
         // check if it's a CC or Pitchbend event
-        if (status == 0xB0)
+        if (status_nibble == 0xB0)
         {
             controller = event.buffer[1];
             mvalue     = event.buffer[2];
             highres    = false;
         }
-        else if (status == 0xE0)
+        else if (status_nibble == 0xE0)
         {
             controller = MIDI_PITCHBEND_AS_CC;
             mvalue     = (event.buffer[2] << 7) | event.buffer[1];
