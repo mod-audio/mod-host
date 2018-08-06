@@ -160,9 +160,13 @@ The commands supported by mod-host are:
         * unmap the MIDI controller from a parameter
         e.g.: unmap 0 gain
 
-    midi_program_listen <enable> <midi_channel>
-        * listen for MIDI program messages for the specified midi channel in the feedback port
-        e.g.: midi_program_listen 1 0
+    set_midi_program_change_pedalboard_bank_channel <enable> <midi_channel>
+        * set the MIDI channel which changes pedalboard banks on MIDI program change.
+        e.g.: set_midi_program_change_pedalboard_bank_channel 1 15 to enable listening for bank changes on channel 16
+
+    set_midi_program_change_pedalboard_preset_channel <enable> <midi_channel>
+        * set the MIDI channel which changes pedalboard presets on MIDI program change.
+        e.g.: set_midi_program_change_pedalboard_preset_channel 1 14 to enable listening for preset changes on channel 15
 
     cc_map <instance_number> <param_symbol> <device_id> <actuator_id> <label> <value> <minimum> <maximum> <steps> <unit> <scalepoints_count> <scalepoints...>
         * map a Control Chain actuator to a parameter
