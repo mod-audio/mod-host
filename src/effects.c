@@ -680,6 +680,11 @@ static bool ShouldIgnorePostPonedEvent(postponed_parameter_event_t* ev, postpone
 
 static void RunPostPonedEvents(int ignored_effect_id)
 {
+#ifdef DEBUG
+  printf("DEBUG: RunPostPonedEvents()\n");
+  fflush(stdout);
+#endif
+  
     // local queue to where we'll save rtsafe list
     struct list_head queue;
     INIT_LIST_HEAD(&queue);
@@ -692,6 +697,10 @@ static void RunPostPonedEvents(int ignored_effect_id)
     if (list_empty(&queue))
     {
         // nothing to do
+#ifdef DEBUG
+  printf("DEBUG: Queue is empty\n");
+  fflush(stdout);
+#endif
         return;
     }
 
@@ -718,10 +727,20 @@ static void RunPostPonedEvents(int ignored_effect_id)
     struct list_head *it, *it2;
     postponed_event_list_data* eventptr;
 
+#ifdef DEBUG
+  printf("DEBUG: Before the queue iteration\n");
+  fflush(stdout);
+#endif
+    
     list_for_each_prev(it, &queue)
     {
         eventptr = list_entry(it, postponed_event_list_data, siblings);
 
+#ifdef DEBUG
+	printf("DEBUG: ptr %x\n", eventptr);
+	fflush(stdout);
+#endif
+	
         switch (eventptr->event.type)
         {
         case POSTPONED_PARAM_SET:
@@ -770,18 +789,33 @@ static void RunPostPonedEvents(int ignored_effect_id)
             break;
 
         case POSTPONED_MIDI_PROGRAM_CHANGE:
-            if (got_midi_program)
-                continue;
+	  if (got_midi_program) {
+#ifdef DEBUG
+  printf("DEBUG: I think I sent this before\n");
+  fflush(stdout);
+#endif
+	      continue;
+	  } else {
 
             snprintf(buf, MAX_CHAR_BUF_SIZE, "midi_program_change %i %i",
 		     eventptr->event.program_change.program,
 		     eventptr->event.program_change.channel);
             socket_send_feedback(buf);
 
+#ifdef DEBUG
+  printf("DEBUG: Sent \"midi_program_change %i %i\"\n",
+	 eventptr->event.program_change.program,
+	 eventptr->event.program_change.channel);
+  fflush(stdout);
+#endif
+
             // ignore older midi program changes
             got_midi_program = true;
             break;
 
+	    // Is the comment correct?
+	  }
+	  
         case POSTPONED_TRANSPORT:
             if (got_transport)
                 continue;
@@ -796,6 +830,11 @@ static void RunPostPonedEvents(int ignored_effect_id)
             break;
         }
     }
+#ifdef DEBUG
+    printf("DEBUG: After the queue iteration\n");
+    fflush(stdout);
+#endif
+
 
     // cleanup memory
     list_for_each_safe(it, it2, &cached_param_set.symbols.siblings)
@@ -818,6 +857,11 @@ static void RunPostPonedEvents(int ignored_effect_id)
 
     if (g_postevents_ready)
     {
+#ifdef DEBUG
+      printf("DEBUG: Reported data finish to server\n");
+      fflush(stdout);
+#endif
+
         // report data finished to server
         g_postevents_ready = false;
         socket_send_feedback("data_finish");
@@ -830,10 +874,23 @@ static void* PostPonedEventsThread(void* arg)
     {
         if (sem_timedwait_secs(&g_postevents_semaphore, 1) != 0)
             continue;
-
-        if (g_postevents_running == 1 && g_postevents_ready)
+	
+        if (g_postevents_running == 1 && g_postevents_ready) {
             RunPostPonedEvents(-3); // as all effects are valid we set ignored_effect_id to -3
+
+#ifdef DEBUG
+	    printf("DEBUG: q_postevents_running == %d\n", g_postevents_running);
+	    fflush(stdout);
+#endif
+	}
+	
     }
+
+#ifdef DEBUG
+  printf("DEBUG: q_postevents_running == %d\n", g_postevents_running);
+  printf("DEBUG: Thread stopped\n");
+  fflush(stdout);
+#endif
 
     return NULL;
 
@@ -1472,8 +1529,16 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
 	      list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
 	      pthread_mutex_unlock(&g_rtsafe_mutex);
 
+#ifdef DEBUG
+  printf("DEBUG: Pgr ch appended to queue\n");
+#endif 
+	      
 	      needs_post = true;
-            }
+            } else {
+#ifdef DEBUG
+  printf("DEBUG: Problem with mempool\n");
+#endif 
+	    }
 	  } else {
 	    // Wrong channel or size. Discard.
 	    continue;
@@ -2377,6 +2442,7 @@ int effects_init(void* client)
     }
 #endif
 
+    /* Start the thread that consumes from the event queue */
     g_postevents_running = 1;
     g_postevents_ready = true;
     pthread_create(&g_postevents_thread, NULL, PostPonedEventsThread, NULL);
@@ -3625,6 +3691,10 @@ int effects_remove(int effect_id)
     // start thread again
     if (g_postevents_running == 0)
     {
+#ifdef DEBUG
+      printf("DEBUG: Had to restart the thread\n");
+      fflush(stdout);
+#endif      
         g_postevents_running = 1;
         pthread_create(&g_postevents_thread, NULL, PostPonedEventsThread, NULL);
     }
