@@ -653,6 +653,10 @@ static void* intclient_socket_run(void* ptr)
 
 int main(int argc, char **argv)
 {
+#ifdef DEBUG
+  printf("DEBUG mode: on.\n");
+#endif 
+  
     /* Command line options */
     static struct option long_options[] = {
         {"nofork", no_argument, 0, 'n'},

@@ -4165,6 +4165,10 @@ void effects_set_midi_program_change_pedalboard_bank_channel(int enable, int cha
   }
 
   g_midi_control_listen.channel_pedalboard_bank = channel;
+
+#ifdef DEBUG
+  printf("DEBUG: Set bank channel := %d\n", channel);
+#endif
 }
 
 void effects_set_midi_program_change_pedalboard_preset_channel(int enable, int channel) {
@@ -4173,6 +4177,10 @@ void effects_set_midi_program_change_pedalboard_preset_channel(int enable, int c
   }
 
   g_midi_control_listen.channel_pedalboard_preset = channel;
+
+#ifdef DEBUG
+  printf("DEBUG: Set preset channel := %d\n", channel);
+#endif
 }
 
 int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int actuator_id,
