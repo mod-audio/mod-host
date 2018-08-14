@@ -420,7 +420,7 @@ typedef struct POSTPONED_CACHED_EVENTS {
 
 typedef struct MIDI_CONTROL_LISTEN_T {
   int channel_pedalboard_bank;
-  int channel_pedalboard_preset;
+  int channel_pedalboard_snapshot;
   // TODO: Think about plugin bundle presets
 } midi_control_listen_t;
 
@@ -1515,7 +1515,7 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
         if (status_nibble == 0xC0) {
 	  channel_nibble = (event.buffer[0] & 0x0F);
 	  if ( (channel_nibble == g_midi_control_listen.channel_pedalboard_bank ||
-		channel_nibble == g_midi_control_listen.channel_pedalboard_preset)
+		channel_nibble == g_midi_control_listen.channel_pedalboard_snapshot)
 	      && event.size == 2) {
 
 	    // Append to the queue
@@ -2426,7 +2426,7 @@ int effects_init(void* client)
      * Initialize the MIDI channels to filter. Note that mod-ui overrides these.
      */
     g_midi_control_listen.channel_pedalboard_bank = 15;
-    g_midi_control_listen.channel_pedalboard_preset = 14;
+    g_midi_control_listen.channel_pedalboard_snapshot = 14;
     
 
 #ifdef HAVE_CONTROLCHAIN
@@ -4241,15 +4241,15 @@ void effects_set_midi_program_change_pedalboard_bank_channel(int enable, int cha
 #endif
 }
 
-void effects_set_midi_program_change_pedalboard_preset_channel(int enable, int channel) {
+void effects_set_midi_program_change_pedalboard_snapshot_channel(int enable, int channel) {
   if (enable == 0 || channel < 0 || channel > 15) {
     channel = -1;
   }
 
-  g_midi_control_listen.channel_pedalboard_preset = channel;
+  g_midi_control_listen.channel_pedalboard_snapshot = channel;
 
 #ifdef DEBUG
-  printf("DEBUG: Set preset channel := %d\n", channel);
+  printf("DEBUG: Set snapshot channel := %d\n", channel);
 #endif
 }
 

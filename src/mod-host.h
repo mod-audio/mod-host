@@ -69,7 +69,7 @@
 #define MIDI_MAP            "midi_map %i %s %i %i %f %f"
 #define MIDI_UNMAP          "midi_unmap %i %s"
 #define SET_MIDI_PROGRAM_CHANGE_PEDALBOARD_BANK_CHANNEL "set_midi_program_change_pedalboard_bank_channel %i %i"
-#define SET_MIDI_PROGRAM_CHANGE_PEDALBOARD_PRESET_CHANNEL "set_midi_program_change_pedalboard_preset_channel %i %i"
+#define SET_MIDI_PROGRAM_CHANGE_PEDALBOARD_SNAPSHOT_CHANNEL "set_midi_program_change_pedalboard_snapshot_channel %i %i"
 #define CC_MAP              "cc_map %i %s %i %i %s %f %f %f %i %s %i ..."
 #define CC_UNMAP            "cc_unmap %i %s"
 #define CPU_LOAD            "cpu_load"

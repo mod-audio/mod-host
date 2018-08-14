@@ -148,7 +148,7 @@ int effects_licensee(int effect_id, char **licensee);
  * Feature is enabled for `enabled != 0` and `0 < channel < 15`.
  */
 void effects_set_midi_program_change_pedalboard_bank_channel(int enable, int channel);
-void effects_set_midi_program_change_pedalboard_preset_channel(int enable, int channel);
+void effects_set_midi_program_change_pedalboard_snapshot_channel(int enable, int channel);
 
 int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int actuator_id,
                    const char* label, float value, float minimum, float maximum, int steps, const char *unit,
