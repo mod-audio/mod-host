@@ -4229,6 +4229,43 @@ int effects_licensee(int effect_id, char **licensee_ptr)
     return ERR_INSTANCE_UNLICENSED;
 }
 
+/**
+ * Set Beats Per Minute in the Jack timebase.
+ * Returns NULL on success or a negative value on error.
+ */
+int effects_set_beats_per_minute(double bpm)
+{
+  int result = NULL;
+  if ((20.0 <= bpm) && (bpm <= 280.0)) {
+    // Change the current global value and fly a flag that is was
+    // changed.
+    g_transport_bpm = bpm;
+    g_transport_reset = true;
+  } else {
+    result = ERR_JACK_VALUE_OUT_OF_RANGE;
+  }
+  return result;
+}
+
+/**
+ * Set Beats Per Bar in the Jack timebase.
+ * Returns NULL on success or a negative value on error.
+ */
+int effects_set_beats_per_bar(float bpb)
+{
+  int result = NULL;
+  if ((1.0 <= bpb) && (bpb <= 16.0)) {
+    // Change the current global value and fly a flag that is was
+    // changed.
+    g_transport_bpb = bpb;
+    g_transport_reset = true;
+  } else {
+    result = ERR_JACK_VALUE_OUT_OF_RANGE;
+  }
+  return result;
+}
+
+
 void effects_set_midi_program_change_pedalboard_bank_channel(int enable, int channel) {
   if (enable == 0 || channel < 0 || channel > 15) {
     channel = -1;

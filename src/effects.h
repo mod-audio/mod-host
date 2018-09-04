@@ -59,6 +59,7 @@ enum {
     ERR_JACK_PORT_REGISTER = -204,
     ERR_JACK_PORT_CONNECTION = -205,
     ERR_JACK_PORT_DISCONNECTION = -206,
+    ERR_JACK_VALUE_OUT_OF_RANGE = -207,
 
     ERR_ASSIGNMENT_ALREADY_EXISTS = -301,
     ERR_ASSIGNMENT_INVALID_OP = -302,
@@ -141,6 +142,8 @@ int effects_midi_learn(int effect_id, const char *control_symbol, float minimum,
 int effects_midi_map(int effect_id, const char *control_symbol, int channel, int controller, float minimum, float maximum);
 int effects_midi_unmap(int effect_id, const char *control_symbol);
 int effects_licensee(int effect_id, char **licensee);
+int effects_set_beats_per_minute(double bpm);
+int effects_set_beats_per_bar(float bpb);
 
 /**
  * Pedalboard control with MIDI program change.
