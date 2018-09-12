@@ -55,6 +55,7 @@
 #include <lv2/lv2plug.in/ns/ext/buf-size/buf-size.h>
 #include <lv2/lv2plug.in/ns/ext/parameters/parameters.h>
 #include "mod-license.h"
+#include "mod-host.h"
 
 #ifdef HAVE_CONTROLCHAIN
 /* Control Chain */
@@ -4237,8 +4238,9 @@ void effects_set_midi_program_change_pedalboard_bank_channel(int enable, int cha
   g_midi_control_listen.channel_pedalboard_bank = channel;
 
   // Report this change to be stored in the user profile!
+  char buffer[MAX_CHAR_BUF_SIZE+1];
   buffer[MAX_CHAR_BUF_SIZE+1];
-  buf[MAX_CHAR_BUF_SIZE] = '\0';
+  buffer[MAX_CHAR_BUF_SIZE] = '\0';
   snprintf(buffer, MAX_CHAR_BUF_SIZE,
 	   SET_MIDI_PROGRAM_CHANGE_PEDALBOARD_BANK_CHANNEL, enable, channel);
   socket_send_feedback(buffer);
@@ -4257,7 +4259,7 @@ void effects_set_midi_program_change_pedalboard_snapshot_channel(int enable, int
 
   // Report this change to be stored in the user profile!
   char buffer[MAX_CHAR_BUF_SIZE+1];
-  buf[MAX_CHAR_BUF_SIZE] = '\0';
+  buffer[MAX_CHAR_BUF_SIZE] = '\0';
   snprintf(buffer, MAX_CHAR_BUF_SIZE,
 	   SET_MIDI_PROGRAM_CHANGE_PEDALBOARD_SNAPSHOT_CHANNEL, enable, channel);
   socket_send_feedback(buffer);
