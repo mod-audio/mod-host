@@ -55,6 +55,7 @@
 #include <lv2/lv2plug.in/ns/ext/buf-size/buf-size.h>
 #include <lv2/lv2plug.in/ns/ext/parameters/parameters.h>
 #include "mod-license.h"
+#include "mod-host.h"
 
 #ifdef HAVE_CONTROLCHAIN
 /* Control Chain */
@@ -184,7 +185,7 @@ enum {
 enum PostPonedEventType {
     POSTPONED_PARAM_SET,
     POSTPONED_OUTPUT_MONITOR,
-    POSTPONED_PROGRAM_LISTEN,
+    POSTPONED_MIDI_PROGRAM_CHANGE,
     POSTPONED_MIDI_MAP,
     POSTPONED_TRANSPORT
 };
@@ -370,9 +371,10 @@ typedef struct POSTPONED_PARAMETER_EVENT_T {
     float value;
 } postponed_parameter_event_t;
 
-typedef struct POSTPONED_PROGRAM_EVENT_T {
-    int8_t value;
-} postponed_program_event_t;
+typedef struct POSTPONED_MIDI_PROGRAM_CHANGE_EVENT_T {
+    int8_t program;
+    int8_t channel;
+} postponed_midi_program_change_event_t;
 
 typedef struct POSTPONED_MIDI_MAP_EVENT_T {
     int effect_id;
@@ -394,7 +396,7 @@ typedef struct POSTPONED_EVENT_T {
     enum PostPonedEventType type;
     union {
         postponed_parameter_event_t parameter;
-        postponed_program_event_t program;
+        postponed_midi_program_change_event_t program_change;
         postponed_midi_map_event_t midi_map;
         postponed_transport_event_t transport;
     };
@@ -416,6 +418,12 @@ typedef struct POSTPONED_CACHED_EVENTS {
     char last_symbol[MAX_CHAR_BUF_SIZE+1];
     postponed_cached_symbol_list_data symbols;
 } postponed_cached_events;
+
+typedef struct MIDI_CONTROL_LISTEN_T {
+  int channel_pedalboard_bank;
+  int channel_pedalboard_snapshot;
+  // TODO: Think about plugin bundle presets
+} midi_control_listen_t;
 
 
 /*
@@ -500,8 +508,10 @@ static LV2_Feature g_buf_size_features[3] = {
     };
 
 /* MIDI Learn */
-static int g_midi_program_listen;
 static pthread_mutex_t g_midi_learning_mutex;
+
+/* MIDI control */
+static midi_control_listen_t g_midi_control_listen;
 
 #ifdef HAVE_HYLIA
 static volatile bool hylia_enabled;
@@ -678,6 +688,11 @@ static bool ShouldIgnorePostPonedEvent(postponed_parameter_event_t* ev, postpone
 
 static void RunPostPonedEvents(int ignored_effect_id)
 {
+#ifdef DEBUG
+  printf("DEBUG: RunPostPonedEvents()\n");
+  fflush(stdout);
+#endif
+  
     // local queue to where we'll save rtsafe list
     struct list_head queue;
     INIT_LIST_HEAD(&queue);
@@ -690,6 +705,10 @@ static void RunPostPonedEvents(int ignored_effect_id)
     if (list_empty(&queue))
     {
         // nothing to do
+#ifdef DEBUG
+  printf("DEBUG: Queue is empty\n");
+  fflush(stdout);
+#endif
         return;
     }
 
@@ -716,10 +735,20 @@ static void RunPostPonedEvents(int ignored_effect_id)
     struct list_head *it, *it2;
     postponed_event_list_data* eventptr;
 
+#ifdef DEBUG
+  printf("DEBUG: Before the queue iteration\n");
+  fflush(stdout);
+#endif
+    
     list_for_each_prev(it, &queue)
     {
         eventptr = list_entry(it, postponed_event_list_data, siblings);
 
+#ifdef DEBUG
+	printf("DEBUG: ptr %x\n", eventptr);
+	fflush(stdout);
+#endif
+	
         switch (eventptr->event.type)
         {
         case POSTPONED_PARAM_SET:
@@ -767,17 +796,34 @@ static void RunPostPonedEvents(int ignored_effect_id)
             socket_send_feedback(buf);
             break;
 
-        case POSTPONED_PROGRAM_LISTEN:
-            if (got_midi_program)
-                continue;
+        case POSTPONED_MIDI_PROGRAM_CHANGE:
+	  if (got_midi_program) {
+#ifdef DEBUG
+  printf("DEBUG: I think I sent this before\n");
+  fflush(stdout);
+#endif
+	      continue;
+	  } else {
 
-            snprintf(buf, MAX_CHAR_BUF_SIZE, "midi_program %i", eventptr->event.program.value);
+            snprintf(buf, MAX_CHAR_BUF_SIZE, "midi_program_change %i %i",
+		     eventptr->event.program_change.program,
+		     eventptr->event.program_change.channel);
             socket_send_feedback(buf);
+
+#ifdef DEBUG
+  printf("DEBUG: Sent \"midi_program_change %i %i\"\n",
+	 eventptr->event.program_change.program,
+	 eventptr->event.program_change.channel);
+  fflush(stdout);
+#endif
 
             // ignore older midi program changes
             got_midi_program = true;
             break;
 
+	    // Is the comment correct?
+	  }
+	  
         case POSTPONED_TRANSPORT:
             if (got_transport)
                 continue;
@@ -792,6 +838,11 @@ static void RunPostPonedEvents(int ignored_effect_id)
             break;
         }
     }
+#ifdef DEBUG
+    printf("DEBUG: After the queue iteration\n");
+    fflush(stdout);
+#endif
+
 
     // cleanup memory
     list_for_each_safe(it, it2, &cached_param_set.symbols.siblings)
@@ -814,6 +865,11 @@ static void RunPostPonedEvents(int ignored_effect_id)
 
     if (g_postevents_ready)
     {
+#ifdef DEBUG
+      printf("DEBUG: Reported data finish to server\n");
+      fflush(stdout);
+#endif
+
         // report data finished to server
         g_postevents_ready = false;
         socket_send_feedback("data_finish");
@@ -826,10 +882,23 @@ static void* PostPonedEventsThread(void* arg)
     {
         if (sem_timedwait_secs(&g_postevents_semaphore, 1) != 0)
             continue;
-
-        if (g_postevents_running == 1 && g_postevents_ready)
+	
+        if (g_postevents_running == 1 && g_postevents_ready) {
             RunPostPonedEvents(-3); // as all effects are valid we set ignored_effect_id to -3
+
+#ifdef DEBUG
+	    printf("DEBUG: q_postevents_running == %d\n", g_postevents_running);
+	    fflush(stdout);
+#endif
+	}
+	
     }
+
+#ifdef DEBUG
+  printf("DEBUG: q_postevents_running == %d\n", g_postevents_running);
+  printf("DEBUG: Thread stopped\n");
+  fflush(stdout);
+#endif
 
     return NULL;
 
@@ -1423,7 +1492,8 @@ static void UpdateGlobalJackPosition(enum UpdatePositionFlag flag)
 static int ProcessMidi(jack_nframes_t nframes, void *arg)
 {
     jack_midi_event_t event;
-    uint8_t channel, controller, status;
+    uint8_t channel, controller;
+    uint8_t status_nibble, channel_nibble;
     uint16_t mvalue;
     float value;
     bool handled, highres, needs_post = false;
@@ -1501,32 +1571,44 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
             if (event.size != 2 || g_midi_program_listen != (event.buffer[0] & 0x0F))
                 continue;
 
+	    // Append to the queue
             postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
+            if (posteventptr) {
+	      posteventptr->event.type = POSTPONED_MIDI_PROGRAM_CHANGE;
+	      posteventptr->event.program_change.program = event.buffer[1];
+	      posteventptr->event.program_change.channel = channel_nibble;
 
-            if (posteventptr)
-            {
-                posteventptr->event.type = POSTPONED_PROGRAM_LISTEN;
-                posteventptr->event.program.value = event.buffer[1];
+	      pthread_mutex_lock(&g_rtsafe_mutex);
+	      list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
+	      pthread_mutex_unlock(&g_rtsafe_mutex);
 
-                pthread_mutex_lock(&g_rtsafe_mutex);
-                list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
-                pthread_mutex_unlock(&g_rtsafe_mutex);
-
-                needs_post = true;
-            }
-        }
+#ifdef DEBUG
+  printf("DEBUG: Pgr ch appended to queue\n");
+#endif 
+	      
+	      needs_post = true;
+            } else {
+#ifdef DEBUG
+  printf("DEBUG: Problem with mempool\n");
+#endif 
+	    }
+	  } else {
+	    // Wrong channel or size. Discard.
+	    continue;
+	  }
+        } // endif MIDI program change
 
         if (event.size != 3)
             continue;
 
         // check if it's a CC or Pitchbend event
-        if (status == 0xB0)
+        if (status_nibble == 0xB0)
         {
             controller = event.buffer[1];
             mvalue     = event.buffer[2];
             highres    = false;
         }
-        else if (status == 0xE0)
+        else if (status_nibble == 0xE0)
         {
             controller = MIDI_PITCHBEND_AS_CC;
             mvalue     = (event.buffer[2] << 7) | event.buffer[1];
@@ -2425,7 +2507,13 @@ int effects_init(void* client)
         g_midi_cc_list[i].port = NULL;
     }
     g_midi_learning = NULL;
-    g_midi_program_listen = 0;
+
+    /*
+     * Initialize the MIDI channels to filter. Note that mod-ui overrides these.
+     */
+    g_midi_control_listen.channel_pedalboard_bank = 15;
+    g_midi_control_listen.channel_pedalboard_snapshot = 14;
+    
 
 #ifdef HAVE_CONTROLCHAIN
     /* Init the control chain variables */
@@ -2440,6 +2528,7 @@ int effects_init(void* client)
     }
 #endif
 
+    /* Start the thread that consumes from the event queue */
     g_postevents_running = 1;
     g_postevents_ready = true;
     pthread_create(&g_postevents_thread, NULL, PostPonedEventsThread, NULL);
@@ -3688,6 +3777,10 @@ int effects_remove(int effect_id)
     // start thread again
     if (g_postevents_running == 0)
     {
+#ifdef DEBUG
+      printf("DEBUG: Had to restart the thread\n");
+      fflush(stdout);
+#endif      
         g_postevents_running = 1;
         pthread_create(&g_postevents_thread, NULL, PostPonedEventsThread, NULL);
     }
@@ -4222,12 +4315,43 @@ int effects_licensee(int effect_id, char **licensee_ptr)
     return ERR_INSTANCE_UNLICENSED;
 }
 
-void effects_midi_program_listen(int enable, int channel)
-{
-    if (enable == 0 || channel < 0 || channel > 15)
-        channel = -1;
+void effects_set_midi_program_change_pedalboard_bank_channel(int enable, int channel) {
+  if (enable == 0 || channel < 0 || channel > 15) {
+    channel = -1;
+  }
 
-    g_midi_program_listen = channel;
+  g_midi_control_listen.channel_pedalboard_bank = channel;
+
+  // Report this change to be stored in the user profile!
+  char buffer[MAX_CHAR_BUF_SIZE+1];
+  buffer[MAX_CHAR_BUF_SIZE+1];
+  buffer[MAX_CHAR_BUF_SIZE] = '\0';
+  snprintf(buffer, MAX_CHAR_BUF_SIZE,
+	   SET_MIDI_PROGRAM_CHANGE_PEDALBOARD_BANK_CHANNEL, enable, channel);
+  socket_send_feedback(buffer);
+
+#ifdef DEBUG
+  printf("DEBUG: Set bank channel := %d\n", channel);
+#endif
+}
+
+void effects_set_midi_program_change_pedalboard_snapshot_channel(int enable, int channel) {
+  if (enable == 0 || channel < 0 || channel > 15) {
+    channel = -1;
+  }
+
+  g_midi_control_listen.channel_pedalboard_snapshot = channel;
+
+  // Report this change to be stored in the user profile!
+  char buffer[MAX_CHAR_BUF_SIZE+1];
+  buffer[MAX_CHAR_BUF_SIZE] = '\0';
+  snprintf(buffer, MAX_CHAR_BUF_SIZE,
+	   SET_MIDI_PROGRAM_CHANGE_PEDALBOARD_SNAPSHOT_CHANNEL, enable, channel);
+  socket_send_feedback(buffer);
+
+#ifdef DEBUG
+  printf("DEBUG: Set snapshot channel := %d\n", channel);
+#endif
 }
 
 int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int actuator_id,

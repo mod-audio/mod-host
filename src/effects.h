@@ -141,7 +141,15 @@ int effects_midi_learn(int effect_id, const char *control_symbol, float minimum,
 int effects_midi_map(int effect_id, const char *control_symbol, int channel, int controller, float minimum, float maximum);
 int effects_midi_unmap(int effect_id, const char *control_symbol);
 int effects_licensee(int effect_id, char **licensee);
-void effects_midi_program_listen(int enable, int channel);
+
+/**
+ * Pedalboard control with MIDI program change.
+ *
+ * Feature is enabled for `enabled != 0` and `0 < channel < 15`.
+ */
+void effects_set_midi_program_change_pedalboard_bank_channel(int enable, int channel);
+void effects_set_midi_program_change_pedalboard_snapshot_channel(int enable, int channel);
+
 int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int actuator_id,
                    const char* label, float value, float minimum, float maximum, int steps, const char *unit,
                    int scalepoints_count, const scalepoint_t *scalepoints);
