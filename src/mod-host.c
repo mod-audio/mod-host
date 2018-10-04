@@ -596,6 +596,8 @@ static int mod_host_init(jack_client_t* client, int socket_port, int feedback_po
     protocol_add_command(EFFECT_PARAM_GET, effects_get_param_cb);
     protocol_add_command(EFFECT_PARAM_MON, effects_monitor_param_cb);
     protocol_add_command(EFFECT_LICENSEE, effects_licensee_cb);
+    protocol_add_command(EFFECT_SET_BEATS_PER_MINUTE, effects_set_beats_per_minute);
+    protocol_add_command(EFFECT_SET_BEATS_PER_BAR, effects_set_beats_per_bar);
     protocol_add_command(MONITOR_ADDR_SET, monitor_addr_set_cb);
     protocol_add_command(MONITOR_OUTPUT, monitor_output_cb);
     protocol_add_command(MIDI_LEARN, midi_learn_cb);

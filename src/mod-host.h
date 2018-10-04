@@ -63,6 +63,8 @@
 #define EFFECT_PARAM_GET    "param_get %i %s"
 #define EFFECT_PARAM_MON    "param_monitor %i %s %s %f"
 #define EFFECT_LICENSEE     "licensee %i"
+#define EFFECT_SET_BEATS_PER_MINUTE "set_bpm %f"
+#define EFFECT_SET_BEATS_PER_BAR "set_bpb %f"
 #define MONITOR_ADDR_SET    "monitor %s %i %i"
 #define MONITOR_OUTPUT      "monitor_output %i %s"
 #define MIDI_LEARN          "midi_learn %i %s %f %f"
