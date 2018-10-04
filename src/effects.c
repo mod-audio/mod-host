@@ -1563,13 +1563,14 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
 	  UpdateGlobalJackPosition(UPDATE_POSTION_FORCED);
 	}
 	  
-	status = event.buffer[0] & 0xF0;
+	status_nibble = event.buffer[0] & 0xF0;
 	
-	// check if it's a program event
-        if (status == 0xC0)
-        {
-            if (event.size != 2 || g_midi_program_listen != (event.buffer[0] & 0x0F))
-                continue;
+	// Handle MIDI program change
+        if (status_nibble == 0xC0) {
+	  channel_nibble = (event.buffer[0] & 0x0F);
+	  if ( (channel_nibble == g_midi_control_listen.channel_pedalboard_bank ||
+		channel_nibble == g_midi_control_listen.channel_pedalboard_snapshot)
+	       && event.size == 2) {
 
 	    // Append to the queue
             postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
