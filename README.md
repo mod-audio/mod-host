@@ -45,6 +45,10 @@ Dependencies:
 Running
 -------
 
+For developing start it like this:
+
+    $ ./mod-host -n -p 5555 -f 5556
+
 mod-host does not startup JACK automatically, so you need to start it before
 running mod-host.
 
