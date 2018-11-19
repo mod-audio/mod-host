@@ -469,6 +469,7 @@ static bool g_processing_enabled;
 static volatile bool g_midi_clock_slave_enabled; // TODO: Join with other states, e.g. Hylia, Processing!
 // Wall clock time since program startup;
 static unsigned long long monotonic_frame_count = 0;
+
 // Used for the MIDI Beat Clock Slave:
 static unsigned long long t_current = 0;
 static unsigned long long t_previous = 0;
@@ -1371,8 +1372,10 @@ static float UpdateValueFromMidi(midi_cc_t* mcc, uint16_t mvalue, bool highres)
  * Beat Clock signals.
  *
  * \text{bpm} = \frac{120}{2\cdot{}24}\cdot{}\cfrac{\text{SR}}{\delta t}
+ * 
+ * `delta_t` is time in samples. Due to filtering this is not integer.
  */
-float beats_per_minute(const size_t delta_t, const jack_nframes_t sample_rate) {
+float beats_per_minute(const float delta_t, const jack_nframes_t sample_rate) {
   return (2.5 * (sample_rate)) / delta_t;
 }
 
@@ -1467,10 +1470,13 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
 	    // Calculate the timestamp difference to the previous MBC
 	    // event
 	    t_current = monotonic_frame_count + event.time;
-	    const long long unsigned delta_t = t_current - t_previous;	 
-	        
-	    // TODO: filter the measured BPM
-	    g_transport_bpm = beats_per_minute(delta_t, g_sample_rate);
+	    const long long unsigned target_delta_t = t_current - t_previous;
+
+	    // Filter the time delta to reduce jitter
+	    const float e = 0.0001;
+	    const long long unsigned filtered_delta_t = (target_delta_t * e) + (filtered_delta_t * (1-e));	    
+	    
+	    g_transport_bpm = beats_per_minute(filtered_delta_t, g_sample_rate);
 	    
 	    t_previous = t_current;
 	    break;
