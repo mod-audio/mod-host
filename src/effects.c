@@ -1544,7 +1544,7 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
 	    const long long unsigned target_delta_t = t_current - t_previous;
 
 	    // Filter the time delta to reduce jitter
-	    const float e = 0.0001;
+	    const float e = 0.01;
 	    filtered_delta_t = (target_delta_t * e) + (filtered_delta_t * (1-e));	    
 	    
 	    g_transport_bpm = beats_per_minute(filtered_delta_t, g_sample_rate);
