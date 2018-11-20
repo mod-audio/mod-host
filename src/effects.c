@@ -481,6 +481,7 @@ static unsigned long long monotonic_frame_count = 0;
 // Used for the MIDI Beat Clock Slave:
 static unsigned long long t_current = 0;
 static unsigned long long t_previous = 0;
+static long long unsigned filtered_delta_t = 0;
 
 /* LV2 and Lilv */
 static LilvWorld *g_lv2_data;
@@ -1544,7 +1545,7 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
 
 	    // Filter the time delta to reduce jitter
 	    const float e = 0.0001;
-	    const long long unsigned filtered_delta_t = (target_delta_t * e) + (filtered_delta_t * (1-e));	    
+	    filtered_delta_t = (target_delta_t * e) + (filtered_delta_t * (1-e));	    
 	    
 	    g_transport_bpm = beats_per_minute(filtered_delta_t, g_sample_rate);
 	    
