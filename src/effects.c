@@ -481,7 +481,8 @@ static unsigned long long monotonic_frame_count = 0;
 // Used for the MIDI Beat Clock Slave:
 static unsigned long long t_current = 0;
 static unsigned long long t_previous = 0;
-static long long unsigned filtered_delta_t = 0;
+
+static double delta_t[3] = { 0.0 }; // all elements 0.0
 
 /* LV2 and Lilv */
 static LilvWorld *g_lv2_data;
@@ -1445,7 +1446,7 @@ static float UpdateValueFromMidi(midi_cc_t* mcc, uint16_t mvalue, bool highres)
  * 
  * `delta_t` is time in samples. Due to filtering this is not integer.
  */
-float beats_per_minute(const float delta_t, const jack_nframes_t sample_rate) {
+float beats_per_minute(const double delta_t, const jack_nframes_t sample_rate) {
   return (2.5 * (sample_rate)) / delta_t;
 }
 
@@ -1541,11 +1542,14 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
 	    // Calculate the timestamp difference to the previous MBC
 	    // event
 	    t_current = monotonic_frame_count + event.time;
-	    const long long unsigned target_delta_t = t_current - t_previous;
 
-	    // Filter the time delta to reduce jitter
-	    const float e = 0.01;
-	    filtered_delta_t = (target_delta_t * e) + (filtered_delta_t * (1-e));	    
+	    // Filter the time delta to reduce jitter.  This is a
+	    // centered binomial filter.	    
+	    delta_t[2] = delta_t[1];
+	    delta_t[1] = delta_t[0];
+	    delta_t[0] = (t_current - t_previous);
+
+	    double filtered_delta_t = 0.25*delta_t[0] + 0.5*delta_t[1] + 0.25*delta_t[2];
 	    
 	    g_transport_bpm = beats_per_minute(filtered_delta_t, g_sample_rate);
 	    
@@ -4331,7 +4335,7 @@ int effects_set_beats_per_minute(double bpm)
 {
   int result = NULL;
   if ((20.0 <= bpm) && (bpm <= 280.0)) {
-    // Change the current global value and fly a flag that is was
+    // Change the current global value and fly a flag that it was
     // changed.
     g_transport_bpm = bpm;
     g_transport_reset = true;
@@ -4682,6 +4686,9 @@ int effects_midi_clock_slave_enable(int enable)
         effects_output_data_ready();
     }
 
+#ifdef DEBUG
+    printf("DEBUG: Sync to external MIDI Beat Clock set to %d.\n", enable);
+#endif
     return SUCCESS;
 }
 
