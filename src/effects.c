@@ -482,7 +482,7 @@ static unsigned long long monotonic_frame_count = 0;
 static unsigned long long t_current = 0;
 static unsigned long long t_previous = 0;
 
-static double delta_t[3] = { 0.0 }; // all elements 0.0
+static double delta_t[8] = { 0.0 }; // all elements 0.0
 
 /* LV2 and Lilv */
 static LilvWorld *g_lv2_data;
@@ -1544,12 +1544,28 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
 	    t_current = monotonic_frame_count + event.time;
 
 	    // Filter the time delta to reduce jitter.  This is a
-	    // centered binomial filter.	    
+	    // centered binomial filter.
+	    // TODO: Use a for-loop.
+	    delta_t[7] = delta_t[6];
+	    delta_t[6] = delta_t[5];
+	    delta_t[5] = delta_t[4];
+	    delta_t[4] = delta_t[3];
+	    delta_t[3] = delta_t[2]; 
 	    delta_t[2] = delta_t[1];
 	    delta_t[1] = delta_t[0];
 	    delta_t[0] = (t_current - t_previous);
 
-	    double filtered_delta_t = 0.25*delta_t[0] + 0.5*delta_t[1] + 0.25*delta_t[2];
+	    const double coeffs[] = {
+				     0.00390625, 0.03125, 0.109375, 0.21875,
+				     0.2734375, 0.21875, 0.109375, 0.03125, 0.00390625
+	    };
+
+	    // TODO: 8 is the order of the filter and the size of the coefficient array.
+	    double filtered_delta_t = 0.0;
+	    for (int i = 0; i < 8; ++i) {
+	      filtered_delta_t += coeffs[i] * delta_t[i];
+	    }
+	      
 	    
 	    g_transport_bpm = beats_per_minute(filtered_delta_t, g_sample_rate);
 	    
