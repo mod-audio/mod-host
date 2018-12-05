@@ -482,7 +482,8 @@ static unsigned long long monotonic_frame_count = 0;
 static unsigned long long t_current = 0;
 static unsigned long long t_previous = 0;
 
-static double delta_t[8] = { 0.0 }; // all elements 0.0
+const unsigned int filter_order = 48;
+static double delta_t[48] = { 0.0 }; // all elements 0.0
 
 /* LV2 and Lilv */
 static LilvWorld *g_lv2_data;
@@ -1545,28 +1546,43 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
 
 	    // Filter the time delta to reduce jitter.  This is a
 	    // centered binomial filter.
-	    // TODO: Use a for-loop.
-	    delta_t[7] = delta_t[6];
-	    delta_t[6] = delta_t[5];
-	    delta_t[5] = delta_t[4];
-	    delta_t[4] = delta_t[3];
-	    delta_t[3] = delta_t[2]; 
-	    delta_t[2] = delta_t[1];
-	    delta_t[1] = delta_t[0];
+	    for (unsigned int i = filter_order-1; i >= 1; --i) {
+	      delta_t[i] = delta_t[i-1];
+	    }
 	    delta_t[0] = (t_current - t_previous);
 
 	    const double coeffs[] = {
-				     0.00390625, 0.03125, 0.109375, 0.21875,
-				     0.2734375, 0.21875, 0.109375, 0.03125, 0.00390625
+				     7.105427357601002e-15, 3.339550858072471e-13,
+				     7.680966973566683e-12, 1.1521450460350025e-10,
+				     1.2673595506385027e-09, 1.0899292135491123e-08,
+				     7.629504494843786e-08, 4.4687097755513605e-07,
+				     2.2343548877756803e-06, 9.682204513694614e-06,
+				     3.6792377152039535e-05, 0.0001237561776932239,
+				     0.00037126853307967167, 0.000999569127522193,
+				     0.0024275250239824686, 0.005340555052761431,
+				     0.010681110105522862, 0.01947731842771816,
+				     0.032462197379530267, 0.0495475644213883,
+				     0.06936659018994362, 0.08918561595849894,
+				     0.10540118249640784, 0.11456650271348678,
+				     0.11456650271348678, 0.10540118249640784,
+				     0.08918561595849894, 0.06936659018994362,
+				     0.0495475644213883, 0.032462197379530267,
+				     0.01947731842771816, 0.010681110105522862,
+				     0.005340555052761431, 0.0024275250239824686,
+				     0.000999569127522193, 0.00037126853307967167,
+				     0.0001237561776932239, 3.6792377152039535e-05,
+				     9.682204513694614e-06, 2.2343548877756803e-06,
+				     4.4687097755513605e-07, 7.629504494843786e-08,
+				     1.0899292135491123e-08, 1.2673595506385027e-09,
+				     1.1521450460350025e-10, 7.680966973566683e-12,
+				     3.339550858072471e-13, 7.105427357601002e-15
 	    };
 
-	    // TODO: 8 is the order of the filter and the size of the coefficient array.
 	    double filtered_delta_t = 0.0;
-	    for (int i = 0; i < 8; ++i) {
+	    for (unsigned int i = 0; i < filter_order; ++i) {
 	      filtered_delta_t += coeffs[i] * delta_t[i];
 	    }
-	      
-	    
+
 	    g_transport_bpm = beats_per_minute(filtered_delta_t, g_sample_rate);
 	    
 	    t_previous = t_current;
