@@ -4743,6 +4743,10 @@ void effects_transport(int rolling, double beats_per_bar, double beats_per_minut
         // g_jack_rolling is updated on the next jack callback
         g_transport_reset = true;
     }
+
+#ifdef DEBUG
+    printf("DEBUG: Transport changed to %d %f, %f.\n", rolling, beats_per_minute, beats_per_bar);
+#endif
 }
 
 void effects_output_data_ready(void)
