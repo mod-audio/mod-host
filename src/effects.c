@@ -562,7 +562,7 @@ static void InitializeControlChainIfNeeded(void);
 static uint32_t GetHyliaOutputLatency(void);
 #endif
 static void init_dll(double tme, double period);
-static void run_dll(double tme);
+static double run_dll(double tme);
 
 /*
 ************************************************************************************************************************
@@ -1514,7 +1514,7 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
         {
             // two data points have been recieved to start the initialisation
             // initialize DLL with time difference
-            init_dll(t_current - t_previous);
+	  init_dll(t_current, t_current - t_previous);
             filtered_delta_t = dll_samplerate * 60 / (24.0 * (double)run_dll(t_previous));
              g_transport_bpm = beats_per_minute(filtered_delta_t, g_sample_rate);
              dll_run++;
