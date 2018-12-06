@@ -516,7 +516,14 @@ static const char* const g_bpb_port_symbol = BPB_PORT_SYMBOL;
 static const char* const g_bpm_port_symbol = BPM_PORT_SYMBOL;
 static const char* const g_rolling_port_symbol = ROLLING_PORT_SYMBOL;
 
-
+// coefficients for the delay locked loop
+static double dll_t0; // time of the current Mclk tick
+static double dll_t1; // expected next Mclk tick
+static double dll_e2; // second order loop error
+static double dll_b, dll_c, dll_omega; // DLL filter coefficients
+static double dll_bandwidth = 6.0; // 1/Hz bandwidth
+static double dll_samplerate = 48000.0; //samplerate of the duo
+static int dll_run = 0; //start the dll
 /*
 ************************************************************************************************************************
 *           LOCAL FUNCTION PROTOTYPES
@@ -553,7 +560,8 @@ static void InitializeControlChainIfNeeded(void);
 #ifdef HAVE_HYLIA
 static uint32_t GetHyliaOutputLatency(void);
 #endif
-
+static void init_dll(double tme, double period);
+static void run_dll(double tme);
 
 /*
 ************************************************************************************************************************
@@ -567,6 +575,32 @@ static uint32_t GetHyliaOutputLatency(void);
 *           LOCAL FUNCTIONS
 ************************************************************************************************************************
 */
+/**
+ * initialize DLL
+ * set current time and period in samples
+ */
+static void init_dll(double tme, double period) {
+  const double omega = 2.0 * M_PI * period / dll_bandwidth / dll_samplerate;
+  dll_b = 1.4142135623730950488 * omega; // I think this is wrong and should be sqrt(2*omega). Lets try this first
+  dll_c = omega * omega;
+
+  dll_e2 = period / dll_samplerate;
+  dll_t0 = tme / dll_samplerate;
+  dll_t1 = dll_t0 + dll_e2;
+}
+
+/**
+ * run one loop iteration.
+ * param tme time of event (in samples)
+ * return smoothed interval (period) [1/Hz]
+ */
+static double run_dll(double tme) {
+  const double e = tme / dll_samplerate - dll_t1;
+  dll_t0 = dll_t1;
+  dll_t1 += dll_b * e + dll_e2;
+  dll_e2 += dll_c * e;
+  return (dll_t1 - dll_t0);
+}
 
 static void InstanceDelete(int effect_id)
 {
@@ -1460,48 +1494,60 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
     
     for (jack_nframes_t i = 0 ; i < event_count; i++)
       {
-	if (jack_midi_event_get(&event, port_buf, i) != 0)
-	  break;
+    if (jack_midi_event_get(&event, port_buf, i) != 0)
+      break;
 
-	// Handle MIDI Beat Clock
-	if (g_midi_clock_slave_enabled) {
-	  switch(event.buffer[0]) {
-	  case 0xF8: // Clock tick  
-	    // Calculate the timestamp difference to the previous MBC
-	    // event
-	    t_current = monotonic_frame_count + event.time;
-	    const long long unsigned target_delta_t = t_current - t_previous;
+    // Handle MIDI Beat Clock
+    if (g_midi_clock_slave_enabled) {
+      switch(event.buffer[0]) {
+      case 0xF8: // Clock tick  
+        // Calculate the timestamp difference to the previous MBC
+        // event
+        t_current = monotonic_frame_count + event.time;
+        const long long unsigned target_delta_t = t_current - t_previous;
+        if(dll_run == 1)
+        {
+            // two data points have been recieved to start the initialisation
+            // initialize DLL with time difference
+            init_dll(t_current - t_previous);
+            filtered_delta_t = dll_samplerate * 60 / (24.0 * (double)run_dll(t_previous));
+        }
+        else if(dll_run > 1)
+        {
+            filtered_delta_t = 60.0 / (24.0 * run_dll(t_current))
+        }
+        // Filter the time delta to reduce jitter This is old code
+        //const float e = 0.0001;
+        //const long long unsigned filtered_delta_t = (target_delta_t * e) + (filtered_delta_t * (1-e));      
+        
+        g_transport_bpm = beats_per_minute(filtered_delta_t, g_sample_rate);
+        
+        dll_run++;
+        t_previous = t_current;
+        break;
+      case 0xFA: // Start
+      case 0xFB: // Continue
+        jack_transport_start(g_jack_global_client);
+        break;
 
-	    // Filter the time delta to reduce jitter
-	    const float e = 0.0001;
-	    const long long unsigned filtered_delta_t = (target_delta_t * e) + (filtered_delta_t * (1-e));	    
-	    
-	    g_transport_bpm = beats_per_minute(filtered_delta_t, g_sample_rate);
-	    
-	    t_previous = t_current;
-	    break;
-	  case 0xFA: // Start
-	  case 0xFB: // Continue
-	    jack_transport_start(g_jack_global_client);
-	    break;
-
-	  case 0xFC: // Stop
-	    jack_transport_stop(g_jack_global_client);
-	    jack_transport_locate(g_jack_global_client, 0);
-	    break;
-	    
-	  default:
-	    // TODO: Handle MIDI Song Position Pointer
-	    break;
-	  }
-	  // TODO: spelling mistake in pos>I<tion!
-	  // TODO: Use pos_flag to minimize function calls.
-	  UpdateGlobalJackPosition(UPDATE_POSTION_FORCED);
-	}
-	  
-	status = event.buffer[0] & 0xF0;
-	
-	// check if it's a program event
+      case 0xFC: // Stop
+        jack_transport_stop(g_jack_global_client);
+        jack_transport_locate(g_jack_global_client, 0);
+        dll_run = 0; //reset the counter as the clock sync is 
+        break;
+        
+      default:
+        // TODO: Handle MIDI Song Position Pointer
+        break;
+      }
+      // TODO: spelling mistake in pos>I<tion!
+      // TODO: Use pos_flag to minimize function calls.
+      UpdateGlobalJackPosition(UPDATE_POSTION_FORCED);
+    }
+      
+    status = event.buffer[0] & 0xF0;
+    
+    // check if it's a program event
         if (status == 0xC0)
         {
             if (event.size != 2 || g_midi_program_listen != (event.buffer[0] & 0x0F))
@@ -1698,10 +1744,10 @@ static void JackTimebase(jack_transport_state_t state, jack_nframes_t nframes,
         else
 #endif
         {
-	  /// ????
-	  // 1. analyse frame position. 2. calculate ticks. 3. derive values for everything else???
-	  
-	  // What is min? why 60?
+      /// ????
+      // 1. analyse frame position. 2. calculate ticks. 3. derive values for everything else???
+      
+      // What is min? why 60?
             const double min = (double)pos->frame / (double)(g_sample_rate * 60);
             abs_tick = min * pos->beats_per_minute * TRANSPORT_TICKS_PER_BEAT;
             abs_beat = abs_tick / TRANSPORT_TICKS_PER_BEAT;
@@ -1720,9 +1766,9 @@ static void JackTimebase(jack_transport_state_t state, jack_nframes_t nframes,
       // update the current tick with the beat.
         tick = g_transport_tick +
               (nframes * TRANSPORT_TICKS_PER_BEAT *
-	       pos->beats_per_minute / (double)(g_sample_rate * 60));
-	
-	// why adjust? why can overflow happen?
+           pos->beats_per_minute / (double)(g_sample_rate * 60));
+    
+    // why adjust? why can overflow happen?
         while (tick >= TRANSPORT_TICKS_PER_BEAT)
         {
             tick -= TRANSPORT_TICKS_PER_BEAT;
