@@ -520,7 +520,7 @@ static const char* const g_rolling_port_symbol = ROLLING_PORT_SYMBOL;
 static double dll_t0; // time of the current Mclk tick
 static double dll_t1; // expected next Mclk tick
 static double dll_e2; // second order loop error
-static double dll_b, dll_c, dll_omega; // DLL filter coefficients
+static double dll_b, dll_c; // DLL filter coefficients
 static double dll_bandwidth = 6.0; // 1/Hz bandwidth
 static double dll_samplerate = 48000.0; //samplerate of the duo
 static int dll_run = 0; //dll boot counter
@@ -1505,29 +1505,25 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
         // Calculate the timestamp difference to the previous MBC
         // event
         t_current = monotonic_frame_count + event.time;
-        //const long long unsigned target_delta_t = t_current - t_previous;
-        if(dll_run < 1)
-        {
-            dll_run++;
-        }
-        else if(dll_run == 1)
-        {
+
+        if (dll_run < 1) {
+	  dll_run++;
+        } else {
+	  if(dll_run == 1) {
             // two data points have been recieved to start the initialisation
             // initialize DLL with time difference
-	  init_dll(t_current, t_current - t_previous);
+	    init_dll(t_current, t_current - t_previous);
             filtered_delta_t = dll_samplerate * 60 / (24.0 * (double)run_dll(t_previous));
-             g_transport_bpm = beats_per_minute(filtered_delta_t, g_sample_rate);
-             dll_run++;
-        }
-        else if(dll_run > 1)
-        {
-            filtered_delta_t = 60.0 / (24.0 * run_dll(t_current));
-            g_transport_bpm = beats_per_minute(filtered_delta_t, g_sample_rate);
-        }
-        // Filter the time delta to reduce jitter This is old code
-        //const float e = 0.0001;
-        //const long long unsigned filtered_delta_t = (target_delta_t * e) + (filtered_delta_t * (1-e));      
-        
+	    g_transport_bpm = beats_per_minute(filtered_delta_t, g_sample_rate);
+	    dll_run++;
+	  } else {
+	    if (dll_run > 1) {
+	      filtered_delta_t = 60.0 / (24.0 * run_dll(t_current));
+	      g_transport_bpm = beats_per_minute(filtered_delta_t, g_sample_rate);
+	    }
+	  }
+	}
+	  
         t_previous = t_current;
         break;
       case 0xFA: // Start
