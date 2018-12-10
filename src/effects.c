@@ -529,6 +529,15 @@ static const char* const g_bpb_port_symbol = BPB_PORT_SYMBOL;
 static const char* const g_bpm_port_symbol = BPM_PORT_SYMBOL;
 static const char* const g_rolling_port_symbol = ROLLING_PORT_SYMBOL;
 
+// coefficients for the delay locked loop
+static double dll_t0; // time of the current Mclk tick
+static double dll_t1; // expected next Mclk tick
+static double dll_e2; // second order loop error
+static double dll_b, dll_c; // DLL filter coefficients
+static double dll_bandwidth = 6.0; // 1/Hz bandwidth
+static double dll_samplerate = 48000.0; //samplerate of the duo
+static int dll_run = 0; //dll boot counter
+static long long unsigned filtered_delta_t;
 
 /*
 ************************************************************************************************************************
@@ -566,7 +575,8 @@ static void InitializeControlChainIfNeeded(void);
 #ifdef HAVE_HYLIA
 static uint32_t GetHyliaOutputLatency(void);
 #endif
-
+static void init_dll(double tme, double period);
+static double run_dll(double tme);
 
 /*
 ************************************************************************************************************************
@@ -580,6 +590,34 @@ static uint32_t GetHyliaOutputLatency(void);
 *           LOCAL FUNCTIONS
 ************************************************************************************************************************
 */
+
+/**
+ * initialize DLL
+ * set current time and period in samples
+ */
+static void init_dll(double tme, double period) {
+  const double omega = 2.0 * M_PI * period / dll_bandwidth / dll_samplerate;
+  dll_b = 1.4142135623730950488 * omega; // I think this is wrong and should be sqrt(2*omega). Lets try this first
+  dll_c = omega * omega;
+
+  dll_e2 = period / dll_samplerate;
+  dll_t0 = tme / dll_samplerate;
+  dll_t1 = dll_t0 + dll_e2;
+}
+
+/**
+ * run one loop iteration.
+ * param tme time of event (in samples)
+ * return smoothed interval (period) [1/Hz]
+ */
+static double run_dll(double tme) {
+  const double e = tme / dll_samplerate - dll_t1;
+  dll_t0 = dll_t1;
+  dll_t1 += dll_b * e + dll_e2;
+  dll_e2 += dll_c * e;
+  return (dll_t1 - dll_t0);
+}
+
 
 static void InstanceDelete(int effect_id)
 {
@@ -1543,24 +1581,24 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
 	    // Calculate the timestamp difference to the previous MBC
 	    // event
 	    t_current = monotonic_frame_count + event.time;
-
-	    // Filter the time delta to reduce jitter.  This is a
-	    // centered binomial filter.
-	    for (unsigned int i = filter_order-1; i >= 1; --i) {
-	      delta_t[i] = delta_t[i-1];
+	    
+	    if (dll_run < 1) {
+	      dll_run++;
+	    } else {
+	      if(dll_run == 1) {
+		// two data points have been recieved to start the initialisation
+		// initialize DLL with time difference
+		init_dll(t_current, t_current - t_previous);
+		filtered_delta_t = dll_samplerate * 60 / (24.0 * (double)run_dll(t_previous));
+		g_transport_bpm = beats_per_minute(filtered_delta_t, g_sample_rate);
+		dll_run++;
+	      } else {
+		if (dll_run > 1) {
+		  filtered_delta_t = 60.0 / (24.0 * run_dll(t_current));
+		  g_transport_bpm = beats_per_minute(filtered_delta_t, g_sample_rate);
+		}
+	      }
 	    }
-	    delta_t[0] = (t_current - t_previous);
-
-	    const double coeffs[] = {
-3.1861838222649046e-58, 6.085611100525968e-56, 5.781330545499669e-54, 3.642238243664792e-52, 1.711851974522452e-50, 6.402326384713971e-49, 1.984721179261331e-47, 5.24533454519066e-46, 1.206426945393852e-44, 2.453068122300832e-43, 4.464583982587514e-42, 7.346270007712183e-41, 1.1019405011568275e-39, 1.5172873054390163e-38, 1.929122431201035e-37, 2.276364468817221e-36, 2.5040009156989434e-35, 2.5776480014547946e-34, 2.4917264014063016e-33, 2.2687824602278428e-32, 1.951152915795945e-31, 1.588795945719555e-30, 1.2277059580560199e-29, 9.020969865715972e-29, 6.314678906001181e-28, 4.2182055092087885e-27, 2.6931619789563806e-26, 1.6458212093622325e-25, 9.639809940550218e-25, 5.4182380010678814e-24, 2.925848520576656e-23, 1.5195535864930374e-22, 7.597767932465187e-22, 3.6607427310968634e-21, 1.7011686809214834e-20, 7.630956654419225e-20, 3.3067478835816647e-19, 1.3852592485274541e-18, 5.613945375611261e-18, 2.2023939550474948e-17, 8.36909702918048e-17, 3.0822771985518353e-16, 1.1008132851970841e-15, 3.814446034752687e-15, 1.2830409389622673e-14, 4.19126706727674e-14, 1.3302717213530521e-13, 4.104029778642395e-13, 1.2312089335927186e-12, 3.593119949056301e-12, 1.0204460655319895e-11, 2.8212332400002062e-11, 7.59562795384671e-11, 1.9920609161975331e-10, 5.090822341393695e-10, 1.268077565038066e-09, 3.0796169436638747e-09, 7.29382960341444e-09, 1.6851261497543706e-08, 3.798674201988666e-08, 8.357083244375065e-08, 1.7947178770707108e-07, 3.763118129341813e-07, 7.705432360080855e-07, 1.541086472016171e-06, 3.011045876093134e-06, 5.748360308905074e-06, 1.0724552815121407e-05, 1.955653748639786e-05, 3.486165378010053e-05, 6.0758882302460926e-05, 0.00010354682758588411, 0.00017257804597647352, 0.0002813258557698678, 0.00044860068893032973, 0.0006998170747313144, 0.0010681418509056904, 0.0015952767903136935, 0.0023315583858430906, 0.003335013893674294, 0.004669019451144012, 0.006398285914530682, 0.008583066470711892, 0.011271737895272242, 0.014492234436778597, 0.018243165702768353, 0.02248576237783076, 0.027137989076692296, 0.032072168908818165, 0.03711722918660979, 0.04206619307815776, 0.0466888516581751, 0.05074875180236424, 0.05402286482187161, 0.05632171013344061, 0.0575074303467762, 0.0575074303467762, 0.05632171013344061, 0.05402286482187161, 0.05074875180236424, 0.0466888516581751, 0.04206619307815776, 0.03711722918660979, 0.032072168908818165, 0.027137989076692296, 0.02248576237783076, 0.018243165702768353, 0.014492234436778597, 0.011271737895272242, 0.008583066470711892, 0.006398285914530682, 0.004669019451144012, 0.003335013893674294, 0.0023315583858430906, 0.0015952767903136935, 0.0010681418509056904, 0.0006998170747313144, 0.00044860068893032973, 0.0002813258557698678, 0.00017257804597647352, 0.00010354682758588411, 6.0758882302460926e-05, 3.486165378010053e-05, 1.955653748639786e-05, 1.0724552815121407e-05, 5.748360308905074e-06, 3.011045876093134e-06, 1.541086472016171e-06, 7.705432360080855e-07, 3.763118129341813e-07, 1.7947178770707108e-07, 8.357083244375065e-08, 3.798674201988666e-08, 1.6851261497543706e-08, 7.29382960341444e-09, 3.0796169436638747e-09, 1.268077565038066e-09, 5.090822341393695e-10, 1.9920609161975331e-10, 7.59562795384671e-11, 2.8212332400002062e-11, 1.0204460655319895e-11, 3.593119949056301e-12, 1.2312089335927186e-12, 4.104029778642395e-13, 1.3302717213530521e-13, 4.19126706727674e-14, 1.2830409389622673e-14, 3.814446034752687e-15, 1.1008132851970841e-15, 3.0822771985518353e-16, 8.36909702918048e-17, 2.2023939550474948e-17, 5.613945375611261e-18, 1.3852592485274541e-18, 3.3067478835816647e-19, 7.630956654419225e-20, 1.7011686809214834e-20, 3.6607427310968634e-21, 7.597767932465187e-22, 1.5195535864930374e-22, 2.925848520576656e-23, 5.4182380010678814e-24, 9.639809940550218e-25, 1.6458212093622325e-25, 2.6931619789563806e-26, 4.2182055092087885e-27, 6.314678906001181e-28, 9.020969865715972e-29, 1.2277059580560199e-29, 1.588795945719555e-30, 1.951152915795945e-31, 2.2687824602278428e-32, 2.4917264014063016e-33, 2.5776480014547946e-34, 2.5040009156989434e-35, 2.276364468817221e-36, 1.929122431201035e-37, 1.5172873054390163e-38, 1.1019405011568275e-39, 7.346270007712183e-41, 4.464583982587514e-42, 2.453068122300832e-43, 1.206426945393852e-44, 5.24533454519066e-46, 1.984721179261331e-47, 6.402326384713971e-49, 1.711851974522452e-50, 3.642238243664792e-52, 5.781330545499669e-54, 6.085611100525968e-56, 3.1861838222649046e-58				    
-	    };
-
-	    double filtered_delta_t = 0.0;
-	    for (unsigned int i = 0; i < filter_order; ++i) {
-	      filtered_delta_t += coeffs[i] * delta_t[i];
-	    }
-
-	    g_transport_bpm = beats_per_minute(filtered_delta_t, g_sample_rate);
 	    
 	    t_previous = t_current;
 	    break;
@@ -1572,6 +1610,7 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
 	  case 0xFC: // Stop
 	    jack_transport_stop(g_jack_global_client);
 	    jack_transport_locate(g_jack_global_client, 0);
+	    dll_run = 0; //reset the counter as the clock sync is 
 	    break;
 	    
 	  default:
