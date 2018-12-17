@@ -66,8 +66,11 @@
 ************************************************************************************************************************
 */
 
-const unsigned int filter_order = 96;
-static double delta_t[96] = { 0.0 }; // all elements 0.0
+const unsigned int avg_filter_steps = 47;
+static unsigned int delta_t[47] = { 120.0 }; // all elements initially 120
+
+const unsigned int binomial_filter_order = 37;
+static float average[37] = { 120.0 };
 
 /*
 ************************************************************************************************************************
@@ -102,16 +105,35 @@ float beats_per_minute(const float delta_t, const jack_nframes_t sample_rate) {
   return (2.5 * (sample_rate)) / delta_t;
 }
 
+
 /**
  * `raw_delta_t` is the time difference in samples between two
  * adjacent MIDI Beat Clock ticks. Over time this has jitter. This
  * function filters the jitter and returns a more steady time delta.
  *
- * Currently this filter is implemented as a centered binomial FIR
- * filter.
+ * Currently this filter is implemented as a moving average filter
+ * followed by a binomial weighted FIR filter. The design goals are:
+ * 
+ * + no overshoot
+ * + quick adjustment on tempo change steps
  */
-float beat_clock_tick_filter(unsigned long long raw_delta_t) {
+
+float beat_clock_tick_filter(unsigned int raw_delta_t) {
   float result = 0.0;
+  
+  // Shift
+  for (unsigned int i = avg_filter_steps-1; i >= 1; --i) {
+    delta_t[i] = delta_t[i-1];
+  }  
+  delta_t[0] = raw_delta_t;
+
+  // Sum
+  unsigned int sum = 0;  
+  for (unsigned int i = 0; i < avg_filter_steps; ++i) {
+    sum += delta_t[i];
+  }
+
+  // Binomial filter following
 
   /* These coefficients were calculated using the following Python
    * script:
@@ -126,22 +148,21 @@ float beat_clock_tick_filter(unsigned long long raw_delta_t) {
    *     s = sum(coeffs)
    *     print([e/s for e in coeffs])
    *
-   * normalized_binomial_coefficients(96)
+   * normalized_binomial_coefficients(37)
    */  
   const double coeffs[] = {
-2.524354896707238e-29, 2.398137151871876e-27, 1.1271244613797817e-25, 3.494085830277323e-24, 8.036397409637843e-23, 1.4626243285540875e-21, 2.1939364928311312e-20, 2.7894335408852954e-19, 3.068376894973825e-18, 2.966097665141364e-17, 2.550843992021573e-16, 1.9711067211075792e-15, 1.3797747047753055e-14, 8.809330807411566e-14, 5.159750901483917e-13, 2.7862654868013153e-12, 1.3931327434006575e-11, 6.473969807567762e-11, 2.805386916612697e-10, 1.1369199609430404e-09, 4.320295851583553e-09, 1.542962804136983e-08, 5.189965795733489e-08, 1.6472500134284552e-07, 4.941750040285366e-07, 1.403457011441044e-06, 3.778538107725887e-06, 9.656264053077267e-06, 2.3450926986044793e-05, 5.4179727864310386e-05, 0.00011919540130148285, 0.0002499258414385931, 0.0004998516828771862, 0.0009542623036746281, 0.0017401253772890276, 0.0030327899432751626, 0.0050546499054586035, 0.008060117416812368, 0.012302284478292562, 0.017980261929812207, 0.02517236670173709, 0.033767808990135116, 0.04341575441588801, 0.05351244148935034, 0.06324197630559586, 0.07167423981300863, 0.07790678240544417, 0.08122196463546306, 0.08122196463546306, 0.07790678240544417, 0.07167423981300863, 0.06324197630559586, 0.05351244148935034, 0.04341575441588801, 0.033767808990135116, 0.02517236670173709, 0.017980261929812207, 0.012302284478292562, 0.008060117416812368, 0.0050546499054586035, 0.0030327899432751626, 0.0017401253772890276, 0.0009542623036746281, 0.0004998516828771862, 0.0002499258414385931, 0.00011919540130148285, 5.4179727864310386e-05, 2.3450926986044793e-05, 9.656264053077267e-06, 3.778538107725887e-06, 1.403457011441044e-06, 4.941750040285366e-07, 1.6472500134284552e-07, 5.189965795733489e-08, 1.542962804136983e-08, 4.320295851583553e-09, 1.1369199609430404e-09, 2.805386916612697e-10, 6.473969807567762e-11, 1.3931327434006575e-11, 2.7862654868013153e-12, 5.159750901483917e-13, 8.809330807411566e-14, 1.3797747047753055e-14, 1.9711067211075792e-15, 2.550843992021573e-16, 2.966097665141364e-17, 3.068376894973825e-18, 2.7894335408852954e-19, 2.1939364928311312e-20, 1.4626243285540875e-21, 8.036397409637843e-23, 3.494085830277323e-24, 1.1271244613797817e-25, 2.398137151871876e-27, 2.524354896707238e-29
+1.4551915228366852e-11, 5.238689482212067e-10, 9.167706593871117e-09, 1.0390067473053932e-07, 8.571805665269494e-07, 5.485955625772476e-06, 2.8344104066491127e-05, 0.0001214747317135334, 0.0004403459024615586, 0.0013699650298804045, 0.003698905580677092, 0.008742867736145854, 0.018214307783637196, 0.033626414369791746, 0.05524339503608644, 0.08102364605292678, 0.1063435354444664, 0.12511004169937223, 0.13206059957155958, 0.12511004169937223, 0.1063435354444664, 0.08102364605292678, 0.05524339503608644, 0.033626414369791746, 0.018214307783637196, 0.008742867736145854, 0.003698905580677092, 0.0013699650298804045, 0.0004403459024615586, 0.0001214747317135334, 2.8344104066491127e-05, 5.485955625772476e-06, 8.571805665269494e-07, 1.0390067473053932e-07, 9.167706593871117e-09, 5.238689482212067e-10, 1.4551915228366852e-11
   };
-  
+
   // Shift
-  for (unsigned int i = filter_order-1; i >= 1; --i) {
-    delta_t[i] = delta_t[i-1];
-  }  
-  delta_t[0] = raw_delta_t;
-  
-  // Summing up. TODO: This can be optimized in regards to rounding
-  // errors. Just sum up the small coefficients first.
-  for (unsigned int i = 0; i < filter_order; ++i) {
-    result += coeffs[i] * delta_t[i];
+  for (unsigned int i = binomial_filter_order-1; i >= 1; --i) {
+    average[i] = average[i-1];
   }
+  average[0] = sum/avg_filter_steps;
+
+  // Sum
+  for (unsigned int i = 0; i < binomial_filter_order; ++i) {
+    result += coeffs[i] * average[i];
+  }  
   return result;
 }
