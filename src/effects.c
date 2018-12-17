@@ -103,7 +103,7 @@
 #include "sha1/sha1.h"
 #include "rtmempool/list.h"
 #include "rtmempool/rtmempool.h"
-
+#include "filter.h"
 
 /*
 ************************************************************************************************************************
@@ -482,9 +482,6 @@ static unsigned long long monotonic_frame_count = 0;
 static unsigned long long t_current = 0;
 static unsigned long long t_previous = 0;
 
-const unsigned int filter_order = 192;
-static double delta_t[192] = { 0.0 }; // all elements 0.0
-
 /* LV2 and Lilv */
 static LilvWorld *g_lv2_data;
 static const LilvPlugins *g_plugins;
@@ -529,16 +526,6 @@ static const char* const g_bpb_port_symbol = BPB_PORT_SYMBOL;
 static const char* const g_bpm_port_symbol = BPM_PORT_SYMBOL;
 static const char* const g_rolling_port_symbol = ROLLING_PORT_SYMBOL;
 
-// coefficients for the delay locked loop
-static double dll_t0; // time of the current Mclk tick
-static double dll_t1; // expected next Mclk tick
-static double dll_e2; // second order loop error
-static double dll_b, dll_c; // DLL filter coefficients
-static double dll_bandwidth = 6.0; // 1/Hz bandwidth
-static double dll_samplerate = 48000.0; //samplerate of the duo
-static int dll_run = 0; //dll boot counter
-static long long unsigned filtered_delta_t;
-
 /*
 ************************************************************************************************************************
 *           LOCAL FUNCTION PROTOTYPES
@@ -575,8 +562,6 @@ static void InitializeControlChainIfNeeded(void);
 #ifdef HAVE_HYLIA
 static uint32_t GetHyliaOutputLatency(void);
 #endif
-static void init_dll(double tme, double period);
-static double run_dll(double tme);
 
 /*
 ************************************************************************************************************************
@@ -590,33 +575,6 @@ static double run_dll(double tme);
 *           LOCAL FUNCTIONS
 ************************************************************************************************************************
 */
-
-/**
- * initialize DLL
- * set current time and period in samples
- */
-static void init_dll(double tme, double period) {
-  const double omega = 2.0 * M_PI * period / dll_bandwidth / dll_samplerate;
-  dll_b = 1.4142135623730950488 * omega; // I think this is wrong and should be sqrt(2*omega). Lets try this first
-  dll_c = omega * omega;
-
-  dll_e2 = period / dll_samplerate;
-  dll_t0 = tme / dll_samplerate;
-  dll_t1 = dll_t0 + dll_e2;
-}
-
-/**
- * run one loop iteration.
- * param tme time of event (in samples)
- * return smoothed interval (period) [1/Hz]
- */
-static double run_dll(double tme) {
-  const double e = tme / dll_samplerate - dll_t1;
-  dll_t0 = dll_t1;
-  dll_t1 += dll_b * e + dll_e2;
-  dll_e2 += dll_c * e;
-  return (dll_t1 - dll_t0);
-}
 
 
 static void InstanceDelete(int effect_id)
@@ -1477,19 +1435,6 @@ static float UpdateValueFromMidi(midi_cc_t* mcc, uint16_t mvalue, bool highres)
 }
 
 
-/**
- * Calculate the BPM from the time difference of two adjacent MIDI
- * Beat Clock signals.
- *
- * \text{bpm} = \frac{120}{2\cdot{}24}\cdot{}\cfrac{\text{SR}}{\delta t}
- * 
- * `delta_t` is time in samples. Due to filtering this is not integer.
- */
-float beats_per_minute(const double delta_t, const jack_nframes_t sample_rate) {
-  return (2.5 * (sample_rate)) / delta_t;
-}
-
-
 static void UpdateGlobalJackPosition(enum UpdatePositionFlag flag)
 {
     bool old_rolling;
@@ -1582,23 +1527,8 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
 	    // event
 	    t_current = monotonic_frame_count + event.time;
 	    
-	    if (dll_run < 1) {
-	      dll_run++;
-	    } else {
-	      if(dll_run == 1) {
-		// two data points have been recieved to start the initialisation
-		// initialize DLL with time difference
-		init_dll(t_current, t_current - t_previous);
-		filtered_delta_t = dll_samplerate * 60 / (24.0 * (double)run_dll(t_previous));
-		g_transport_bpm = beats_per_minute(filtered_delta_t, g_sample_rate);
-		dll_run++;
-	      } else {
-		if (dll_run > 1) {
-		  filtered_delta_t = 60.0 / (24.0 * run_dll(t_current));
-		  g_transport_bpm = beats_per_minute(filtered_delta_t, g_sample_rate);
-		}
-	      }
-	    }
+	    float filtered_delta_t = beat_clock_tick_filter(t_current - t_previous);
+	    g_transport_bpm = beats_per_minute(filtered_delta_t, g_sample_rate);
 	    
 	    t_previous = t_current;
 	    break;
@@ -1606,11 +1536,10 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
 	  case 0xFB: // Continue
 	    jack_transport_start(g_jack_global_client);
 	    break;
-
+	    
 	  case 0xFC: // Stop
 	    jack_transport_stop(g_jack_global_client);
 	    jack_transport_locate(g_jack_global_client, 0);
-	    dll_run = 0; //reset the counter as the clock sync is 
 	    break;
 	    
 	  default:
@@ -1620,33 +1549,34 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
 	  // TODO: spelling mistake in pos>I<tion!
 	  // TODO: Use pos_flag to minimize function calls.
 	  UpdateGlobalJackPosition(UPDATE_POSTION_FORCED);
-	}
-	  
-	status_nibble = event.buffer[0] & 0xF0;
+	} // endif g_midi_clock_slave_enabled
 	
+	status_nibble = event.buffer[0] & 0xF0;
+
 	// Handle MIDI program change
         if (status_nibble == 0xC0) {
 	  channel_nibble = (event.buffer[0] & 0x0F);
 	  if ( (channel_nibble == g_midi_control_listen.channel_pedalboard_bank ||
 		channel_nibble == g_midi_control_listen.channel_pedalboard_snapshot)
 	       && event.size == 2) {
-
+	  
 	    // Append to the queue
             postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
             if (posteventptr) {
 	      posteventptr->event.type = POSTPONED_MIDI_PROGRAM_CHANGE;
 	      posteventptr->event.program_change.program = event.buffer[1];
 	      posteventptr->event.program_change.channel = channel_nibble;
-
+	      
+	      
 	      pthread_mutex_lock(&g_rtsafe_mutex);
 	      list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
 	      pthread_mutex_unlock(&g_rtsafe_mutex);
-
+	      
 #ifdef DEBUG
   printf("DEBUG: Pgr ch appended to queue\n");
 #endif 
 	      
-	      needs_post = true;
+              needs_post = true;
             } else {
 #ifdef DEBUG
   printf("DEBUG: Problem with mempool\n");
@@ -1834,10 +1764,10 @@ static void JackTimebase(jack_transport_state_t state, jack_nframes_t nframes,
         else
 #endif
         {
-	  /// ????
-	  // 1. analyse frame position. 2. calculate ticks. 3. derive values for everything else???
-	  
-	  // What is min? why 60?
+      /// ????
+      // 1. analyse frame position. 2. calculate ticks. 3. derive values for everything else???
+      
+      // What is min? why 60?
             const double min = (double)pos->frame / (double)(g_sample_rate * 60);
             abs_tick = min * pos->beats_per_minute * TRANSPORT_TICKS_PER_BEAT;
             abs_beat = abs_tick / TRANSPORT_TICKS_PER_BEAT;
@@ -1856,9 +1786,9 @@ static void JackTimebase(jack_transport_state_t state, jack_nframes_t nframes,
       // update the current tick with the beat.
         tick = g_transport_tick +
               (nframes * TRANSPORT_TICKS_PER_BEAT *
-	       pos->beats_per_minute / (double)(g_sample_rate * 60));
-	
-	// why adjust? why can overflow happen?
+           pos->beats_per_minute / (double)(g_sample_rate * 60));
+    
+    // why adjust? why can overflow happen?
         while (tick >= TRANSPORT_TICKS_PER_BEAT)
         {
             tick -= TRANSPORT_TICKS_PER_BEAT;
