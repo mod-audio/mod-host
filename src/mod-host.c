@@ -269,6 +269,32 @@ static void effects_licensee_cb(proto_t *proto)
     protocol_response("", proto);
 }
 
+static void effects_set_beats_per_minute_cb(proto_t *proto)
+{
+  int resp;
+  double bpm;
+  
+  bpm = atof(proto->list[1]);
+  resp = effects_set_beats_per_minute(bpm);
+  
+  char buffer[128];
+  sprintf(buffer, "resp %i", resp);
+  protocol_response(buffer, proto);
+}
+
+static void effects_set_beats_per_bar_cb(proto_t *proto)
+{
+  int resp;
+  double bpb;
+  
+  bpb = atof(proto->list[1]);
+  resp = effects_set_beats_per_bar(bpb);
+  
+  char buffer[128];
+  sprintf(buffer, "resp %i", resp);
+  protocol_response(buffer, proto);
+}
+
 static void monitor_addr_set_cb(proto_t *proto)
 {
     int resp;
@@ -596,8 +622,8 @@ static int mod_host_init(jack_client_t* client, int socket_port, int feedback_po
     protocol_add_command(EFFECT_PARAM_GET, effects_get_param_cb);
     protocol_add_command(EFFECT_PARAM_MON, effects_monitor_param_cb);
     protocol_add_command(EFFECT_LICENSEE, effects_licensee_cb);
-    protocol_add_command(EFFECT_SET_BEATS_PER_MINUTE, effects_set_beats_per_minute);
-    protocol_add_command(EFFECT_SET_BEATS_PER_BAR, effects_set_beats_per_bar);
+    protocol_add_command(EFFECT_SET_BEATS_PER_MINUTE, effects_set_beats_per_minute_cb);
+    protocol_add_command(EFFECT_SET_BEATS_PER_BAR, effects_set_beats_per_bar_cb);
     protocol_add_command(MONITOR_ADDR_SET, monitor_addr_set_cb);
     protocol_add_command(MONITOR_OUTPUT, monitor_output_cb);
     protocol_add_command(MIDI_LEARN, midi_learn_cb);

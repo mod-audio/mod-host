@@ -4317,6 +4317,10 @@ int effects_set_beats_per_minute(double bpm)
     // changed.
     g_transport_bpm = bpm;
     g_transport_reset = true;
+#ifdef DEBUG
+    printf("DEBUG: set_beats_per_minute %f\n", g_transport_bpm);
+    fflush(stdout);
+#endif    
   } else {
     result = ERR_JACK_VALUE_OUT_OF_RANGE;
   }
