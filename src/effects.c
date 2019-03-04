@@ -547,6 +547,8 @@ static void JackTimebase(jack_transport_state_t state, jack_nframes_t nframes,
                          jack_position_t* pos, int new_pos, void* arg);
 static void JackThreadInit(void *arg);
 static void GetFeatures(effect_t *effect);
+static void TriggerJackTimebase(void);
+
 static property_t *FindEffectPropertyByLabel(effect_t *effect, const char *label);
 static port_t *FindEffectInputPortBySymbol(effect_t *effect, const char *control_symbol);
 static port_t *FindEffectOutputPortBySymbol(effect_t *effect, const char *control_symbol);
@@ -1882,6 +1884,23 @@ static void GetFeatures(effect_t *effect)
     features[FEATURE_TERMINATOR]        = NULL;
 
     effect->features = features;
+}
+
+/**
+* If transport is stopped, ensure jack invokes the timebase master by 
+* invoking a jack reposition on the current position.
+ */
+static void TriggerJackTimebase(void)
+{
+    jack_position_t pos;
+    if (jack_transport_query(g_jack_global_client, &pos) == JackTransportStopped) {
+        int res = jack_transport_reposition(g_jack_global_client, &pos);
+        if (res < 0) {
+            fprintf(stderr, "Failed to trigger timebase master.  Call "
+                            "will occur when transport starts or a client updates "
+                            "position.\n");
+        }
+    }
 }
 
 static property_t *FindEffectPropertyByLabel(effect_t *effect, const char *label)
@@ -4311,12 +4330,13 @@ int effects_licensee(int effect_id, char **licensee_ptr)
  */
 int effects_set_beats_per_minute(double bpm)
 {
-  int result = NULL;
+  int result = 0;
   if ((20.0 <= bpm) && (bpm <= 280.0)) {
     // Change the current global value and fly a flag that it was
     // changed.
     g_transport_bpm = bpm;
     g_transport_reset = true;
+    TriggerJackTimebase();
 #ifdef DEBUG
     printf("DEBUG: set_beats_per_minute %f\n", g_transport_bpm);
     fflush(stdout);
@@ -4339,6 +4359,7 @@ int effects_set_beats_per_bar(float bpb)
     // changed.
     g_transport_bpb = bpb;
     g_transport_reset = true;
+    TriggerJackTimebase();
   } else {
     result = ERR_JACK_VALUE_OUT_OF_RANGE;
   }
@@ -4709,6 +4730,7 @@ void effects_transport(int rolling, double beats_per_bar, double beats_per_minut
         // g_jack_rolling is updated on the next jack callback
         g_transport_reset = true;
     }
+    TriggerJackTimebase();
 
 #ifdef DEBUG
     printf("DEBUG: Transport changed to %d %f, %f.\n", rolling, beats_per_minute, beats_per_bar);
