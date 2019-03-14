@@ -4337,6 +4337,7 @@ int effects_set_beats_per_minute(double bpm)
     g_transport_bpm = bpm;
     g_transport_reset = true;
     TriggerJackTimebase();
+    UpdateGlobalJackPosition(UPDATE_POSTION_FORCED);
 #ifdef DEBUG
     printf("DEBUG: set_beats_per_minute %f\n", g_transport_bpm);
     fflush(stdout);
@@ -4360,6 +4361,7 @@ int effects_set_beats_per_bar(float bpb)
     g_transport_bpb = bpb;
     g_transport_reset = true;
     TriggerJackTimebase();
+    UpdateGlobalJackPosition(UPDATE_POSTION_FORCED);
   } else {
     result = ERR_JACK_VALUE_OUT_OF_RANGE;
   }
