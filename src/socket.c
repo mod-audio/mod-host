@@ -103,7 +103,7 @@ static int g_clientfd, g_fbclientfd;
  *        We don't have time to investigate this further right now, so leave a note here for later.
  *        Using SO_REUSEPORT with -1 as 'backlog' seems to work, needs testing on MOD Duo later on.
  */
-#if defined(__MOD_DEVICES__) || ! defined(SO_REUSEPORT)
+#if (defined(__MOD_DEVICES__) && defined(__ARM_ARCH_7A__)) || ! defined(SO_REUSEPORT)
 #define MOD_SOCKET_FLAGS   SO_REUSEADDR
 #define MOD_SOCKET_BACKLOG 0
 #else
