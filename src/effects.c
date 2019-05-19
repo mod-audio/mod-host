@@ -983,7 +983,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
                 lv2_atom_forge_long(&forge, pos.bar - 1);
 
                 lv2_atom_forge_key(&forge, g_urids.time_barBeat);
-                lv2_atom_forge_float(&forge, pos.beat - 1 + (pos.tick / pos.ticks_per_beat));
+                lv2_atom_forge_float(&forge, pos.beat - 1 + (g_transport_tick / pos.ticks_per_beat));
 
                 lv2_atom_forge_key(&forge, g_urids.time_beat);
                 lv2_atom_forge_double(&forge, pos.beat - 1);
