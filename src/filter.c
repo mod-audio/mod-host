@@ -1,0 +1,168 @@
+/*
+ * This file is part of mod-host.
+ *
+ * mod-host is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * mod-host is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with mod-host.  If not, see <http://www.gnu.org/licenses/>.
+ *
+ */
+
+/*
+************************************************************************************************************************
+*
+************************************************************************************************************************
+*/
+
+
+/*
+************************************************************************************************************************
+*           INCLUDE FILES
+************************************************************************************************************************
+*/
+
+#include <math.h>
+#include "filter.h"
+
+/*
+************************************************************************************************************************
+*           LOCAL DEFINES
+************************************************************************************************************************
+*/
+
+
+/*
+************************************************************************************************************************
+*           LOCAL CONSTANTS
+************************************************************************************************************************
+*/
+
+
+/*
+************************************************************************************************************************
+*           LOCAL DATA TYPES
+************************************************************************************************************************
+*/
+
+
+/*
+************************************************************************************************************************
+*           LOCAL MACROS
+************************************************************************************************************************
+*/
+
+
+/*
+************************************************************************************************************************
+*           LOCAL GLOBAL VARIABLES
+************************************************************************************************************************
+*/
+
+const unsigned int avg_filter_steps = 47;
+static unsigned int delta_t[47] = { 120.0 }; // all elements initially 120
+
+const unsigned int binomial_filter_order = 37;
+static float average[37] = { 120.0 };
+
+/*
+************************************************************************************************************************
+*           LOCAL FUNCTION PROTOTYPES
+************************************************************************************************************************
+*/
+
+
+/*
+************************************************************************************************************************
+*           LOCAL CONFIGURATION ERRORS
+************************************************************************************************************************
+*/
+
+
+/*
+************************************************************************************************************************
+*           LOCAL FUNCTIONS
+************************************************************************************************************************
+*/
+
+/**
+ * Calculate the BPM from the time difference of two adjacent MIDI
+ * Beat Clock signals.
+ * 
+ * `delta_t` is time in samples. Due to filtering, this is not integer.
+ */
+float beats_per_minute(const float delta_t, const jack_nframes_t sample_rate) {
+  /*
+   * \text{bpm} = \frac{120}{2\cdot{}24}\cdot{}\cfrac{\text{SR}}{\delta t}
+   */  
+  return (2.5 * (sample_rate)) / delta_t;
+}
+
+
+/**
+ * `raw_delta_t` is the time difference in samples between two
+ * adjacent MIDI Beat Clock ticks. Over time this has jitter. This
+ * function filters the jitter and returns a more steady time delta.
+ *
+ * Currently this filter is implemented as a moving average filter
+ * followed by a binomial weighted FIR filter. The design goals are:
+ * 
+ * + no overshoot
+ * + quick adjustment on tempo change steps
+ */
+
+float beat_clock_tick_filter(unsigned int raw_delta_t) {
+  float result = 0.0;
+  
+  // Shift
+  for (unsigned int i = avg_filter_steps-1; i >= 1; --i) {
+    delta_t[i] = delta_t[i-1];
+  }  
+  delta_t[0] = raw_delta_t;
+
+  // Sum
+  unsigned int sum = 0;  
+  for (unsigned int i = 0; i < avg_filter_steps; ++i) {
+    sum += delta_t[i];
+  }
+
+  // Binomial filter following
+
+  /* These coefficients were calculated using the following Python
+   * script:
+   *
+   * # Pascal's triangle as binomial coefficients, but normalized such that the sum is 1.
+   * # Print the k-th row of the triangle:
+   * def normalized_binomial_coefficients(k):
+   *     coeffs = []
+   *     for i in range(k-1, k):
+   *         for n in range(0, i+1):
+   *             coeffs.append(scipy.special.comb(i, n, exact=True))
+   *     s = sum(coeffs)
+   *     print([e/s for e in coeffs])
+   *
+   * normalized_binomial_coefficients(37)
+   */  
+  const double coeffs[] = {
+1.4551915228366852e-11, 5.238689482212067e-10, 9.167706593871117e-09, 1.0390067473053932e-07, 8.571805665269494e-07, 5.485955625772476e-06, 2.8344104066491127e-05, 0.0001214747317135334, 0.0004403459024615586, 0.0013699650298804045, 0.003698905580677092, 0.008742867736145854, 0.018214307783637196, 0.033626414369791746, 0.05524339503608644, 0.08102364605292678, 0.1063435354444664, 0.12511004169937223, 0.13206059957155958, 0.12511004169937223, 0.1063435354444664, 0.08102364605292678, 0.05524339503608644, 0.033626414369791746, 0.018214307783637196, 0.008742867736145854, 0.003698905580677092, 0.0013699650298804045, 0.0004403459024615586, 0.0001214747317135334, 2.8344104066491127e-05, 5.485955625772476e-06, 8.571805665269494e-07, 1.0390067473053932e-07, 9.167706593871117e-09, 5.238689482212067e-10, 1.4551915228366852e-11
+  };
+
+  // Shift
+  for (unsigned int i = binomial_filter_order-1; i >= 1; --i) {
+    average[i] = average[i-1];
+  }
+  average[0] = sum/avg_filter_steps;
+
+  // Sum
+  for (unsigned int i = 0; i < binomial_filter_order; ++i) {
+    result += coeffs[i] * average[i];
+  }  
+  return result;
+}

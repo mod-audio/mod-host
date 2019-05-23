@@ -269,6 +269,32 @@ static void effects_licensee_cb(proto_t *proto)
     protocol_response("", proto);
 }
 
+static void effects_set_beats_per_minute_cb(proto_t *proto)
+{
+  int resp;
+  double bpm;
+  
+  bpm = atof(proto->list[1]);
+  resp = effects_set_beats_per_minute(bpm);
+  
+  char buffer[128];
+  sprintf(buffer, "resp %i", resp);
+  protocol_response(buffer, proto);
+}
+
+static void effects_set_beats_per_bar_cb(proto_t *proto)
+{
+  int resp;
+  double bpb;
+  
+  bpb = atof(proto->list[1]);
+  resp = effects_set_beats_per_bar(bpb);
+  
+  char buffer[128];
+  sprintf(buffer, "resp %i", resp);
+  protocol_response(buffer, proto);
+}
+
 static void monitor_addr_set_cb(proto_t *proto)
 {
     int resp;
@@ -324,10 +350,16 @@ static void midi_unmap_cb(proto_t *proto)
     protocol_response(buffer, proto);
 }
 
-static void midi_program_listen_cb(proto_t *proto)
+static void set_midi_program_change_pedalboard_bank_channel_cb(proto_t *proto)
 {
-    effects_midi_program_listen(atoi(proto->list[1]), atoi(proto->list[2]));
-    protocol_response("resp 0", proto);
+  effects_set_midi_program_change_pedalboard_bank_channel(atoi(proto->list[1]), atoi(proto->list[2]));
+  protocol_response("resp 0", proto);
+}
+
+static void set_midi_program_change_pedalboard_snapshot_channel_cb(proto_t *proto)
+{
+  effects_set_midi_program_change_pedalboard_snapshot_channel(atoi(proto->list[1]), atoi(proto->list[2]));
+  protocol_response("resp 0", proto);
 }
 
 static void cc_map_cb(proto_t *proto)
@@ -479,7 +511,9 @@ static void feature_enable(proto_t *proto)
         resp = effects_link_enable(enabled);
     else if (!strcmp(feature, "processing"))
         resp = effects_processing_enable(enabled);
-    else
+    else if (!strcmp(feature, "midi_clock_slave")) {
+      resp = effects_midi_clock_slave_enable(enabled);
+    } else
         resp = ERR_INVALID_OPERATION;
 
     char buffer[128];
@@ -588,12 +622,17 @@ static int mod_host_init(jack_client_t* client, int socket_port, int feedback_po
     protocol_add_command(EFFECT_PARAM_GET, effects_get_param_cb);
     protocol_add_command(EFFECT_PARAM_MON, effects_monitor_param_cb);
     protocol_add_command(EFFECT_LICENSEE, effects_licensee_cb);
+    protocol_add_command(EFFECT_SET_BEATS_PER_MINUTE, effects_set_beats_per_minute_cb);
+    protocol_add_command(EFFECT_SET_BEATS_PER_BAR, effects_set_beats_per_bar_cb);
     protocol_add_command(MONITOR_ADDR_SET, monitor_addr_set_cb);
     protocol_add_command(MONITOR_OUTPUT, monitor_output_cb);
     protocol_add_command(MIDI_LEARN, midi_learn_cb);
     protocol_add_command(MIDI_MAP, midi_map_cb);
     protocol_add_command(MIDI_UNMAP, midi_unmap_cb);
-    protocol_add_command(MIDI_PROGRAM_LISTEN, midi_program_listen_cb);
+    protocol_add_command(SET_MIDI_PROGRAM_CHANGE_PEDALBOARD_BANK_CHANNEL,
+			 set_midi_program_change_pedalboard_bank_channel_cb);
+    protocol_add_command(SET_MIDI_PROGRAM_CHANGE_PEDALBOARD_SNAPSHOT_CHANNEL,
+			 set_midi_program_change_pedalboard_snapshot_channel_cb);
     protocol_add_command(CC_MAP, cc_map_cb);
     protocol_add_command(CC_UNMAP, cc_unmap_cb);
     protocol_add_command(CPU_LOAD, cpu_load_cb);
@@ -644,6 +683,13 @@ static void* intclient_socket_run(void* ptr)
 
 int main(int argc, char **argv)
 {
+#ifdef DEBUG
+  printf("DEBUG mode: on.\n");
+  fflush(stdout);
+#else
+  printf("DEBUG mode: off.\n");
+#endif
+  
     /* Command line options */
     static struct option long_options[] = {
         {"nofork", no_argument, 0, 'n'},

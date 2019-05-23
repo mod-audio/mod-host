@@ -59,6 +59,7 @@ enum {
     ERR_JACK_PORT_REGISTER = -204,
     ERR_JACK_PORT_CONNECTION = -205,
     ERR_JACK_PORT_DISCONNECTION = -206,
+    ERR_JACK_VALUE_OUT_OF_RANGE = -207,
 
     ERR_ASSIGNMENT_ALREADY_EXISTS = -301,
     ERR_ASSIGNMENT_INVALID_OP = -302,
@@ -141,7 +142,17 @@ int effects_midi_learn(int effect_id, const char *control_symbol, float minimum,
 int effects_midi_map(int effect_id, const char *control_symbol, int channel, int controller, float minimum, float maximum);
 int effects_midi_unmap(int effect_id, const char *control_symbol);
 int effects_licensee(int effect_id, char **licensee);
-void effects_midi_program_listen(int enable, int channel);
+int effects_set_beats_per_minute(double bpm);
+int effects_set_beats_per_bar(float bpb);
+
+/**
+ * Pedalboard control with MIDI program change.
+ *
+ * Feature is enabled for `enabled != 0` and `0 < channel < 15`.
+ */
+void effects_set_midi_program_change_pedalboard_bank_channel(int enable, int channel);
+void effects_set_midi_program_change_pedalboard_snapshot_channel(int enable, int channel);
+
 int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int actuator_id,
                    const char* label, float value, float minimum, float maximum, int steps, const char *unit,
                    int scalepoints_count, const scalepoint_t *scalepoints);
@@ -151,6 +162,7 @@ void effects_bundle_add(const char* bundlepath);
 void effects_bundle_remove(const char* bundlepath);
 int effects_link_enable(int enable);
 int effects_processing_enable(int enable);
+int effects_midi_clock_slave_enable(int enable);
 void effects_transport(int rolling, double beats_per_bar, double beats_per_minute);
 void effects_output_data_ready(void);
 

@@ -164,9 +164,13 @@ The commands supported by mod-host are:
         * unmap the MIDI controller from a parameter
         e.g.: unmap 0 gain
 
-    midi_program_listen <enable> <midi_channel>
-        * listen for MIDI program messages for the specified midi channel in the feedback port
-        e.g.: midi_program_listen 1 0
+    set_midi_program_change_pedalboard_bank_channel <enable> <midi_channel>
+        * set the MIDI channel which changes pedalboard banks on MIDI program change. <midi_channel> is in the range of [0,15].
+        e.g.: set_midi_program_change_pedalboard_bank_channel 1 5 to enable listening for bank changes on channel 6
+
+    set_midi_program_change_pedalboard_snapshot_channel <enable> <midi_channel>
+        * set the MIDI channel which changes pedalboard snapshots on MIDI program change. <midi_channel> is in the range of [0,15].
+        e.g.: set_midi_program_change_pedalboard_snapshot_channel 1 4 to enable listening for preset changes on channel 5
 
     cc_map <instance_number> <param_symbol> <device_id> <actuator_id> <label> <value> <minimum> <maximum> <steps> <unit> <scalepoints_count> <scalepoints...>
         * map a Control Chain actuator to a parameter
@@ -200,7 +204,7 @@ The commands supported by mod-host are:
     feature_enable <feature> <enable>
         * enable or disable a feature
         e.g.: feature_enable link 1
-        current features are "link" and "processing"
+        current features are "link", "processing" and "midi_clock_slave"
 
     transport <rolling> <beats_per_bar> <beats_per_minute>
         * change the current transport state

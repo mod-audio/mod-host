@@ -1,13 +1,12 @@
+dist: xenial
 language:
     - c
 compiler:
     - gcc
 before_script:
     - sudo apt-get update -qq
-    - sudo apt-get install -y python-nose libjack-jackd2-dev libjack-jackd2-0 jackd2 python-pip
-    - sudo apt-get install -y libc6 libglib2.0-0 libgtk2.0-0 libsndfile1
+    - sudo apt-get install -y libjack-jackd2-dev liblilv-dev jackd2 lilv-utils lv2-examples python-nose python-pip
     - sudo pip install pytest
-    - bash .create_lv2_env.sh
     - make
 script:
     - py.test tests/test_host.py
