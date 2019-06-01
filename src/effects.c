@@ -694,7 +694,7 @@ static void RunPostPonedEvents(int ignored_effect_id)
   printf("DEBUG: RunPostPonedEvents()\n");
   fflush(stdout);
 #endif
-  
+
     // local queue to where we'll save rtsafe list
     struct list_head queue;
     INIT_LIST_HEAD(&queue);
@@ -741,7 +741,7 @@ static void RunPostPonedEvents(int ignored_effect_id)
   printf("DEBUG: Before the queue iteration\n");
   fflush(stdout);
 #endif
-    
+
     list_for_each_prev(it, &queue)
     {
         eventptr = list_entry(it, postponed_event_list_data, siblings);
@@ -750,7 +750,7 @@ static void RunPostPonedEvents(int ignored_effect_id)
 	printf("DEBUG: ptr %x\n", eventptr);
 	fflush(stdout);
 #endif
-	
+
         switch (eventptr->event.type)
         {
         case POSTPONED_PARAM_SET:
@@ -825,7 +825,7 @@ static void RunPostPonedEvents(int ignored_effect_id)
 
 	    // Is the comment correct?
 	  }
-	  
+
         case POSTPONED_TRANSPORT:
             if (got_transport)
                 continue;
@@ -884,7 +884,7 @@ static void* PostPonedEventsThread(void* arg)
     {
         if (sem_timedwait_secs(&g_postevents_semaphore, 1) != 0)
             continue;
-	
+
         if (g_postevents_running == 1 && g_postevents_ready) {
             RunPostPonedEvents(-3); // as all effects are valid we set ignored_effect_id to -3
 
@@ -893,7 +893,7 @@ static void* PostPonedEventsThread(void* arg)
 	    fflush(stdout);
 #endif
 	}
-	
+
     }
 
 #ifdef DEBUG
@@ -1489,7 +1489,7 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
     float value;
     bool handled, highres, needs_post = false;
     enum UpdatePositionFlag pos_flag = UPDATE_POSTION_IF_CHANGED;
-    
+
 #ifdef HAVE_HYLIA
     if (hylia_enabled)
     {
@@ -1511,11 +1511,11 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
 #endif
 
     UpdateGlobalJackPosition(pos_flag);
-    
+
     // Handle input MIDI events
     void *const port_buf = jack_port_get_buffer(g_midi_in_port, nframes);
     const jack_nframes_t event_count = jack_midi_get_event_count(port_buf);
-    
+
     for (jack_nframes_t i = 0 ; i < event_count; i++)
       {
 	if (jack_midi_event_get(&event, port_buf, i) != 0)
@@ -1524,26 +1524,26 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
 	// Handle MIDI Beat Clock
 	if (g_midi_clock_slave_enabled) {
 	  switch(event.buffer[0]) {
-	  case 0xF8: // Clock tick  
+	  case 0xF8: // Clock tick
 	    // Calculate the timestamp difference to the previous MBC
 	    // event
 	    t_current = monotonic_frame_count + event.time;
-	    
+
 	    float filtered_delta_t = beat_clock_tick_filter(t_current - t_previous);
 	    g_transport_bpm = beats_per_minute(filtered_delta_t, g_sample_rate);
-	    
+
 	    t_previous = t_current;
 	    break;
 	  case 0xFA: // Start
 	  case 0xFB: // Continue
 	    jack_transport_start(g_jack_global_client);
 	    break;
-	    
+
 	  case 0xFC: // Stop
 	    jack_transport_stop(g_jack_global_client);
 	    jack_transport_locate(g_jack_global_client, 0);
 	    break;
-	    
+
 	  default:
 	    // TODO: Handle MIDI Song Position Pointer
 	    break;
@@ -1552,7 +1552,7 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
 	  // TODO: Use pos_flag to minimize function calls.
 	  UpdateGlobalJackPosition(UPDATE_POSTION_FORCED);
 	} // endif g_midi_clock_slave_enabled
-	
+
 	status_nibble = event.buffer[0] & 0xF0;
 
 	// Handle MIDI program change
@@ -1561,28 +1561,28 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
 	  if ( (channel_nibble == g_midi_control_listen.channel_pedalboard_bank ||
 		channel_nibble == g_midi_control_listen.channel_pedalboard_snapshot)
 	       && event.size == 2) {
-	  
+
 	    // Append to the queue
             postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
             if (posteventptr) {
 	      posteventptr->event.type = POSTPONED_MIDI_PROGRAM_CHANGE;
 	      posteventptr->event.program_change.program = event.buffer[1];
 	      posteventptr->event.program_change.channel = channel_nibble;
-	      
-	      
+
+
 	      pthread_mutex_lock(&g_rtsafe_mutex);
 	      list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
 	      pthread_mutex_unlock(&g_rtsafe_mutex);
-	      
+
 #ifdef DEBUG
   printf("DEBUG: Pgr ch appended to queue\n");
-#endif 
-	      
+#endif
+
               needs_post = true;
             } else {
 #ifdef DEBUG
   printf("DEBUG: Problem with mempool\n");
-#endif 
+#endif
 	    }
 	  } else {
 	    // Wrong channel or size. Discard.
@@ -1702,7 +1702,7 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
 
     // Increase by one period
     monotonic_frame_count += nframes;
-    
+
     return 0;
 
     UNUSED_PARAM(arg);
@@ -1730,8 +1730,8 @@ static void JackTimebase(jack_transport_state_t state, jack_nframes_t nframes,
     // g_transport_bpm is only set on lines 1352
     // (UpdateValueFromMIDI), 1427 (ProcessMidi), 2016 (CCDataUpdate)
     // and 4451 (effects_transport).
-    
-    // Update the extended position information.    
+
+    // Update the extended position information.
     pos->beats_per_bar = g_transport_bpb;
     pos->beats_per_minute = g_transport_bpm;
 
@@ -1768,7 +1768,7 @@ static void JackTimebase(jack_transport_state_t state, jack_nframes_t nframes,
         {
       /// ????
       // 1. analyse frame position. 2. calculate ticks. 3. derive values for everything else???
-      
+
       // What is min? why 60?
             const double min = (double)pos->frame / (double)(g_sample_rate * 60);
             abs_tick = min * pos->beats_per_minute * TRANSPORT_TICKS_PER_BEAT;
@@ -1789,7 +1789,7 @@ static void JackTimebase(jack_transport_state_t state, jack_nframes_t nframes,
         tick = g_transport_tick +
               (nframes * TRANSPORT_TICKS_PER_BEAT *
            pos->beats_per_minute / (double)(g_sample_rate * 60));
-    
+
     // why adjust? why can overflow happen?
         while (tick >= TRANSPORT_TICKS_PER_BEAT)
         {
@@ -1887,7 +1887,7 @@ static void GetFeatures(effect_t *effect)
 }
 
 /**
-* If transport is stopped, ensure jack invokes the timebase master by 
+* If transport is stopped, ensure jack invokes the timebase master by
 * invoking a jack reposition on the current position.
  */
 static void TriggerJackTimebase(void)
@@ -2393,7 +2393,7 @@ int effects_init(void* client)
 #endif
 
     g_midi_clock_slave_enabled = false;
-    
+
     /* Register jack ports */
     g_midi_in_port = jack_port_register(g_jack_global_client, "midi_in", JACK_DEFAULT_MIDI_TYPE, JackPortIsInput, 0);
 
@@ -2522,7 +2522,7 @@ int effects_init(void* client)
      */
     g_midi_control_listen.channel_pedalboard_bank = 15;
     g_midi_control_listen.channel_pedalboard_snapshot = 14;
-    
+
 
 #ifdef HAVE_CONTROLCHAIN
     /* Init the control chain variables */
@@ -2554,17 +2554,20 @@ int effects_init(void* client)
         return ERR_JACK_CLIENT_ACTIVATION;
     }
 
+    /* Connect to midi-merger if avaiable */
+    if (jack_port_by_name(g_jack_global_client, "mod-midi-merger:out") != NULL)
+    {
+        const char *ourportname = jack_port_name(g_midi_in_port);
+        jack_connect(g_jack_global_client, "mod-midi-merger:out", ourportname);
+        goto done;
+    }
+
     /* Connect to all good hw ports (system, ttymidi and nooice) */
     const char** const midihwports = jack_get_ports(g_jack_global_client, "", JACK_DEFAULT_MIDI_TYPE,
                                                                               JackPortIsOutput|JackPortIsPhysical);
     if (midihwports != NULL)
     {
-        char ourportname[MAX_CHAR_BUF_SIZE+1];
-        ourportname[MAX_CHAR_BUF_SIZE] = '\0';
-
-        const char* const ourclientname = jack_get_client_name(g_jack_global_client);
-
-        snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:midi_in", ourclientname);
+        const char *ourportname = jack_port_name(g_midi_in_port);
 
         for (int i=0; midihwports[i] != NULL; ++i)
         {
@@ -2580,6 +2583,7 @@ int effects_init(void* client)
         jack_free(midihwports);
     }
 
+done:
     g_processing_enabled = true;
 
     return SUCCESS;
@@ -3789,7 +3793,7 @@ int effects_remove(int effect_id)
 #ifdef DEBUG
       printf("DEBUG: Had to restart the thread\n");
       fflush(stdout);
-#endif      
+#endif
         g_postevents_running = 1;
         pthread_create(&g_postevents_thread, NULL, PostPonedEventsThread, NULL);
     }
@@ -4341,7 +4345,7 @@ int effects_set_beats_per_minute(double bpm)
 #ifdef DEBUG
     printf("DEBUG: set_beats_per_minute %f\n", g_transport_bpm);
     fflush(stdout);
-#endif    
+#endif
   } else {
     result = ERR_JACK_VALUE_OUT_OF_RANGE;
   }
@@ -4378,10 +4382,9 @@ void effects_set_midi_program_change_pedalboard_bank_channel(int enable, int cha
 
   // Report this change to be stored in the user profile!
   char buffer[MAX_CHAR_BUF_SIZE+1];
-  buffer[MAX_CHAR_BUF_SIZE+1];
   buffer[MAX_CHAR_BUF_SIZE] = '\0';
   snprintf(buffer, MAX_CHAR_BUF_SIZE,
-	   SET_MIDI_PROGRAM_CHANGE_PEDALBOARD_BANK_CHANNEL, enable, channel);
+           SET_MIDI_PROGRAM_CHANGE_PEDALBOARD_BANK_CHANNEL, enable, channel);
   socket_send_feedback(buffer);
 
 #ifdef DEBUG
@@ -4400,7 +4403,7 @@ void effects_set_midi_program_change_pedalboard_snapshot_channel(int enable, int
   char buffer[MAX_CHAR_BUF_SIZE+1];
   buffer[MAX_CHAR_BUF_SIZE] = '\0';
   snprintf(buffer, MAX_CHAR_BUF_SIZE,
-	   SET_MIDI_PROGRAM_CHANGE_PEDALBOARD_SNAPSHOT_CHANNEL, enable, channel);
+           SET_MIDI_PROGRAM_CHANGE_PEDALBOARD_SNAPSHOT_CHANNEL, enable, channel);
   socket_send_feedback(buffer);
 
 #ifdef DEBUG
