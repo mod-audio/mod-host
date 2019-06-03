@@ -948,7 +948,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
     {
         lv2_evbuf_reset(effect->input_event_ports[i]->evbuf, true);
 
-        if (effect->bypass > 0.5f)
+        if (effect->bypass > 0.5f && effect->enabled_index < 0)
         {
             // effect is now bypassed, but wasn't before
             if (!effect->was_bypassed)
@@ -1157,7 +1157,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
             void* buf = jack_port_get_buffer(port->jack_port, nframes);
             jack_midi_clear_buffer(buf);
 
-            if (effect->bypass > 0.5f)
+            if (effect->bypass > 0.5f && effect->enabled_index < 0)
             {
                 // effect is now bypassed, but wasn't before
                 if (!effect->was_bypassed)
