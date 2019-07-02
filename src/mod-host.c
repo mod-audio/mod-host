@@ -144,6 +144,58 @@ static void effects_remove_cb(proto_t *proto)
     protocol_response(buffer, proto);
 }
 
+static void effects_list_uris_cb(proto_t *proto)
+{
+    int resp;
+    const char **effects = (const char **) calloc(MAX_INSTANCES, sizeof(char *));
+    int *instances = (int *) malloc(MAX_INSTANCES*sizeof(int));
+    char *buffer = NULL;
+
+    resp = effects_list_uris(instances, effects);
+    if (resp >0) {
+        uint32_t i;
+        buffer = (char *) malloc(resp*128*sizeof(char));
+        sprintf(buffer, "resp %i", resp);
+        for (i = 0; effects[i]; i++) {
+            sprintf(buffer+strlen(buffer), " %d:%s", instances[i], effects[i]);
+            if (effects[i+1]) sprintf(buffer+strlen(buffer), ",");
+        }
+    } else {
+        buffer = (char *) malloc(128*sizeof(char));
+        sprintf(buffer, "resp %i", resp);
+    }
+    protocol_response(buffer, proto);
+
+    free(effects);
+    free(buffer);
+}
+
+static void effects_list_bundles_cb(proto_t *proto)
+{
+    int resp;
+    const char **effects = (const char **) calloc(MAX_INSTANCES, sizeof(char *));
+    int *instances = (int *) malloc(MAX_INSTANCES*sizeof(int));
+    char *buffer = NULL;
+
+    resp = effects_list_bundles(instances, effects);
+    if (resp >0) {
+        uint32_t i;
+        buffer = (char *) malloc(resp*128*sizeof(char));
+        sprintf(buffer, "resp %i", resp);
+        for (i = 0; effects[i]; i++) {
+            sprintf(buffer+strlen(buffer), " %d:%s", instances[i], effects[i]);
+            if (effects[i+1]) sprintf(buffer+strlen(buffer), ",");
+        }
+    } else {
+        buffer = (char *) malloc(128*sizeof(char));
+        sprintf(buffer, "resp %i", resp);
+    }
+    protocol_response(buffer, proto);
+
+    free(effects);
+    free(buffer);
+}
+
 static void effects_preset_save_cb(proto_t *proto)
 {
     int resp;
@@ -177,6 +229,31 @@ static void effects_preset_show_cb(proto_t *proto)
         }
     }
     protocol_response("", proto);
+}
+
+static void effects_preset_list_cb(proto_t *proto)
+{
+    int resp;
+    char **presets = (char **) calloc(32*128, sizeof(char *));
+    char *buffer = NULL;
+
+    resp = effects_get_presets_uris(atoi(proto->list[1]), presets);
+    if (resp>0) {
+        uint32_t i;
+        buffer = (char *) malloc(resp*128*sizeof(char));
+        sprintf(buffer, "resp %i", resp);
+        for (i = 0; presets[i]; i++) {
+            sprintf(buffer+strlen(buffer)," %s", presets[i]);
+            if (presets[i+1]) sprintf(buffer+strlen(buffer),",");
+        }
+    } else {
+        buffer = (char *) malloc(128*sizeof(char));
+        sprintf(buffer, "resp %i", resp);
+    }
+    protocol_response(buffer, proto);
+
+    free(presets);
+    free(buffer);
 }
 
 static void effects_connect_cb(proto_t *proto)
@@ -236,6 +313,43 @@ static void effects_get_param_cb(proto_t *proto)
         sprintf(buffer, "resp %i", resp);
 
     protocol_response(buffer, proto);
+}
+
+static void effects_get_param_info_cb(proto_t *proto)
+{
+    int resp;
+    /* Create a array of strings for scale points */
+    const char **scale_points = (const char **) calloc(256, sizeof(char *));
+    /* Allocates memory to parameter range */
+    float **param_range = (float **) calloc(4, sizeof(float *));
+    param_range[0] = (float *) malloc(sizeof(float));
+    param_range[1] = (float *) malloc(sizeof(float));
+    param_range[2] = (float *) malloc(sizeof(float));
+    param_range[3] = (float *) malloc(sizeof(float));
+
+    resp = effects_get_parameter_info(atoi(proto->list[1]), proto->list[2], param_range, scale_points);
+    char buffer[1024];
+    if (resp >= 0) {
+        sprintf(buffer, "resp %i def: %.03f, min: %.03f, max: %.03f, curr: %.03f",
+                resp, *param_range[0], *param_range[1], *param_range[2], *param_range[3]);
+        if (scale_points[0]) {
+            uint32_t i;
+            sprintf(buffer,", scale points: ");
+            for (i = 0; scale_points[i]; i+=2) {
+                sprintf(buffer,"(%s: %s)", scale_points[i], scale_points[i+1]);
+            }
+        }
+    } else {
+        sprintf(buffer, "resp %i", resp);
+    }
+    protocol_response(buffer, proto);
+
+    /*Free memory*/
+    free(scale_points);
+    free(param_range[0]);
+    free(param_range[1]);
+    free(param_range[2]);
+    free(param_range[3]);
 }
 
 static void effects_monitor_param_cb(proto_t *proto)
@@ -612,14 +726,18 @@ static int mod_host_init(jack_client_t* client, int socket_port, int feedback_po
     /* Setup the protocol */
     protocol_add_command(EFFECT_ADD, effects_add_cb);
     protocol_add_command(EFFECT_REMOVE, effects_remove_cb);
+    protocol_add_command(EFFECT_LIST_URIS, effects_list_uris_cb);
+    protocol_add_command(EFFECT_LIST_BUNDLES, effects_list_bundles_cb);
     protocol_add_command(EFFECT_PRESET_LOAD, effects_preset_load_cb);
     protocol_add_command(EFFECT_PRESET_SAVE, effects_preset_save_cb);
     protocol_add_command(EFFECT_PRESET_SHOW, effects_preset_show_cb);
+    protocol_add_command(EFFECT_PRESET_LIST, effects_preset_list_cb);
     protocol_add_command(EFFECT_CONNECT, effects_connect_cb);
     protocol_add_command(EFFECT_DISCONNECT, effects_disconnect_cb);
     protocol_add_command(EFFECT_BYPASS, effects_bypass_cb);
     protocol_add_command(EFFECT_PARAM_SET, effects_set_param_cb);
     protocol_add_command(EFFECT_PARAM_GET, effects_get_param_cb);
+    protocol_add_command(EFFECT_PARAM_INFO, effects_get_param_info_cb);
     protocol_add_command(EFFECT_PARAM_MON, effects_monitor_param_cb);
     protocol_add_command(EFFECT_LICENSEE, effects_licensee_cb);
     protocol_add_command(EFFECT_SET_BEATS_PER_MINUTE, effects_set_beats_per_minute_cb);
@@ -673,7 +791,6 @@ static void* intclient_socket_run(void* ptr)
     return NULL;
     (void)ptr;
 }
-
 
 /*
 ************************************************************************************************************************
