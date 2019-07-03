@@ -127,7 +127,12 @@ static pthread_t intclient_socket_thread;
 static void effects_add_cb(proto_t *proto)
 {
     int resp;
-    resp = effects_add(proto->list[1], atoi(proto->list[2]));
+    char *jack_client_name = NULL;
+    if (proto->list_count == 4)
+    {
+        jack_client_name = proto->list[3];
+    }
+    resp = effects_add(proto->list[1], atoi(proto->list[2]), jack_client_name);
 
     char buffer[128];
     sprintf(buffer, "resp %i", resp);

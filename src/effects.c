@@ -2636,7 +2636,7 @@ int effects_finish(int close_client)
     return SUCCESS;
 }
 
-int effects_add(const char *uid, int instance)
+int effects_add(const char *uid, int instance, const char *jack_client_name)
 {
     unsigned int i, ports_count;
     char effect_name[32], port_name[MAX_CHAR_BUF_SIZE+1];
@@ -2714,7 +2714,14 @@ int effects_add(const char *uid, int instance)
     lilv_license_interface = NULL;
 
     /* Create a client to Jack */
-    snprintf(effect_name, 31, "effect_%i", instance);
+    if (jack_client_name)
+    {
+        strncpy(effect_name, jack_client_name, 31);
+    }
+    else
+    {
+        snprintf(effect_name, 31, "effect_%i", instance);
+    }
     jack_client = jack_client_open(effect_name, JackNoStartServer, &jack_status);
 
     if (!jack_client)

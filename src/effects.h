@@ -122,7 +122,7 @@ typedef struct {
 
 int effects_init(void* client);
 int effects_finish(int close_client);
-int effects_add(const char *uid, int instance);
+int effects_add(const char *uid, int instance, const char *jack_client_name);
 int effects_remove(int effect_id);
 int effects_preset_load(int effect_id, const char *uri);
 int effects_preset_save(int effect_id, const char *dir, const char *file_name, const char *label);
