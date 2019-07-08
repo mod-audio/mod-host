@@ -318,6 +318,16 @@ static void monitor_output_cb(proto_t *proto)
     protocol_response(buffer, proto);
 }
 
+static void monitor_midi_program_cb(proto_t *proto)
+{
+    int resp;
+    resp = effects_monitor_midi_program(atoi(proto->list[1]), atoi(proto->list[2]));
+
+    char buffer[128];
+    sprintf(buffer, "resp %i", resp);
+    protocol_response(buffer, proto);
+}
+
 static void midi_learn_cb(proto_t *proto)
 {
     int resp;
@@ -348,18 +358,6 @@ static void midi_unmap_cb(proto_t *proto)
     char buffer[128];
     sprintf(buffer, "resp %i", resp);
     protocol_response(buffer, proto);
-}
-
-static void set_midi_program_change_pedalboard_bank_channel_cb(proto_t *proto)
-{
-  effects_set_midi_program_change_pedalboard_bank_channel(atoi(proto->list[1]), atoi(proto->list[2]));
-  protocol_response("resp 0", proto);
-}
-
-static void set_midi_program_change_pedalboard_snapshot_channel_cb(proto_t *proto)
-{
-  effects_set_midi_program_change_pedalboard_snapshot_channel(atoi(proto->list[1]), atoi(proto->list[2]));
-  protocol_response("resp 0", proto);
 }
 
 static void cc_map_cb(proto_t *proto)
@@ -622,17 +620,14 @@ static int mod_host_init(jack_client_t* client, int socket_port, int feedback_po
     protocol_add_command(EFFECT_PARAM_GET, effects_get_param_cb);
     protocol_add_command(EFFECT_PARAM_MON, effects_monitor_param_cb);
     protocol_add_command(EFFECT_LICENSEE, effects_licensee_cb);
-    protocol_add_command(EFFECT_SET_BEATS_PER_MINUTE, effects_set_beats_per_minute_cb);
-    protocol_add_command(EFFECT_SET_BEATS_PER_BAR, effects_set_beats_per_bar_cb);
+    protocol_add_command(EFFECT_SET_BPM, effects_set_beats_per_minute_cb);
+    protocol_add_command(EFFECT_SET_BPB, effects_set_beats_per_bar_cb);
     protocol_add_command(MONITOR_ADDR_SET, monitor_addr_set_cb);
     protocol_add_command(MONITOR_OUTPUT, monitor_output_cb);
+    protocol_add_command(MONITOR_MIDI_PROGRAM, monitor_midi_program_cb);
     protocol_add_command(MIDI_LEARN, midi_learn_cb);
     protocol_add_command(MIDI_MAP, midi_map_cb);
     protocol_add_command(MIDI_UNMAP, midi_unmap_cb);
-    protocol_add_command(SET_MIDI_PROGRAM_CHANGE_PEDALBOARD_BANK_CHANNEL,
-			 set_midi_program_change_pedalboard_bank_channel_cb);
-    protocol_add_command(SET_MIDI_PROGRAM_CHANGE_PEDALBOARD_SNAPSHOT_CHANNEL,
-			 set_midi_program_change_pedalboard_snapshot_channel_cb);
     protocol_add_command(CC_MAP, cc_map_cb);
     protocol_add_command(CC_UNMAP, cc_unmap_cb);
     protocol_add_command(CPU_LOAD, cpu_load_cb);

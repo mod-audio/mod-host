@@ -145,14 +145,6 @@ int effects_licensee(int effect_id, char **licensee);
 int effects_set_beats_per_minute(double bpm);
 int effects_set_beats_per_bar(float bpb);
 
-/**
- * Pedalboard control with MIDI program change.
- *
- * Feature is enabled for `enabled != 0` and `0 < channel < 15`.
- */
-void effects_set_midi_program_change_pedalboard_bank_channel(int enable, int channel);
-void effects_set_midi_program_change_pedalboard_snapshot_channel(int enable, int channel);
-
 int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int actuator_id,
                    const char* label, float value, float minimum, float maximum, int steps, const char *unit,
                    int scalepoints_count, const scalepoint_t *scalepoints);
@@ -163,6 +155,7 @@ void effects_bundle_remove(const char* bundlepath);
 int effects_link_enable(int enable);
 int effects_processing_enable(int enable);
 int effects_midi_clock_slave_enable(int enable);
+int effects_monitor_midi_program(int channel, int enable);
 void effects_transport(int rolling, double beats_per_bar, double beats_per_minute);
 void effects_output_data_ready(void);
 

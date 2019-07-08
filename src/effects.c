@@ -191,9 +191,9 @@ enum PostPonedEventType {
 };
 
 enum UpdatePositionFlag {
-    UPDATE_POSTION_SKIP,
-    UPDATE_POSTION_IF_CHANGED,
-    UPDATE_POSTION_FORCED,
+    UPDATE_POSITION_SKIP,
+    UPDATE_POSITION_IF_CHANGED,
+    UPDATE_POSITION_FORCED,
 };
 
 
@@ -419,12 +419,6 @@ typedef struct POSTPONED_CACHED_EVENTS {
     postponed_cached_symbol_list_data symbols;
 } postponed_cached_events;
 
-typedef struct MIDI_CONTROL_LISTEN_T {
-  int channel_pedalboard_bank;
-  int channel_pedalboard_snapshot;
-  // TODO: Think about plugin bundle presets
-} midi_control_listen_t;
-
 
 /*
 ************************************************************************************************************************
@@ -511,8 +505,8 @@ static LV2_Feature g_buf_size_features[3] = {
 /* MIDI Learn */
 static pthread_mutex_t g_midi_learning_mutex;
 
-/* MIDI control */
-static midi_control_listen_t g_midi_control_listen;
+/* MIDI program monitoring */
+static bool g_monitored_midi_programs[16];
 
 #ifdef HAVE_HYLIA
 static volatile bool hylia_enabled;
@@ -823,7 +817,6 @@ static void RunPostPonedEvents(int ignored_effect_id)
             // ignore older midi program changes
             got_midi_program = true;
             break;
-        }
 
         case POSTPONED_TRANSPORT:
             if (got_transport)
@@ -1440,7 +1433,7 @@ static void UpdateGlobalJackPosition(enum UpdatePositionFlag flag)
     bool old_rolling;
     double old_bpb, old_bpm;
 
-    if (flag != UPDATE_POSTION_SKIP)
+    if (flag != UPDATE_POSITION_SKIP)
     {
         old_rolling = g_jack_rolling;
         old_bpb = g_transport_bpb;
@@ -1455,9 +1448,9 @@ static void UpdateGlobalJackPosition(enum UpdatePositionFlag flag)
         g_jack_pos.beats_per_minute = g_transport_bpm;
     }
 
-    if (flag == UPDATE_POSTION_SKIP)
+    if (flag == UPDATE_POSITION_SKIP)
         return;
-    if (flag == UPDATE_POSTION_IF_CHANGED &&
+    if (flag == UPDATE_POSITION_IF_CHANGED &&
         old_rolling == g_jack_rolling && old_bpb == g_transport_bpb && old_bpm == g_transport_bpm)
         return;
 
@@ -1486,7 +1479,7 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
     uint16_t mvalue;
     float value;
     bool handled, highres, needs_post = false;
-    enum UpdatePositionFlag pos_flag = UPDATE_POSTION_IF_CHANGED;
+    enum UpdatePositionFlag pos_flag = UPDATE_POSITION_IF_CHANGED;
 
 #ifdef HAVE_HYLIA
     if (hylia_enabled)
@@ -1498,12 +1491,12 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
         if (new_bpb > 0.0 && (g_transport_bpb != new_bpb))
         {
             g_transport_bpb = new_bpb;
-            pos_flag = UPDATE_POSTION_FORCED;
+            pos_flag = UPDATE_POSITION_FORCED;
         }
         if (new_bpm > 0.0 && (g_transport_bpm != new_bpm))
         {
             g_transport_bpm = new_bpm;
-            pos_flag = UPDATE_POSTION_FORCED;
+            pos_flag = UPDATE_POSITION_FORCED;
         }
     }
 #endif
@@ -1533,6 +1526,7 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
 
               t_previous = t_current;
               break;
+
             case 0xFA: // Start
             case 0xFB: // Continue
               jack_transport_start(g_jack_global_client);
@@ -1547,9 +1541,8 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
               // TODO: Handle MIDI Song Position Pointer
               break;
             }
-            // TODO: spelling mistake in pos>I<tion!
             // TODO: Use pos_flag to minimize function calls.
-            UpdateGlobalJackPosition(UPDATE_POSTION_FORCED);
+            UpdateGlobalJackPosition(UPDATE_POSITION_FORCED);
         } // endif g_midi_clock_slave_enabled
 
         status_nibble = event.buffer[0] & 0xF0;
@@ -1559,9 +1552,7 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
         {
             channel_nibble = (event.buffer[0] & 0x0F);
 
-            if ( (channel_nibble == g_midi_control_listen.channel_pedalboard_bank ||
-              channel_nibble == g_midi_control_listen.channel_pedalboard_snapshot)
-                && event.size == 2)
+            if (g_monitored_midi_programs[channel_nibble] && event.size == 2)
             {
                 // Append to the queue
                 postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
@@ -2522,12 +2513,7 @@ int effects_init(void* client)
     }
     g_midi_learning = NULL;
 
-    /*
-     * Initialize the MIDI channels to filter. Note that mod-ui overrides these.
-     */
-    g_midi_control_listen.channel_pedalboard_bank = 15;
-    g_midi_control_listen.channel_pedalboard_snapshot = 14;
-
+    memset(g_monitored_midi_programs, 0, sizeof(g_monitored_midi_programs));
 
 #ifdef HAVE_CONTROLCHAIN
     /* Init the control chain variables */
@@ -2548,7 +2534,7 @@ int effects_init(void* client)
     pthread_create(&g_postevents_thread, NULL, PostPonedEventsThread, NULL);
 
     /* get transport state */
-    UpdateGlobalJackPosition(UPDATE_POSTION_SKIP);
+    UpdateGlobalJackPosition(UPDATE_POSITION_SKIP);
 
     /* Try activate the jack global client */
     if (jack_activate(g_jack_global_client) != 0)
@@ -4346,7 +4332,7 @@ int effects_set_beats_per_minute(double bpm)
     g_transport_bpm = bpm;
     g_transport_reset = true;
     TriggerJackTimebase();
-    UpdateGlobalJackPosition(UPDATE_POSTION_FORCED);
+    UpdateGlobalJackPosition(UPDATE_POSITION_FORCED);
 #ifdef DEBUG
     printf("DEBUG: set_beats_per_minute %f\n", g_transport_bpm);
     fflush(stdout);
@@ -4370,28 +4356,11 @@ int effects_set_beats_per_bar(float bpb)
     g_transport_bpb = bpb;
     g_transport_reset = true;
     TriggerJackTimebase();
-    UpdateGlobalJackPosition(UPDATE_POSTION_FORCED);
+    UpdateGlobalJackPosition(UPDATE_POSITION_FORCED);
   } else {
     result = ERR_JACK_VALUE_OUT_OF_RANGE;
   }
   return result;
-}
-
-
-void effects_set_midi_program_change_pedalboard_bank_channel(int enable, int channel) {
-  if (enable == 0 || channel < 0 || channel > 15) {
-    channel = -1;
-  }
-
-  g_midi_control_listen.channel_pedalboard_bank = channel;
-}
-
-void effects_set_midi_program_change_pedalboard_snapshot_channel(int enable, int channel) {
-  if (enable == 0 || channel < 0 || channel > 15) {
-    channel = -1;
-  }
-
-  g_midi_control_listen.channel_pedalboard_snapshot = channel;
 }
 
 int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int actuator_id,
@@ -4683,6 +4652,15 @@ int effects_midi_clock_slave_enable(int enable)
     return SUCCESS;
 }
 
+
+int effects_monitor_midi_program(int channel, int enable)
+{
+    if (channel < 0 || channel > 15)
+        return ERR_INVALID_OPERATION;
+
+    g_monitored_midi_programs[channel] = enable != 0;
+    return SUCCESS;
+}
 
 void effects_transport(int rolling, double beats_per_bar, double beats_per_minute)
 {
