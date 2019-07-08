@@ -691,8 +691,8 @@ static bool ShouldIgnorePostPonedEvent(postponed_parameter_event_t* ev, postpone
 static void RunPostPonedEvents(int ignored_effect_id)
 {
 #ifdef DEBUG
-  printf("DEBUG: RunPostPonedEvents()\n");
-  fflush(stdout);
+    printf("DEBUG: RunPostPonedEvents()\n");
+    fflush(stdout);
 #endif
 
     // local queue to where we'll save rtsafe list
@@ -708,8 +708,8 @@ static void RunPostPonedEvents(int ignored_effect_id)
     {
         // nothing to do
 #ifdef DEBUG
-  printf("DEBUG: Queue is empty\n");
-  fflush(stdout);
+        printf("DEBUG: Queue is empty\n");
+        fflush(stdout);
 #endif
         return;
     }
@@ -733,22 +733,22 @@ static void RunPostPonedEvents(int ignored_effect_id)
     INIT_LIST_HEAD(&cached_param_set.symbols.siblings);
     INIT_LIST_HEAD(&cached_output_mon.symbols.siblings);
 
+#ifdef DEBUG
+    printf("DEBUG: Before the queue iteration\n");
+    fflush(stdout);
+#endif
+
     // itenerate backwards
     struct list_head *it, *it2;
     postponed_event_list_data* eventptr;
-
-#ifdef DEBUG
-  printf("DEBUG: Before the queue iteration\n");
-  fflush(stdout);
-#endif
 
     list_for_each_prev(it, &queue)
     {
         eventptr = list_entry(it, postponed_event_list_data, siblings);
 
 #ifdef DEBUG
-	printf("DEBUG: ptr %x\n", eventptr);
-	fflush(stdout);
+        printf("DEBUG: ptr %x\n", eventptr);
+        fflush(stdout);
 #endif
 
         switch (eventptr->event.type)
@@ -799,32 +799,31 @@ static void RunPostPonedEvents(int ignored_effect_id)
             break;
 
         case POSTPONED_MIDI_PROGRAM_CHANGE:
-	  if (got_midi_program) {
+            if (got_midi_program)
+            {
 #ifdef DEBUG
-  printf("DEBUG: I think I sent this before\n");
-  fflush(stdout);
+                printf("DEBUG: I think I sent this before\n");
+                fflush(stdout);
 #endif
-	      continue;
-	  } else {
+                continue;
+            }
 
             snprintf(buf, MAX_CHAR_BUF_SIZE, "midi_program_change %i %i",
-		     eventptr->event.program_change.program,
-		     eventptr->event.program_change.channel);
+                     eventptr->event.program_change.program,
+                     eventptr->event.program_change.channel);
             socket_send_feedback(buf);
 
 #ifdef DEBUG
-  printf("DEBUG: Sent \"midi_program_change %i %i\"\n",
-	 eventptr->event.program_change.program,
-	 eventptr->event.program_change.channel);
-  fflush(stdout);
+            printf("DEBUG: Sent \"midi_program_change %i %i\"\n",
+                   eventptr->event.program_change.program,
+                   eventptr->event.program_change.channel);
+            fflush(stdout);
 #endif
 
             // ignore older midi program changes
             got_midi_program = true;
             break;
-
-	    // Is the comment correct?
-	  }
+        }
 
         case POSTPONED_TRANSPORT:
             if (got_transport)
@@ -868,8 +867,8 @@ static void RunPostPonedEvents(int ignored_effect_id)
     if (g_postevents_ready)
     {
 #ifdef DEBUG
-      printf("DEBUG: Reported data finish to server\n");
-      fflush(stdout);
+        printf("DEBUG: Reported data finish to server\n");
+        fflush(stdout);
 #endif
 
         // report data finished to server
@@ -885,21 +884,20 @@ static void* PostPonedEventsThread(void* arg)
         if (sem_timedwait_secs(&g_postevents_semaphore, 1) != 0)
             continue;
 
-        if (g_postevents_running == 1 && g_postevents_ready) {
+        if (g_postevents_running == 1 && g_postevents_ready)
+        {
             RunPostPonedEvents(-3); // as all effects are valid we set ignored_effect_id to -3
-
 #ifdef DEBUG
-	    printf("DEBUG: q_postevents_running == %d\n", g_postevents_running);
-	    fflush(stdout);
+            printf("DEBUG: q_postevents_running == %d\n", g_postevents_running);
+            fflush(stdout);
 #endif
-	}
-
+        }
     }
 
 #ifdef DEBUG
-  printf("DEBUG: q_postevents_running == %d\n", g_postevents_running);
-  printf("DEBUG: Thread stopped\n");
-  fflush(stdout);
+    printf("DEBUG: q_postevents_running == %d\n", g_postevents_running);
+    printf("DEBUG: Thread stopped\n");
+    fflush(stdout);
 #endif
 
     return NULL;
@@ -1517,77 +1515,84 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
     const jack_nframes_t event_count = jack_midi_get_event_count(port_buf);
 
     for (jack_nframes_t i = 0 ; i < event_count; i++)
-      {
-	if (jack_midi_event_get(&event, port_buf, i) != 0)
-	  break;
+    {
+        if (jack_midi_event_get(&event, port_buf, i) != 0)
+            break;
 
-	// Handle MIDI Beat Clock
-	if (g_midi_clock_slave_enabled) {
-	  switch(event.buffer[0]) {
-	  case 0xF8: // Clock tick
-	    // Calculate the timestamp difference to the previous MBC
-	    // event
-	    t_current = monotonic_frame_count + event.time;
+        // Handle MIDI Beat Clock
+        if (g_midi_clock_slave_enabled)
+        {
+            switch(event.buffer[0]) {
+            case 0xF8: // Clock tick
+              // Calculate the timestamp difference to the previous MBC
+              // event
+              t_current = monotonic_frame_count + event.time;
 
-	    float filtered_delta_t = beat_clock_tick_filter(t_current - t_previous);
-	    g_transport_bpm = beats_per_minute(filtered_delta_t, g_sample_rate);
+              float filtered_delta_t = beat_clock_tick_filter(t_current - t_previous);
+              g_transport_bpm = beats_per_minute(filtered_delta_t, g_sample_rate);
 
-	    t_previous = t_current;
-	    break;
-	  case 0xFA: // Start
-	  case 0xFB: // Continue
-	    jack_transport_start(g_jack_global_client);
-	    break;
+              t_previous = t_current;
+              break;
+            case 0xFA: // Start
+            case 0xFB: // Continue
+              jack_transport_start(g_jack_global_client);
+              break;
 
-	  case 0xFC: // Stop
-	    jack_transport_stop(g_jack_global_client);
-	    jack_transport_locate(g_jack_global_client, 0);
-	    break;
+            case 0xFC: // Stop
+              jack_transport_stop(g_jack_global_client);
+              jack_transport_locate(g_jack_global_client, 0);
+              break;
 
-	  default:
-	    // TODO: Handle MIDI Song Position Pointer
-	    break;
-	  }
-	  // TODO: spelling mistake in pos>I<tion!
-	  // TODO: Use pos_flag to minimize function calls.
-	  UpdateGlobalJackPosition(UPDATE_POSTION_FORCED);
-	} // endif g_midi_clock_slave_enabled
+            default:
+              // TODO: Handle MIDI Song Position Pointer
+              break;
+            }
+            // TODO: spelling mistake in pos>I<tion!
+            // TODO: Use pos_flag to minimize function calls.
+            UpdateGlobalJackPosition(UPDATE_POSTION_FORCED);
+        } // endif g_midi_clock_slave_enabled
 
-	status_nibble = event.buffer[0] & 0xF0;
+        status_nibble = event.buffer[0] & 0xF0;
 
-	// Handle MIDI program change
-        if (status_nibble == 0xC0) {
-	  channel_nibble = (event.buffer[0] & 0x0F);
-	  if ( (channel_nibble == g_midi_control_listen.channel_pedalboard_bank ||
-		channel_nibble == g_midi_control_listen.channel_pedalboard_snapshot)
-	       && event.size == 2) {
+        // Handle MIDI program change
+        if (status_nibble == 0xC0)
+        {
+            channel_nibble = (event.buffer[0] & 0x0F);
 
-	    // Append to the queue
-            postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
-            if (posteventptr) {
-	      posteventptr->event.type = POSTPONED_MIDI_PROGRAM_CHANGE;
-	      posteventptr->event.program_change.program = event.buffer[1];
-	      posteventptr->event.program_change.channel = channel_nibble;
+            if ( (channel_nibble == g_midi_control_listen.channel_pedalboard_bank ||
+              channel_nibble == g_midi_control_listen.channel_pedalboard_snapshot)
+                && event.size == 2)
+            {
+                // Append to the queue
+                postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
 
+                  if (posteventptr)
+                  {
+                      posteventptr->event.type = POSTPONED_MIDI_PROGRAM_CHANGE;
+                      posteventptr->event.program_change.program = event.buffer[1];
+                      posteventptr->event.program_change.channel = channel_nibble;
 
-	      pthread_mutex_lock(&g_rtsafe_mutex);
-	      list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
-	      pthread_mutex_unlock(&g_rtsafe_mutex);
+                      pthread_mutex_lock(&g_rtsafe_mutex);
+                      list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
+                      pthread_mutex_unlock(&g_rtsafe_mutex);
 
 #ifdef DEBUG
-  printf("DEBUG: Pgr ch appended to queue\n");
+                      printf("DEBUG: Pgr ch appended to queue\n");
 #endif
-
-              needs_post = true;
-            } else {
+                      needs_post = true;
+                }
+                else
+                {
 #ifdef DEBUG
-  printf("DEBUG: Problem with mempool\n");
+                      printf("DEBUG: Problem with mempool\n");
 #endif
-	    }
-	  } else {
-	    // Wrong channel or size. Discard.
-	    continue;
-	  }
+                }
+            }
+            else
+            {
+                // Wrong channel or size. Discard.
+                continue;
+            }
         } // endif MIDI program change
 
         if (event.size != 3)
@@ -3791,8 +3796,8 @@ int effects_remove(int effect_id)
     if (g_postevents_running == 0)
     {
 #ifdef DEBUG
-      printf("DEBUG: Had to restart the thread\n");
-      fflush(stdout);
+        printf("DEBUG: Had to restart the thread\n");
+        fflush(stdout);
 #endif
         g_postevents_running = 1;
         pthread_create(&g_postevents_thread, NULL, PostPonedEventsThread, NULL);
