@@ -204,9 +204,6 @@ static uint32_t spaces_count(const char *str)
 }
 
 
-// ignore char** to const char** pointer type switching for this function
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wincompatible-pointer-types"
 
 /* Attempt to complete on the contents of TEXT.  START and END bound the
    region of rl_line_buffer that contains the word to complete.  TEXT is
@@ -244,7 +241,7 @@ static char **completion(const char *text, int start, int end)
             {
                 if (count == 1)
                 {
-                    g_list = g_plugins_list;
+                    g_list = (const char**)g_plugins_list;
                 }
             }
             else if ((strcmp(cmd[0], "remove") == 0) ||
@@ -262,12 +259,12 @@ static char **completion(const char *text, int start, int end)
                 if (count == 1)
                 {
                     update_ports_list("output");
-                    g_list = g_ports_list;
+                    g_list = (const char**)g_ports_list;
                 }
                 else if (count == 2)
                 {
                     update_ports_list("input");
-                    g_list = g_ports_list;
+                    g_list = (const char**)g_ports_list;
                 }
             }
             else if (strcmp(cmd[0], "preset_load") == 0 ||
@@ -396,7 +393,7 @@ static char **completion(const char *text, int start, int end)
             if (get_instances)
             {
                 update_instances_list();
-                g_list = g_instances_list;
+                g_list = (const char**)g_instances_list;
             }
             if (get_presets)
             {
@@ -439,9 +436,6 @@ static char **completion(const char *text, int start, int end)
 
     return (matches);
 }
-
-// back to normal
-#pragma GCC diagnostic pop
 
 
 /* Generator function for command completion.  STATE lets us know whether
