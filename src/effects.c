@@ -4329,7 +4329,7 @@ int effects_licensee(int effect_id, char **licensee_ptr)
  */
 int effects_set_beats_per_minute(double bpm)
 {
-  int result = 0;
+  int result = SUCCESS;
   if ((20.0 <= bpm) && (bpm <= 280.0)) {
     // Change the current global value and fly a flag that it was
     // changed.
@@ -4353,7 +4353,7 @@ int effects_set_beats_per_minute(double bpm)
  */
 int effects_set_beats_per_bar(float bpb)
 {
-  int result = NULL;
+  int result = SUCCESS;
   if ((1.0 <= bpb) && (bpb <= 16.0)) {
     // Change the current global value and fly a flag that is was
     // changed.
@@ -4702,6 +4702,7 @@ int effects_transport_sync_mode(const char* mode)
         return ERR_LINK_UNAVAILABLE;
     }
 
+#ifdef HAVE_HYLIA
     // disable link if previously enabled
     if (g_transport_sync_mode == TRANSPORT_SYNC_ABLETON_LINK)
     {
@@ -4709,6 +4710,7 @@ int effects_transport_sync_mode(const char* mode)
         hylia_enable(g_hylia_instance, false);
         g_transport_reset = true;
     }
+#endif
 
     if (!strcmp(mode, "midi"))
     {
