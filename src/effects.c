@@ -4690,6 +4690,8 @@ int effects_transport_sync_mode(const char* mode)
 #ifdef HAVE_HYLIA
         if (g_hylia_instance)
         {
+            if (g_transport_sync_mode != TRANSPORT_SYNC_ABLETON_LINK)
+                g_transport_sync_mode = TRANSPORT_SYNC_NONE; // disabling sync mode first
             hylia_enable(g_hylia_instance, true);
             g_transport_sync_mode = TRANSPORT_SYNC_ABLETON_LINK;
             g_transport_reset = true;
@@ -4703,6 +4705,7 @@ int effects_transport_sync_mode(const char* mode)
     // disable link if previously enabled
     if (g_transport_sync_mode == TRANSPORT_SYNC_ABLETON_LINK)
     {
+        g_transport_sync_mode = TRANSPORT_SYNC_NONE; // disabling sync mode first
         hylia_enable(g_hylia_instance, false);
         g_transport_reset = true;
     }
