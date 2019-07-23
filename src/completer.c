@@ -75,6 +75,7 @@ static const char *g_commands[] = {
     "bundle_remove",
     "feature_enable",
     "transport",
+    "transport_sync",
     "output_data_ready",
     "help",
     "quit",
@@ -92,9 +93,14 @@ static const char *g_condition[] = {
 };
 
 static const char *g_features[] = {
-    "link",
     "processing",
-    "midi_clock_slave",
+    NULL
+};
+
+static const char *g_transport_sync_modes[] = {
+    "none",
+    "link",
+    "midi",
     NULL
 };
 
@@ -377,6 +383,13 @@ static char **completion(const char *text, int start, int end)
                 if (count == 1)
                 {
                     g_list = g_features;
+                }
+            }
+            else if (strcmp(cmd[0], "transport_sync") == 0)
+            {
+                if (count == 1)
+                {
+                    g_list = g_transport_sync_modes;
                 }
             }
 

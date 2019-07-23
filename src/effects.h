@@ -152,11 +152,10 @@ int effects_cc_unmap(int effect_id, const char *control_symbol);
 float effects_jack_cpu_load(void);
 void effects_bundle_add(const char* bundlepath);
 void effects_bundle_remove(const char* bundlepath);
-int effects_link_enable(int enable);
 int effects_processing_enable(int enable);
-int effects_midi_clock_slave_enable(int enable);
 int effects_monitor_midi_program(int channel, int enable);
 void effects_transport(int rolling, double beats_per_bar, double beats_per_minute);
+int effects_transport_sync_mode(const char* mode);
 void effects_output_data_ready(void);
 
 /*

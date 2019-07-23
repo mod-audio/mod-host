@@ -169,6 +169,12 @@ enum PluginHints {
     HINT_OUTPUT_MONITORS = 1 << 2,
 };
 
+enum TransportSyncMode {
+    TRANSPORT_SYNC_NONE,
+    TRANSPORT_SYNC_ABLETON_LINK,
+    TRANSPORT_SYNC_MIDI,
+};
+
 enum {
     URI_MAP_FEATURE,
     URID_MAP_FEATURE,
@@ -465,10 +471,10 @@ static bool g_jack_rolling;
 static volatile double g_transport_bpb;
 static volatile double g_transport_bpm;
 static volatile bool g_transport_reset;
+static volatile enum TransportSyncMode g_transport_sync_mode;
 static double g_transport_tick;
 static bool g_processing_enabled;
 
-static volatile bool g_midi_clock_slave_enabled; // TODO: Join with other states, e.g. Hylia, Processing!
 // Wall clock time since program startup;
 static unsigned long long monotonic_frame_count = 0;
 
@@ -509,7 +515,6 @@ static pthread_mutex_t g_midi_learning_mutex;
 static bool g_monitored_midi_programs[16];
 
 #ifdef HAVE_HYLIA
-static volatile bool hylia_enabled;
 static hylia_t* g_hylia_instance;
 static hylia_time_info_t g_hylia_timeinfo;
 #endif
@@ -1482,7 +1487,7 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
     enum UpdatePositionFlag pos_flag = UPDATE_POSITION_IF_CHANGED;
 
 #ifdef HAVE_HYLIA
-    if (hylia_enabled)
+    if (g_transport_sync_mode == TRANSPORT_SYNC_ABLETON_LINK)
     {
         hylia_process(g_hylia_instance, nframes, &g_hylia_timeinfo);
         const double new_bpb = g_hylia_timeinfo.beatsPerBar;
@@ -1513,7 +1518,7 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
             break;
 
         // Handle MIDI Beat Clock
-        if (g_midi_clock_slave_enabled)
+        if (g_transport_sync_mode == TRANSPORT_SYNC_MIDI)
         {
             switch(event.buffer[0]) {
             case 0xF8: // Clock tick
@@ -1541,9 +1546,10 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
               // TODO: Handle MIDI Song Position Pointer
               break;
             }
+
             // TODO: Use pos_flag to minimize function calls.
             UpdateGlobalJackPosition(UPDATE_POSITION_FORCED);
-        } // endif g_midi_clock_slave_enabled
+        }
 
         status_nibble = event.buffer[0] & 0xF0;
 
@@ -1744,7 +1750,7 @@ static void JackTimebase(jack_transport_state_t state, jack_nframes_t nframes,
         double abs_beat, abs_tick;
 
 #ifdef HAVE_HYLIA
-        if (hylia_enabled)
+        if (g_transport_sync_mode == TRANSPORT_SYNC_ABLETON_LINK)
         {
             if (g_hylia_timeinfo.beat >= 0.0)
             {
@@ -2282,6 +2288,7 @@ int effects_init(void* client)
     g_transport_bpb = 4.0;
     g_transport_bpm = 120.0;
     g_transport_tick = 0.0;
+    g_transport_sync_mode = TRANSPORT_SYNC_NONE;
 
     /* this fails to build if GLOBAL_EFFECT_ID >= MAX_INSTANCES */
     char global_effect_id_static_check[GLOBAL_EFFECT_ID < MAX_INSTANCES?1:-1];
@@ -2376,7 +2383,6 @@ int effects_init(void* client)
 
 #ifdef HAVE_HYLIA
     /* Init hylia */
-    hylia_enabled = false;
     g_hylia_instance = hylia_create();
     memset(&g_hylia_timeinfo, 0, sizeof(g_hylia_timeinfo));
 
@@ -2387,8 +2393,6 @@ int effects_init(void* client)
         hylia_set_output_latency(g_hylia_instance, GetHyliaOutputLatency());
     }
 #endif
-
-    g_midi_clock_slave_enabled = false;
 
     /* Register jack ports */
     g_midi_in_port = jack_port_register(g_jack_global_client, "midi_in", JACK_DEFAULT_MIDI_TYPE, JackPortIsInput, 0);
@@ -4610,23 +4614,6 @@ void effects_bundle_remove(const char* bpath)
 #endif
 }
 
-int effects_link_enable(int enable)
-{
-#ifdef HAVE_HYLIA
-    if (g_hylia_instance)
-    {
-        hylia_enable(g_hylia_instance, enable);
-        hylia_enabled = enable;
-        g_transport_reset = true;
-        return SUCCESS;
-    }
-#else
-    UNUSED_PARAM(enable);
-#endif
-
-    return ERR_LINK_UNAVAILABLE;
-}
-
 int effects_processing_enable(int enable)
 {
     g_processing_enabled = enable;
@@ -4637,21 +4624,6 @@ int effects_processing_enable(int enable)
 
     return SUCCESS;
 }
-
-int effects_midi_clock_slave_enable(int enable)
-{
-    g_midi_clock_slave_enabled = enable;
-
-    if (enable > 1) {
-        effects_output_data_ready();
-    }
-
-#ifdef DEBUG
-    printf("DEBUG: Sync to external MIDI Beat Clock set to %d.\n", enable);
-#endif
-    return SUCCESS;
-}
-
 
 int effects_monitor_midi_program(int channel, int enable)
 {
@@ -4664,6 +4636,11 @@ int effects_monitor_midi_program(int channel, int enable)
 
 void effects_transport(int rolling, double beats_per_bar, double beats_per_minute)
 {
+    // give warning if changing BPM while clock slave is enabled
+    if (g_transport_sync_mode == TRANSPORT_SYNC_MIDI && fabs(g_transport_bpm - beats_per_minute) > 0.1) {
+        fprintf(stderr, "trying to change transport BPM while MIDI sync enabled, expect issues!\n");
+    }
+
     g_transport_bpb = beats_per_bar;
     g_transport_bpm = beats_per_minute;
 
@@ -4701,6 +4678,44 @@ void effects_transport(int rolling, double beats_per_bar, double beats_per_minut
 #ifdef DEBUG
     printf("DEBUG: Transport changed to %d %f, %f.\n", rolling, beats_per_minute, beats_per_bar);
 #endif
+}
+
+int effects_transport_sync_mode(const char* mode)
+{
+    if (mode == NULL)
+        return ERR_INVALID_OPERATION;
+
+    if (!strcmp(mode, "link"))
+    {
+#ifdef HAVE_HYLIA
+        if (g_hylia_instance)
+        {
+            hylia_enable(g_hylia_instance, true);
+            g_transport_sync_mode = TRANSPORT_SYNC_ABLETON_LINK;
+            g_transport_reset = true;
+            return SUCCESS;
+        }
+#endif
+        g_transport_sync_mode = TRANSPORT_SYNC_NONE;
+        return ERR_LINK_UNAVAILABLE;
+    }
+
+    // disable link if previously enabled
+    if (g_transport_sync_mode == TRANSPORT_SYNC_ABLETON_LINK)
+    {
+        hylia_enable(g_hylia_instance, false);
+        g_transport_reset = true;
+    }
+
+    if (!strcmp(mode, "midi"))
+    {
+        g_transport_sync_mode = TRANSPORT_SYNC_MIDI;
+        effects_output_data_ready();
+        return SUCCESS;
+    }
+
+    g_transport_sync_mode = TRANSPORT_SYNC_NONE;
+    return SUCCESS;
 }
 
 void effects_output_data_ready(void)

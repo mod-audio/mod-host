@@ -505,13 +505,9 @@ static void feature_enable(proto_t *proto)
     int enabled = atoi(proto->list[2]);
     int resp;
 
-    if (!strcmp(feature, "link"))
-        resp = effects_link_enable(enabled);
-    else if (!strcmp(feature, "processing"))
+    if (!strcmp(feature, "processing"))
         resp = effects_processing_enable(enabled);
-    else if (!strcmp(feature, "midi_clock_slave")) {
-      resp = effects_midi_clock_slave_enable(enabled);
-    } else
+    else
         resp = ERR_INVALID_OPERATION;
 
     char buffer[128];
@@ -523,6 +519,18 @@ static void transport(proto_t *proto)
 {
     effects_transport(atoi(proto->list[1]), atof(proto->list[2]), atof(proto->list[3]));
     protocol_response("resp 0", proto);
+}
+
+static void transport_sync(proto_t *proto)
+{
+    const char* mode = proto->list[1];
+    int resp;
+
+    resp = effects_transport_sync_mode(mode);
+
+    char buffer[128];
+    sprintf(buffer, "resp %i", resp);
+    protocol_response(buffer, proto);
 }
 
 static void output_data_ready(proto_t *proto)
@@ -637,6 +645,7 @@ static int mod_host_init(jack_client_t* client, int socket_port, int feedback_po
     protocol_add_command(BUNDLE_REMOVE, bundle_remove);
     protocol_add_command(FEATURE_ENABLE, feature_enable);
     protocol_add_command(TRANSPORT, transport);
+    protocol_add_command(TRANSPORT_SYNC, transport_sync);
     protocol_add_command(OUTPUT_DATA_READY, output_data_ready);
 
     /* skip help and quit for internal client */
