@@ -18,6 +18,7 @@ MANDIR = $(SHAREDIR)/man/man1/
 
 # default compiler and linker flags
 CFLAGS += -O3 -Wall -Wextra -c -std=gnu99 -fPIC -D_GNU_SOURCE
+CFLAGS += -Wno-deprecated-declarations
 CFLAGS += -Werror=implicit-function-declaration -Werror=return-type
 LDFLAGS += -Wl,--no-undefined
 
