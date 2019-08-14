@@ -4614,6 +4614,12 @@ void effects_bundle_remove(const char* bpath)
 #endif
 }
 
+int effects_aggregated_midi_enable(int enable)
+{
+    // TODO
+    return SUCCESS;
+}
+
 int effects_processing_enable(int enable)
 {
     g_processing_enabled = enable;

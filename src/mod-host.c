@@ -505,7 +505,9 @@ static void feature_enable(proto_t *proto)
     int enabled = atoi(proto->list[2]);
     int resp;
 
-    if (!strcmp(feature, "processing"))
+    if (!strcmp(feature, "aggregated-midi"))
+        resp = effects_aggregated_midi_enable(enabled);
+    else if (!strcmp(feature, "processing"))
         resp = effects_processing_enable(enabled);
     else
         resp = ERR_INVALID_OPERATION;

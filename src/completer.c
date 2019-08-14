@@ -94,6 +94,7 @@ static const char *g_condition[] = {
 };
 
 static const char *g_features[] = {
+    "aggregated-midi",
     "processing",
     NULL
 };
