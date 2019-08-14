@@ -34,6 +34,7 @@
 
 /* Jack */
 #include <jack/jack.h>
+#include <jack/intclient.h>
 #include <jack/midiport.h>
 #include <jack/transport.h>
 
@@ -554,6 +555,7 @@ static port_t *FindEffectOutputPortBySymbol(effect_t *effect, const char *contro
 static const void* GetPortValueForState(const char* symbol, void* user_data, uint32_t* size, uint32_t* type);
 static int LoadPresets(effect_t *effect);
 static void FreeFeatures(effect_t *effect);
+static void ConnectToAllHardwareMIDIPorts(void);
 static char* GetLicenseFile(MOD_License_Handle handle, const char *license_uri);
 static void FreeLicenseData(MOD_License_Handle handle, char *license);
 #ifdef HAVE_CONTROLCHAIN
@@ -746,7 +748,7 @@ static void RunPostPonedEvents(int ignored_effect_id)
         eventptr = list_entry(it, postponed_event_list_data, siblings);
 
 #ifdef DEBUG
-        printf("DEBUG: ptr %x\n", eventptr);
+        printf("DEBUG: ptr %p\n", eventptr);
         fflush(stdout);
 #endif
 
@@ -2040,6 +2042,25 @@ static void FreeFeatures(effect_t *effect)
 // back to normal
 #pragma GCC diagnostic pop
 
+static void ConnectToAllHardwareMIDIPorts(void)
+{
+    if (g_jack_global_client == NULL)
+        return;
+
+    const char** const midihwports = jack_get_ports(g_jack_global_client, "",
+                                                    JACK_DEFAULT_MIDI_TYPE,
+                                                    JackPortIsTerminal|JackPortIsPhysical|JackPortIsOutput);
+    if (midihwports != NULL)
+    {
+        const char *ourportname = jack_port_name(g_midi_in_port);
+
+        for (int i=0; midihwports[i] != NULL; ++i)
+            jack_connect(g_jack_global_client, midihwports[i], ourportname);
+
+        jack_free(midihwports);
+    }
+}
+
 static char* GetLicenseFile(MOD_License_Handle handle, const char *license_uri)
 {
     if (!license_uri || *license_uri == '\0')
@@ -2554,31 +2575,13 @@ int effects_init(void* client)
     {
         const char *ourportname = jack_port_name(g_midi_in_port);
         jack_connect(g_jack_global_client, "mod-midi-merger:out", ourportname);
-        goto done;
     }
-
-    /* Connect to all good hw ports (system, ttymidi and nooice) */
-    const char** const midihwports = jack_get_ports(g_jack_global_client, "", JACK_DEFAULT_MIDI_TYPE,
-                                                                              JackPortIsOutput|JackPortIsPhysical);
-    if (midihwports != NULL)
+    /* Else connect to all good hw ports (system, ttymidi and nooice) */
+    else
     {
-        const char *ourportname = jack_port_name(g_midi_in_port);
-
-        for (int i=0; midihwports[i] != NULL; ++i)
-        {
-            const char* const portname = midihwports[i];
-            if (strncmp(portname, "ttymidi:", 8) != 0 &&
-                strncmp(portname, "system:", 7) != 0 &&
-                strncmp(portname, "nooice", 5) != 0)
-                continue;
-
-            jack_connect(g_jack_global_client, portname, ourportname);
-        }
-
-        jack_free(midihwports);
+        ConnectToAllHardwareMIDIPorts();
     }
 
-done:
     g_processing_enabled = true;
 
     return SUCCESS;
@@ -4616,7 +4619,51 @@ void effects_bundle_remove(const char* bpath)
 
 int effects_aggregated_midi_enable(int enable)
 {
-    // TODO
+    if (g_jack_global_client == NULL)
+        return ERR_INVALID_OPERATION;
+
+    if (enable) {
+        if (g_midi_in_port == NULL)
+            return ERR_INVALID_OPERATION;
+
+        const char *ourportname = jack_port_name(g_midi_in_port);
+
+        // step 1. disconnect everything from our mod-host port
+        const char **connectedports = jack_port_get_connections(g_midi_in_port);
+        if (connectedports != NULL) {
+            for (int i=0; connectedports[i] != NULL; ++i)
+                jack_disconnect(g_jack_global_client, connectedports[i], ourportname);
+
+            jack_free(connectedports);
+        }
+
+        // step 2. load the aggregated midi clients
+        if (jack_internal_client_load(g_jack_global_client, "mod-midi-merger",
+                                      JackUseExactName|JackLoadName, NULL, "mod-midi-merger") == 0)
+            return ERR_JACK_CLIENT_ACTIVATION;
+
+        if (jack_internal_client_load(g_jack_global_client, "mod-midi-broadcaster",
+                                      JackUseExactName|JackLoadName, NULL, "mod-midi-broadcaster") == 0)
+            return ERR_JACK_CLIENT_ACTIVATION;
+
+        // step 3. Connect to midi-merger if avaiable */
+        if (jack_port_by_name(g_jack_global_client, "mod-midi-merger:out") != NULL)
+            jack_connect(g_jack_global_client, "mod-midi-merger:out", ourportname);
+
+    } else {
+        // first step, remove aggregated midi clients
+        jack_intclient_t merger = jack_internal_client_handle(g_jack_global_client, "mod-midi-merger", NULL);
+        if (merger != 0)
+            jack_internal_client_unload(g_jack_global_client, merger);
+
+        jack_intclient_t broadcaster = jack_internal_client_handle(g_jack_global_client, "mod-midi-broadcaster", NULL);
+        if (broadcaster != 0)
+            jack_internal_client_unload(g_jack_global_client, broadcaster);
+
+        // second step, connect to all midi hw ports
+        ConnectToAllHardwareMIDIPorts();
+    }
+
     return SUCCESS;
 }
 
