@@ -69,8 +69,9 @@
 static const unsigned int avg_filter_steps = 47;
 static const unsigned int binomial_filter_order = 37;
 
-static unsigned int g_delta[47] = { 120 }; // all elements initially 120
-static float g_average[37] = { 120.0 };
+// all elements initially 120
+static unsigned int g_delta[47] = { [0 ... 46] 120 };
+static float g_average[37] = { [0 ... 36] 120.0 };
 
 /*
 ************************************************************************************************************************
