@@ -476,11 +476,11 @@ static double g_transport_tick;
 static bool g_processing_enabled;
 
 // Wall clock time since program startup;
-static unsigned long long monotonic_frame_count = 0;
+static uint64_t g_monotonic_frame_count = 0;
 
 // Used for the MIDI Beat Clock Slave:
-static unsigned long long t_current = 0;
-static unsigned long long t_previous = 0;
+static uint64_t g_current = 0;
+static uint64_t g_previous = 0;
 
 /* LV2 and Lilv */
 static LilvWorld *g_lv2_data;
@@ -1524,12 +1524,12 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
             case 0xF8: // Clock tick
               // Calculate the timestamp difference to the previous MBC
               // event
-              t_current = monotonic_frame_count + event.time;
+              g_current = g_monotonic_frame_count + event.time;
 
-              float filtered_delta_t = beat_clock_tick_filter(t_current - t_previous);
+              float filtered_delta_t = beat_clock_tick_filter(g_current - g_previous);
               g_transport_bpm = beats_per_minute(filtered_delta_t, g_sample_rate);
 
-              t_previous = t_current;
+              g_previous = g_current;
               break;
 
             case 0xFA: // Start
@@ -1703,7 +1703,7 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
         sem_post(&g_postevents_semaphore);
 
     // Increase by one period
-    monotonic_frame_count += nframes;
+    g_monotonic_frame_count += nframes;
 
     return 0;
 
