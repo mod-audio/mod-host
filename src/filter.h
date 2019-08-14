@@ -71,16 +71,16 @@
  * Calculate the BPM from the time difference of two adjacent MIDI
  * Beat Clock signals.
  *
- * `delta_t` is time in samples. Due to filtering this is not integer.
+ * `delta` is time in samples. Due to filtering this is not integer.
  */
-float beats_per_minute(const float delta_t, const jack_nframes_t sample_rate);
+double beats_per_minute(const double delta, const jack_nframes_t sample_rate);
 
 /**
  * `raw_delta` is the time difference in samples between two
  * adjacent MIDI Beat Clock ticks. Over time this has jitter.
  * This function filters the jitter and returns a more steady time delta.
  */
-float beat_clock_tick_filter(unsigned int raw_delta);
+double beat_clock_tick_filter(unsigned int raw_delta);
 
 /*
 ************************************************************************************************************************
