@@ -128,40 +128,28 @@ static void effects_add_cb(proto_t *proto)
 {
     int resp;
     resp = effects_add(proto->list[1], atoi(proto->list[2]));
-
-    char buffer[128];
-    sprintf(buffer, "resp %i", resp);
-    protocol_response(buffer, proto);
+    protocol_response_int(resp, proto);
 }
 
 static void effects_remove_cb(proto_t *proto)
 {
     int resp;
     resp = effects_remove(atoi(proto->list[1]));
-
-    char buffer[128];
-    sprintf(buffer, "resp %i", resp);
-    protocol_response(buffer, proto);
+    protocol_response_int(resp, proto);
 }
 
 static void effects_preset_save_cb(proto_t *proto)
 {
     int resp;
     resp = effects_preset_save(atoi(proto->list[1]), proto->list[3], proto->list[4], proto->list[2]);
-
-    char buffer[128];
-    sprintf(buffer, "resp %i", resp);
-    protocol_response(buffer, proto);
+    protocol_response_int(resp, proto);
 }
 
 static void effects_preset_load_cb(proto_t *proto)
 {
     int resp;
     resp = effects_preset_load(atoi(proto->list[1]), proto->list[2]);
-
-    char buffer[128];
-    sprintf(buffer, "resp %i", resp);
-    protocol_response(buffer, proto);
+    protocol_response_int(resp, proto);
 }
 
 static void effects_preset_show_cb(proto_t *proto)
@@ -183,30 +171,21 @@ static void effects_connect_cb(proto_t *proto)
 {
     int resp;
     resp = effects_connect(proto->list[1], proto->list[2]);
-
-    char buffer[128];
-    sprintf(buffer, "resp %i", resp);
-    protocol_response(buffer, proto);
+    protocol_response_int(resp, proto);
 }
 
 static void effects_disconnect_cb(proto_t *proto)
 {
     int resp;
     resp = effects_disconnect(proto->list[1], proto->list[2]);
-
-    char buffer[128];
-    sprintf(buffer, "resp %i", resp);
-    protocol_response(buffer, proto);
+    protocol_response_int(resp, proto);
 }
 
 static void effects_bypass_cb(proto_t *proto)
 {
     int resp;
     resp = effects_bypass(atoi(proto->list[1]), atoi(proto->list[2]));
-
-    char buffer[128];
-    sprintf(buffer, "resp %i", resp);
-    protocol_response(buffer, proto);
+    protocol_response_int(resp, proto);
 }
 
 static void effects_set_param_cb(proto_t *proto)
@@ -218,9 +197,7 @@ static void effects_set_param_cb(proto_t *proto)
         resp = effects_set_property(atoi(proto->list[1]), proto->list[2], proto->list[3]);
     }
 
-    char buffer[128];
-    sprintf(buffer, "resp %i", resp);
-    protocol_response(buffer, proto);
+    protocol_response_int(resp, proto);
 }
 
 static void effects_get_param_cb(proto_t *proto)
@@ -247,9 +224,7 @@ static void effects_monitor_param_cb(proto_t *proto)
     else
         resp = -1;
 
-    char buffer[128];
-    sprintf(buffer, "resp %i", resp);
-    protocol_response(buffer, proto);
+    protocol_response_int(resp, proto);
 }
 
 static void effects_licensee_cb(proto_t *proto)
@@ -271,28 +246,24 @@ static void effects_licensee_cb(proto_t *proto)
 
 static void effects_set_beats_per_minute_cb(proto_t *proto)
 {
-  int resp;
-  double bpm;
-  
-  bpm = atof(proto->list[1]);
-  resp = effects_set_beats_per_minute(bpm);
-  
-  char buffer[128];
-  sprintf(buffer, "resp %i", resp);
-  protocol_response(buffer, proto);
+    int resp;
+    double bpm;
+
+    bpm = atof(proto->list[1]);
+    resp = effects_set_beats_per_minute(bpm);
+
+    protocol_response_int(resp, proto);
 }
 
 static void effects_set_beats_per_bar_cb(proto_t *proto)
 {
-  int resp;
-  double bpb;
-  
-  bpb = atof(proto->list[1]);
-  resp = effects_set_beats_per_bar(bpb);
-  
-  char buffer[128];
-  sprintf(buffer, "resp %i", resp);
-  protocol_response(buffer, proto);
+    int resp;
+    double bpb;
+
+    bpb = atof(proto->list[1]);
+    resp = effects_set_beats_per_bar(bpb);
+
+    protocol_response_int(resp, proto);
 }
 
 static void monitor_addr_set_cb(proto_t *proto)
@@ -303,39 +274,28 @@ static void monitor_addr_set_cb(proto_t *proto)
     else
         resp = monitor_stop();
 
-    char buffer[128];
-    sprintf(buffer, "resp %i", resp);
-    protocol_response(buffer, proto);
+    protocol_response_int(resp, proto);
 }
 
 static void monitor_output_cb(proto_t *proto)
 {
     int resp;
     resp = !effects_monitor_output_parameter(atoi(proto->list[1]), proto->list[2]);
-
-    char buffer[128];
-    sprintf(buffer, "resp %i", resp);
-    protocol_response(buffer, proto);
+    protocol_response_int(resp, proto);
 }
 
 static void monitor_midi_program_cb(proto_t *proto)
 {
     int resp;
     resp = effects_monitor_midi_program(atoi(proto->list[1]), atoi(proto->list[2]));
-
-    char buffer[128];
-    sprintf(buffer, "resp %i", resp);
-    protocol_response(buffer, proto);
+    protocol_response_int(resp, proto);
 }
 
 static void midi_learn_cb(proto_t *proto)
 {
     int resp;
     resp = !effects_midi_learn(atoi(proto->list[1]), proto->list[2], atof(proto->list[3]), atof(proto->list[4]));
-
-    char buffer[128];
-    sprintf(buffer, "resp %i", resp);
-    protocol_response(buffer, proto);
+    protocol_response_int(resp, proto);
 }
 
 static void midi_map_cb(proto_t *proto)
@@ -344,20 +304,14 @@ static void midi_map_cb(proto_t *proto)
     resp = !effects_midi_map(atoi(proto->list[1]), proto->list[2],
                              atoi(proto->list[3]), atoi(proto->list[4]),
                              atof(proto->list[5]), atof(proto->list[6]));
-
-    char buffer[128];
-    sprintf(buffer, "resp %i", resp);
-    protocol_response(buffer, proto);
+    protocol_response_int(resp, proto);
 }
 
 static void midi_unmap_cb(proto_t *proto)
 {
     int resp;
     resp = !effects_midi_unmap(atoi(proto->list[1]), proto->list[2]);
-
-    char buffer[128];
-    sprintf(buffer, "resp %i", resp);
-    protocol_response(buffer, proto);
+    protocol_response_int(resp, proto);
 }
 
 static void cc_map_cb(proto_t *proto)
@@ -368,9 +322,7 @@ static void cc_map_cb(proto_t *proto)
 
     if (scalepoints_count != 0 && (scalepoints_count == 1 || proto->list_count < (uint32_t)(12+2*scalepoints_count)))
     {
-        char buffer[128];
-        sprintf(buffer, "resp %i", ERR_ASSIGNMENT_INVALID_OP);
-        protocol_response(buffer, proto);
+        protocol_response_int(ERR_ASSIGNMENT_INVALID_OP, proto);
         return;
     }
 
@@ -388,9 +340,7 @@ static void cc_map_cb(proto_t *proto)
         }
         else
         {
-            char buffer[128];
-            sprintf(buffer, "resp %i", ERR_MEMORY_ALLOCATION);
-            protocol_response(buffer, proto);
+            protocol_response_int(ERR_MEMORY_ALLOCATION, proto);
             return;
         }
     }
@@ -413,19 +363,14 @@ static void cc_map_cb(proto_t *proto)
 
     free(scalepoints);
 
-    char buffer[128];
-    sprintf(buffer, "resp %i", resp);
-    protocol_response(buffer, proto);
+    protocol_response_int(resp, proto);
 }
 
 static void cc_unmap_cb(proto_t *proto)
 {
     int resp;
     resp = effects_cc_unmap(atoi(proto->list[1]), proto->list[2]);
-
-    char buffer[128];
-    sprintf(buffer, "resp %i", resp);
-    protocol_response(buffer, proto);
+    protocol_response_int(resp, proto);
 }
 
 static void cpu_load_cb(proto_t *proto)
@@ -512,9 +457,7 @@ static void feature_enable(proto_t *proto)
     else
         resp = ERR_INVALID_OPERATION;
 
-    char buffer[128];
-    sprintf(buffer, "resp %i", resp);
-    protocol_response(buffer, proto);
+    protocol_response_int(resp, proto);
 }
 
 static void transport(proto_t *proto)
@@ -526,13 +469,8 @@ static void transport(proto_t *proto)
 static void transport_sync(proto_t *proto)
 {
     const char* mode = proto->list[1];
-    int resp;
-
-    resp = effects_transport_sync_mode(mode);
-
-    char buffer[128];
-    sprintf(buffer, "resp %i", resp);
-    protocol_response(buffer, proto);
+    int resp = effects_transport_sync_mode(mode);
+    protocol_response_int(resp, proto);
 }
 
 static void output_data_ready(proto_t *proto)
@@ -695,7 +633,7 @@ int main(int argc, char **argv)
 #else
   printf("DEBUG mode: off.\n");
 #endif
-  
+
     /* Command line options */
     static struct option long_options[] = {
         {"nofork", no_argument, 0, 'n'},

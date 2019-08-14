@@ -504,7 +504,7 @@ static void update_ports_list(const char *flow)
     }
 
     /* Gets ports list */
-    char cmd[64];
+    char cmd[128];
     sprintf(cmd, "jack_lsp -p | grep -B1 %s | grep -v 'properties.*,$' | grep -v ^--", flow);
     fp = popen(cmd, "r");
     if (fp)

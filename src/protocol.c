@@ -253,6 +253,15 @@ void protocol_response(const char *response, proto_t *proto)
 }
 
 
+void protocol_response_int(int resp, proto_t *proto)
+{
+    char buffer[32];
+    snprintf(buffer, 32, "resp %i", resp);
+    buffer[31] = '\0';
+    protocol_response(buffer, proto);
+}
+
+
 void protocol_remove_commands(void)
 {
     unsigned int i;
