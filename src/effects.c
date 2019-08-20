@@ -4638,17 +4638,18 @@ int effects_aggregated_midi_enable(int enable)
         }
 
         // step 2. load the aggregated midi clients
-        if (jack_internal_client_load(g_jack_global_client, "mod-midi-merger",
-                                      JackUseExactName|JackLoadName, NULL, "mod-midi-merger") == 0)
-            return ERR_JACK_CLIENT_ACTIVATION;
+        if (jack_port_by_name(g_jack_global_client, "mod-midi-merger:out") == NULL)
+            if (jack_internal_client_load(g_jack_global_client, "mod-midi-merger",
+                                          JackUseExactName|JackLoadName, NULL, "mod-midi-merger") == 0)
+                return ERR_JACK_CLIENT_ACTIVATION;
 
-        if (jack_internal_client_load(g_jack_global_client, "mod-midi-broadcaster",
-                                      JackUseExactName|JackLoadName, NULL, "mod-midi-broadcaster") == 0)
-            return ERR_JACK_CLIENT_ACTIVATION;
+        if (jack_port_by_name(g_jack_global_client, "mod-midi-broadcaster:out") == NULL)
+            if (jack_internal_client_load(g_jack_global_client, "mod-midi-broadcaster",
+                                          JackUseExactName|JackLoadName, NULL, "mod-midi-broadcaster") == 0)
+                return ERR_JACK_CLIENT_ACTIVATION;
 
-        // step 3. Connect to midi-merger if avaiable */
-        if (jack_port_by_name(g_jack_global_client, "mod-midi-merger:out") != NULL)
-            jack_connect(g_jack_global_client, "mod-midi-merger:out", ourportname);
+        // step 3. Connect to midi-merger */
+        jack_connect(g_jack_global_client, "mod-midi-merger:out", ourportname);
 
     } else {
         // first step, remove aggregated midi clients
