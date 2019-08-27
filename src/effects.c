@@ -194,7 +194,8 @@ enum PostPonedEventType {
     POSTPONED_OUTPUT_MONITOR,
     POSTPONED_MIDI_PROGRAM_CHANGE,
     POSTPONED_MIDI_MAP,
-    POSTPONED_TRANSPORT
+    POSTPONED_TRANSPORT,
+    POSTPONED_JACK_MIDI_CONNECT
 };
 
 enum UpdatePositionFlag {
@@ -399,6 +400,10 @@ typedef struct POSTPONED_TRANSPORT_EVENT_T {
     float bpm;
 } postponed_transport_event_t;
 
+typedef struct POSTPONED_JACK_MIDI_CONNECT_EVENT_T {
+    jack_port_id_t port;
+} postponed_jack_midi_connect_event_t;
+
 typedef struct POSTPONED_EVENT_T {
     enum PostPonedEventType type;
     union {
@@ -406,6 +411,7 @@ typedef struct POSTPONED_EVENT_T {
         postponed_midi_program_change_event_t program_change;
         postponed_midi_map_event_t midi_map;
         postponed_transport_event_t transport;
+        postponed_jack_midi_connect_event_t jack_midi_connect;
     };
 } postponed_event_t;
 
@@ -474,6 +480,7 @@ static volatile double g_transport_bpm;
 static volatile bool g_transport_reset;
 static volatile enum TransportSyncMode g_transport_sync_mode;
 static double g_transport_tick;
+static bool g_aggregated_midi_enabled;
 static bool g_processing_enabled;
 
 // Wall clock time since program startup;
@@ -537,6 +544,7 @@ static int InstanceExist(int effect_id);
 static void AllocatePortBuffers(effect_t* effect);
 static int BufferSize(jack_nframes_t nframes, void* data);
 static void FreeWheelMode(int starting, void* data);
+static void PortRegistration(jack_port_id_t port_id, int reg, void* data);
 static void RunPostPonedEvents(int ignored_effect_id);
 static void* PostPonedEventsThread(void* arg);
 static int ProcessPlugin(jack_nframes_t nframes, void *arg);
@@ -646,6 +654,39 @@ static void FreeWheelMode(int starting, void* data)
     }
 }
 
+static void PortRegistration(jack_port_id_t port_id, int reg, void* data)
+{
+    if (g_aggregated_midi_enabled || reg == 0)
+        return;
+
+    /* port flags to connect to */
+    static const int target_port_flags = JackPortIsTerminal|JackPortIsPhysical|JackPortIsOutput;
+
+    const jack_port_t* const port = jack_port_by_id(g_jack_global_client, port_id);
+
+    if ((jack_port_flags(port) & target_port_flags) != target_port_flags)
+        return;
+    if (strcmp(jack_port_type(port), JACK_DEFAULT_MIDI_TYPE) != 0)
+        return;
+
+    postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
+
+    if (posteventptr == NULL)
+        return;
+
+    posteventptr->event.type = POSTPONED_JACK_MIDI_CONNECT;
+    posteventptr->event.jack_midi_connect.port = port_id;
+
+    pthread_mutex_lock(&g_rtsafe_mutex);
+    list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
+    pthread_mutex_unlock(&g_rtsafe_mutex);
+
+    sem_post(&g_postevents_semaphore);
+    return;
+
+    UNUSED_PARAM(data);
+}
+
 static bool ShouldIgnorePostPonedEvent(postponed_parameter_event_t* ev, postponed_cached_events* cached_events)
 {
     // symbol must not be null
@@ -734,6 +775,9 @@ static void RunPostPonedEvents(int ignored_effect_id)
     INIT_LIST_HEAD(&cached_param_set.symbols.siblings);
     INIT_LIST_HEAD(&cached_output_mon.symbols.siblings);
 
+    // if all we have are jack_midi_connect requests, do not send feedback to server
+    bool got_only_jack_midi_requests = true;
+
 #ifdef DEBUG
     printf("DEBUG: Before the queue iteration\n");
     fflush(stdout);
@@ -751,6 +795,8 @@ static void RunPostPonedEvents(int ignored_effect_id)
         printf("DEBUG: ptr %p\n", eventptr);
         fflush(stdout);
 #endif
+        if (got_only_jack_midi_requests && eventptr->event.type != POSTPONED_JACK_MIDI_CONNECT)
+            got_only_jack_midi_requests = false;
 
         switch (eventptr->event.type)
         {
@@ -837,6 +883,16 @@ static void RunPostPonedEvents(int ignored_effect_id)
             // ignore older transport changes
             got_transport = true;
             break;
+
+        case POSTPONED_JACK_MIDI_CONNECT:
+            if (g_jack_global_client != NULL && g_midi_in_port != NULL) {
+                const jack_port_t* const port = jack_port_by_id(g_jack_global_client,
+                                                                eventptr->event.jack_midi_connect.port);
+
+                if (port != NULL)
+                    jack_connect(g_jack_global_client, jack_port_name(port), jack_port_name(g_midi_in_port));
+            }
+            break;
         }
     }
 #ifdef DEBUG
@@ -864,7 +920,7 @@ static void RunPostPonedEvents(int ignored_effect_id)
         rtsafe_memory_pool_deallocate(g_rtsafe_mem_pool, eventptr);
     }
 
-    if (g_postevents_ready)
+    if (g_postevents_ready && !got_only_jack_midi_requests)
     {
 #ifdef DEBUG
         printf("DEBUG: Reported data finish to server\n");
@@ -2401,6 +2457,7 @@ int effects_init(void* client)
     jack_set_timebase_callback(g_jack_global_client, 1, JackTimebase, NULL);
     jack_set_process_callback(g_jack_global_client, ProcessMidi, NULL);
     jack_set_buffer_size_callback(g_jack_global_client, BufferSize, NULL);
+    jack_set_port_registration_callback(g_jack_global_client, PortRegistration, NULL);
 
 #ifdef HAVE_HYLIA
     /* Init hylia */
@@ -2571,7 +2628,9 @@ int effects_init(void* client)
     }
 
     /* Connect to midi-merger if avaiable */
-    if (jack_port_by_name(g_jack_global_client, "mod-midi-merger:out") != NULL)
+    g_aggregated_midi_enabled = jack_port_by_name(g_jack_global_client, "mod-midi-merger:out") != NULL;
+
+    if (g_aggregated_midi_enabled)
     {
         const char *ourportname = jack_port_name(g_midi_in_port);
         jack_connect(g_jack_global_client, "mod-midi-merger:out", ourportname);
@@ -4703,6 +4762,7 @@ int effects_aggregated_midi_enable(int enable)
         ConnectToAllHardwareMIDIPorts();
     }
 
+    g_aggregated_midi_enabled = enable != 0;
     return SUCCESS;
 }
 
