@@ -487,7 +487,6 @@ static bool g_processing_enabled;
 static uint64_t g_monotonic_frame_count = 0;
 
 // Used for the MIDI Beat Clock Slave:
-static uint64_t g_current = 0;
 static uint64_t g_previous = 0;
 
 /* LV2 and Lilv */
@@ -1578,35 +1577,35 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
         // Handle MIDI Beat Clock
         if (g_transport_sync_mode == TRANSPORT_SYNC_MIDI)
         {
-            switch(event.buffer[0]) {
-            case 0xF8: // Clock tick
-              // Calculate the timestamp difference to the previous MBC
-              // event
-              g_current = g_monotonic_frame_count + event.time;
+            switch (event.buffer[0])
+            {
+            case 0xF8: { // Clock tick
+                // Calculate the timestamp difference to the previous MBC event
+                const uint64_t current = g_monotonic_frame_count + event.time;
 
-              float filtered_delta_t = beat_clock_tick_filter(g_current - g_previous);
-              g_transport_bpm = beats_per_minute(filtered_delta_t, g_sample_rate);
+                const double filtered_delta = beat_clock_tick_filter(current - g_previous);
+                g_transport_bpm = beats_per_minute(filtered_delta, g_sample_rate);
 
-              g_previous = g_current;
-              break;
+                g_previous = current;
+                break;
+            }
 
             case 0xFA: // Start
             case 0xFB: // Continue
-              jack_transport_start(g_jack_global_client);
-              break;
+                jack_transport_start(g_jack_global_client);
+                break;
 
             case 0xFC: // Stop
-              jack_transport_stop(g_jack_global_client);
-              jack_transport_locate(g_jack_global_client, 0);
-              break;
+                jack_transport_stop(g_jack_global_client);
+                jack_transport_locate(g_jack_global_client, 0);
+                break;
 
             default:
-              // TODO: Handle MIDI Song Position Pointer
-              break;
+                // TODO: Handle MIDI Song Position Pointer
+                break;
             }
 
-            // TODO: Use pos_flag to minimize function calls.
-            UpdateGlobalJackPosition(UPDATE_POSITION_FORCED);
+            UpdateGlobalJackPosition(UPDATE_POSITION_IF_CHANGED);
         }
 
         status_nibble = event.buffer[0] & 0xF0;
@@ -4877,6 +4876,11 @@ int effects_transport_sync_mode(const char* mode)
 
 void effects_output_data_ready(void)
 {
+#ifdef DEBUG
+        printf("DEBUG: Server is ready to receive more stuff %i\n", g_postevents_ready);
+        fflush(stdout);
+#endif
+
     if (! g_postevents_ready)
     {
         g_postevents_ready = true;
