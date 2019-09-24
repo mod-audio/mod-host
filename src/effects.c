@@ -548,7 +548,7 @@ static void RunPostPonedEvents(int ignored_effect_id);
 static void* PostPonedEventsThread(void* arg);
 static int ProcessPlugin(jack_nframes_t nframes, void *arg);
 static float UpdateValueFromMidi(midi_cc_t* mcc, uint16_t mvalue, bool highres);
-static void UpdateGlobalJackPosition(enum UpdatePositionFlag flag);
+static bool UpdateGlobalJackPosition(enum UpdatePositionFlag flag, bool do_post);
 static int ProcessMidi(jack_nframes_t nframes, void *arg);
 static void JackTimebase(jack_transport_state_t state, jack_nframes_t nframes,
                          jack_position_t* pos, int new_pos, void* arg);
@@ -1490,7 +1490,7 @@ static float UpdateValueFromMidi(midi_cc_t* mcc, uint16_t mvalue, bool highres)
 }
 
 
-static void UpdateGlobalJackPosition(enum UpdatePositionFlag flag)
+static bool UpdateGlobalJackPosition(enum UpdatePositionFlag flag, bool do_post)
 {
     bool old_rolling;
     double old_bpb, old_bpm;
@@ -1511,15 +1511,15 @@ static void UpdateGlobalJackPosition(enum UpdatePositionFlag flag)
     }
 
     if (flag == UPDATE_POSITION_SKIP)
-        return;
+        return false;
     if (flag == UPDATE_POSITION_IF_CHANGED &&
         old_rolling == g_jack_rolling && old_bpb == g_transport_bpb && old_bpm == g_transport_bpm)
-        return;
+        return false;
 
     postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
 
     if (!posteventptr)
-        return;
+        return false;
 
     posteventptr->event.type = POSTPONED_TRANSPORT;
     posteventptr->event.transport.rolling = g_jack_rolling;
@@ -1530,7 +1530,10 @@ static void UpdateGlobalJackPosition(enum UpdatePositionFlag flag)
     list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
     pthread_mutex_unlock(&g_rtsafe_mutex);
 
-    sem_post(&g_postevents_semaphore);
+    if (do_post)
+        sem_post(&g_postevents_semaphore);
+    
+    return true;
 }
 
 static int ProcessMidi(jack_nframes_t nframes, void *arg)
@@ -1563,8 +1566,6 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
     }
 #endif
 
-    UpdateGlobalJackPosition(pos_flag);
-
     // Handle input MIDI events
     void *const port_buf = jack_port_get_buffer(g_midi_in_port, nframes);
     const jack_nframes_t event_count = jack_midi_get_event_count(port_buf);
@@ -1584,9 +1585,12 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
                 const uint64_t current = g_monotonic_frame_count + event.time;
 
                 const double filtered_delta = beat_clock_tick_filter(current - g_previous);
-                g_transport_bpm = beats_per_minute(filtered_delta, g_sample_rate);
+                
+                // rounded to 2 decimal points
+                g_transport_bpm = rint(beats_per_minute(filtered_delta, g_sample_rate) * 100.0) / 100.0;
 
                 g_previous = current;
+                pos_flag = UPDATE_POSITION_FORCED;
                 break;
             }
 
@@ -1604,8 +1608,6 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
                 // TODO: Handle MIDI Song Position Pointer
                 break;
             }
-
-            UpdateGlobalJackPosition(UPDATE_POSITION_IF_CHANGED);
         }
 
         status_nibble = event.buffer[0] & 0xF0;
@@ -1755,6 +1757,9 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
             }
         }
     }
+
+    if (UpdateGlobalJackPosition(pos_flag, false))
+        needs_post = true;
 
     if (needs_post)
         sem_post(&g_postevents_semaphore);
@@ -2615,7 +2620,7 @@ int effects_init(void* client)
     pthread_create(&g_postevents_thread, NULL, PostPonedEventsThread, NULL);
 
     /* get transport state */
-    UpdateGlobalJackPosition(UPDATE_POSITION_SKIP);
+    UpdateGlobalJackPosition(UPDATE_POSITION_SKIP, false);
 
     /* Try activate the jack global client */
     if (jack_activate(g_jack_global_client) != 0)
@@ -4397,7 +4402,7 @@ int effects_set_beats_per_minute(double bpm)
     g_transport_bpm = bpm;
     g_transport_reset = true;
     TriggerJackTimebase();
-    UpdateGlobalJackPosition(UPDATE_POSITION_FORCED);
+    UpdateGlobalJackPosition(UPDATE_POSITION_FORCED, true);
 #ifdef DEBUG
     printf("DEBUG: set_beats_per_minute %f\n", g_transport_bpm);
     fflush(stdout);
@@ -4421,7 +4426,7 @@ int effects_set_beats_per_bar(float bpb)
     g_transport_bpb = bpb;
     g_transport_reset = true;
     TriggerJackTimebase();
-    UpdateGlobalJackPosition(UPDATE_POSITION_FORCED);
+    UpdateGlobalJackPosition(UPDATE_POSITION_FORCED, true);
   } else {
     result = ERR_JACK_VALUE_OUT_OF_RANGE;
   }
