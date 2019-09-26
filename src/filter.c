@@ -189,9 +189,7 @@ double beat_clock_tick_filter(unsigned int raw_delta) {
     sum = raw_delta * AVERAGE_FILTER_STEPS;
   } else {
     // Shift
-    for (unsigned int i = AVERAGE_FILTER_STEPS-1; i >= 1; --i) {
-      g_delta[i] = g_delta[i-1];
-    }
+    memmove(g_delta+1, g_delta, sizeof(g_delta[0])*(AVERAGE_FILTER_STEPS-1));
     g_delta[0] = raw_delta;
 
     // Sum
@@ -210,9 +208,7 @@ double beat_clock_tick_filter(unsigned int raw_delta) {
     }
   } else {
     // Shift
-    for (unsigned int i = BINOMIAL_FILTER_ORDER-1; i >= 1; --i) {
-      g_average[i] = g_average[i-1];
-    }
+    memmove(g_average+1, g_average, sizeof(g_average[0])*(BINOMIAL_FILTER_ORDER-1));
     g_average[0] = sum/AVERAGE_FILTER_STEPS;
   }
 
