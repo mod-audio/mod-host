@@ -1613,6 +1613,7 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
             case 0xFA: // Start
             case 0xFB: // Continue
                 jack_transport_start(g_jack_global_client);
+                reset_filter();
                 break;
 
             case 0xFC: // Stop
