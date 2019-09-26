@@ -30,6 +30,8 @@
 */
 
 #include <math.h>
+#include <stdbool.h>
+#include <string.h>
 #include "filter.h"
 
 /*
@@ -38,6 +40,8 @@
 ************************************************************************************************************************
 */
 
+#define AVERAGE_FILTER_STEPS  47
+#define BINOMIAL_FILTER_ORDER 37
 
 /*
 ************************************************************************************************************************
@@ -45,6 +49,60 @@
 ************************************************************************************************************************
 */
 
+/* These coefficients were calculated using the following Python
+  * script:
+  *
+  * # Pascal's triangle as binomial coefficients, but normalized such that the sum is 1.
+  * # Print the k-th row of the triangle:
+  * def normalized_binomial_coefficients(k):
+  *     coeffs = []
+  *     for i in range(k-1, k):
+  *         for n in range(0, i+1):
+  *             coeffs.append(scipy.special.comb(i, n, exact=True))
+  *     s = sum(coeffs)
+  *     print([e/s for e in coeffs])
+  *
+  * normalized_binomial_coefficients(37)
+  */
+static const double coeffs[] = {
+  1.4551915228366852e-11,
+  5.238689482212067e-10,
+  9.167706593871117e-09,
+  1.0390067473053932e-07,
+  8.571805665269494e-07,
+  5.485955625772476e-06,
+  2.8344104066491127e-05,
+  0.0001214747317135334,
+  0.0004403459024615586,
+  0.0013699650298804045,
+  0.003698905580677092,
+  0.008742867736145854,
+  0.018214307783637196,
+  0.033626414369791746,
+  0.05524339503608644,
+  0.08102364605292678,
+  0.1063435354444664,
+  0.12511004169937223,
+  0.13206059957155958,
+  0.12511004169937223,
+  0.1063435354444664,
+  0.08102364605292678,
+  0.05524339503608644,
+  0.033626414369791746,
+  0.018214307783637196,
+  0.008742867736145854,
+  0.003698905580677092,
+  0.0013699650298804045,
+  0.0004403459024615586,
+  0.0001214747317135334,
+  2.8344104066491127e-05,
+  5.485955625772476e-06,
+  8.571805665269494e-07,
+  1.0390067473053932e-07,
+  9.167706593871117e-09,
+  5.238689482212067e-10,
+  1.4551915228366852e-11
+};
 
 /*
 ************************************************************************************************************************
@@ -66,12 +124,10 @@
 ************************************************************************************************************************
 */
 
-static const unsigned int avg_filter_steps = 47;
-static const unsigned int binomial_filter_order = 37;
-
 // all elements initially 120
-static unsigned int g_delta[47] = { [0 ... 46] 120 };
-static double g_average[37] = { [0 ... 36] 120.0 };
+static unsigned int g_delta[AVERAGE_FILTER_STEPS];
+static double g_average[BINOMIAL_FILTER_ORDER];
+static bool g_reset_average;
 
 /*
 ************************************************************************************************************************
@@ -120,86 +176,59 @@ double beats_per_minute(const double delta, const jack_nframes_t sample_rate) {
  */
 
 double beat_clock_tick_filter(unsigned int raw_delta) {
-  double result = 0.0;
+  const bool reset_average = g_reset_average;
+  double result;
+  unsigned int sum;
 
   // Shift
-  for (unsigned int i = avg_filter_steps-1; i >= 1; --i) {
-    g_delta[i] = g_delta[i-1];
-  }
-  g_delta[0] = raw_delta;
+  if (reset_average) {
+    g_reset_average = false;
+    for (unsigned int i = 0; i < AVERAGE_FILTER_STEPS; ++i) {
+      g_delta[i] = raw_delta;
+    }
+    sum = raw_delta * AVERAGE_FILTER_STEPS;
+  } else {
+    // Shift
+    for (unsigned int i = AVERAGE_FILTER_STEPS-1; i >= 1; --i) {
+      g_delta[i] = g_delta[i-1];
+    }
+    g_delta[0] = raw_delta;
 
-  // Sum
-  unsigned int sum = 0;
-  for (unsigned int i = 0; i < avg_filter_steps; ++i) {
-    sum += g_delta[i];
+    // Sum
+    sum = 0;
+    for (unsigned int i = 0; i < AVERAGE_FILTER_STEPS; ++i) {
+      sum += g_delta[i];
+    }
   }
 
   // Binomial filter following
 
-  /* These coefficients were calculated using the following Python
-   * script:
-   *
-   * # Pascal's triangle as binomial coefficients, but normalized such that the sum is 1.
-   * # Print the k-th row of the triangle:
-   * def normalized_binomial_coefficients(k):
-   *     coeffs = []
-   *     for i in range(k-1, k):
-   *         for n in range(0, i+1):
-   *             coeffs.append(scipy.special.comb(i, n, exact=True))
-   *     s = sum(coeffs)
-   *     print([e/s for e in coeffs])
-   *
-   * normalized_binomial_coefficients(37)
-   */
-  const double coeffs[] = {
-    1.4551915228366852e-11,
-    5.238689482212067e-10,
-    9.167706593871117e-09,
-    1.0390067473053932e-07,
-    8.571805665269494e-07,
-    5.485955625772476e-06,
-    2.8344104066491127e-05,
-    0.0001214747317135334,
-    0.0004403459024615586,
-    0.0013699650298804045,
-    0.003698905580677092,
-    0.008742867736145854,
-    0.018214307783637196,
-    0.033626414369791746,
-    0.05524339503608644,
-    0.08102364605292678,
-    0.1063435354444664,
-    0.12511004169937223,
-    0.13206059957155958,
-    0.12511004169937223,
-    0.1063435354444664,
-    0.08102364605292678,
-    0.05524339503608644,
-    0.033626414369791746,
-    0.018214307783637196,
-    0.008742867736145854,
-    0.003698905580677092,
-    0.0013699650298804045,
-    0.0004403459024615586,
-    0.0001214747317135334,
-    2.8344104066491127e-05,
-    5.485955625772476e-06,
-    8.571805665269494e-07,
-    1.0390067473053932e-07,
-    9.167706593871117e-09,
-    5.238689482212067e-10,
-    1.4551915228366852e-11
-  };
-
-  // Shift
-  for (unsigned int i = binomial_filter_order-1; i >= 1; --i) {
-    g_average[i] = g_average[i-1];
+  if (reset_average) {
+    result = sum/AVERAGE_FILTER_STEPS;
+    for (unsigned int i = 0; i < BINOMIAL_FILTER_ORDER; ++i) {
+      g_average[i] = result;
+    }
+  } else {
+    // Shift
+    for (unsigned int i = BINOMIAL_FILTER_ORDER-1; i >= 1; --i) {
+      g_average[i] = g_average[i-1];
+    }
+    g_average[0] = sum/AVERAGE_FILTER_STEPS;
   }
-  g_average[0] = sum/avg_filter_steps;
 
   // Sum
-  for (unsigned int i = 0; i < binomial_filter_order; ++i) {
+  result = 0;
+  for (unsigned int i = 0; i < BINOMIAL_FILTER_ORDER; ++i) {
     result += coeffs[i] * g_average[i];
   }
+
   return result;
+}
+
+/**
+ * reset filter average values for the next call to `beat_clock_tick_filter`.
+ */
+void reset_filter(void)
+{
+  g_reset_average = true;
 }

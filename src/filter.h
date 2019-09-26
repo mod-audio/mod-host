@@ -82,6 +82,11 @@ double beats_per_minute(const double delta, const jack_nframes_t sample_rate);
  */
 double beat_clock_tick_filter(unsigned int raw_delta);
 
+/**
+ * reset filter average values for the next call to `beat_clock_tick_filter`.
+ */
+void reset_filter(void);
+
 /*
 ************************************************************************************************************************
 *           CONFIGURATION ERRORS

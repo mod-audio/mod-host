@@ -36,6 +36,9 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+#include <math.h>
+#include <float.h>
+
 
 /*
 ************************************************************************************************************************
@@ -91,8 +94,6 @@ typedef struct MSG_T {
 ************************************************************************************************************************
 */
 
-// safely compare 2 float values
-bool floats_differ_enough(float a, float b);
 // splits the string in each whitespace occurrence and returns a array of strings NULL terminated
 char** strarr_split(char *str);
 // returns the string array length
@@ -101,6 +102,19 @@ uint32_t strarr_length(char **str_array);
 char* strarr_join(char** const str_array);
 // duplicate a string
 char *str_duplicate(const char *str);
+
+// safely compare 2 float values, inlined for speed
+static inline
+bool floats_differ_enough(float a, float b)
+{
+    return fabsf(a - b) >= FLT_EPSILON;
+}
+
+static inline
+bool doubles_differ_enough(double a, double b)
+{
+    return fabs(a - b) >= DBL_EPSILON;
+}
 
 
 /*

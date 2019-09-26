@@ -487,7 +487,7 @@ static bool g_processing_enabled;
 static uint64_t g_monotonic_frame_count = 0;
 
 // Used for the MIDI Beat Clock Slave:
-static uint64_t g_previous = 0;
+static volatile uint64_t g_previous_midi_event_time = 0;
 
 /* LV2 and Lilv */
 static LilvWorld *g_lv2_data;
@@ -1532,7 +1532,7 @@ static bool UpdateGlobalJackPosition(enum UpdatePositionFlag flag, bool do_post)
 
     if (do_post)
         sem_post(&g_postevents_semaphore);
-    
+
     return true;
 }
 
@@ -1543,6 +1543,7 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
     uint8_t status_nibble, channel_nibble;
     uint16_t mvalue;
     float value;
+    double dvalue;
     bool handled, highres, needs_post = false;
     enum UpdatePositionFlag pos_flag = UPDATE_POSITION_IF_CHANGED;
 
@@ -1550,17 +1551,22 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
     if (g_transport_sync_mode == TRANSPORT_SYNC_ABLETON_LINK)
     {
         hylia_process(g_hylia_instance, nframes, &g_hylia_timeinfo);
-        const double new_bpb = g_hylia_timeinfo.beatsPerBar;
-        const double new_bpm = g_hylia_timeinfo.beatsPerMinute;
 
-        if (new_bpb > 0.0 && (g_transport_bpb != new_bpb))
+        // check for updated beats per bar
+        dvalue = g_hylia_timeinfo.beatsPerBar;
+
+        if (dvalue > 0.0 && doubles_differ_enough(g_transport_bpb, dvalue))
         {
-            g_transport_bpb = new_bpb;
+            g_transport_bpb = dvalue;
             pos_flag = UPDATE_POSITION_FORCED;
         }
-        if (new_bpm > 0.0 && (g_transport_bpm != new_bpm))
+
+        // check for updated beats per minute
+        dvalue = g_hylia_timeinfo.beatsPerMinute;
+
+        if (dvalue > 0.0 && doubles_differ_enough(g_transport_bpm, dvalue))
         {
-            g_transport_bpm = new_bpm;
+            g_transport_bpm = dvalue;
             pos_flag = UPDATE_POSITION_FORCED;
         }
     }
@@ -1584,13 +1590,23 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
                 // Calculate the timestamp difference to the previous MBC event
                 const uint64_t current = g_monotonic_frame_count + event.time;
 
-                const double filtered_delta = beat_clock_tick_filter(current - g_previous);
-                
-                // rounded to 2 decimal points
-                g_transport_bpm = rint(beats_per_minute(filtered_delta, g_sample_rate) * 100.0) / 100.0;
+                if (g_previous_midi_event_time != 0)
+                {
+                    const double filtered_delta = beat_clock_tick_filter(current - g_previous_midi_event_time);
 
-                g_previous = current;
-                pos_flag = UPDATE_POSITION_FORCED;
+                    // rounded to 2 decimal points
+                    dvalue = rint(beats_per_minute(filtered_delta, g_sample_rate) * 100.0) / 100.0;
+
+                    if (dvalue > 0.0 && doubles_differ_enough(g_transport_bpm, dvalue))
+                    {
+                        g_transport_bpm = dvalue;
+                        pos_flag = UPDATE_POSITION_FORCED;
+                    }
+                } else {
+                    reset_filter();
+                }
+
+                g_previous_midi_event_time = current;
                 break;
             }
 
@@ -4870,6 +4886,7 @@ int effects_transport_sync_mode(const char* mode)
 
     if (!strcmp(mode, "midi"))
     {
+        g_previous_midi_event_time = 0;
         g_transport_sync_mode = TRANSPORT_SYNC_MIDI;
         effects_output_data_ready();
         return SUCCESS;
