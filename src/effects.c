@@ -994,6 +994,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
 
     /* transport */
     uint8_t pos_buf[256];
+    memset(pos_buf, 0, sizeof(pos_buf));
     LV2_Atom* lv2_pos = (LV2_Atom*)pos_buf;
 
     if (effect->hints & HINT_TRANSPORT)
@@ -1055,10 +1056,6 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
             }
 
             lv2_atom_forge_pop(&forge, &frame);
-        }
-        else
-        {
-            lv2_pos->size = 0;
         }
     }
     if (effect->bpb_index >= 0)
