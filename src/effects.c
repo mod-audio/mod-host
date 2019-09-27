@@ -239,7 +239,7 @@ typedef struct PROPERTY_EVENT_T {
 } property_event_t;
 
 typedef struct PRESET_T {
-    const LilvNode* uri;
+    LilvNode *uri;
 } preset_t;
 
 typedef struct MONITOR_T {
@@ -3725,6 +3725,7 @@ int effects_remove(int effect_id)
             {
                 for (i = 0; i < effect->presets_count; i++)
                 {
+                    lilv_free(effect->presets[i]->uri);
                     free(effect->presets[i]);
                 }
                 free(effect->presets);
