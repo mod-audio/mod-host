@@ -4700,6 +4700,7 @@ int effects_aggregated_midi_enable(int enable)
     if (g_jack_global_client == NULL)
         return ERR_INVALID_OPERATION;
 
+#ifdef HAVE_JACK2
     if (enable) {
         if (g_midi_in_port == NULL)
             return ERR_INVALID_OPERATION;
@@ -4780,6 +4781,7 @@ int effects_aggregated_midi_enable(int enable)
         // step 2. connect to all midi hw ports
         ConnectToAllHardwareMIDIPorts();
     }
+#endif // HAVE_JACK2
 
     g_aggregated_midi_enabled = enable != 0;
     return SUCCESS;
