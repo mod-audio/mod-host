@@ -1596,7 +1596,16 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
 
                     if (dvalue > 0.0 && doubles_differ_enough(g_transport_bpm, dvalue))
                     {
-                        g_transport_bpm = dvalue;
+                        // set a sane low limit
+                        if (dvalue <= 20.0)
+                            g_transport_bpm = 20;
+                        // >280 BPM over MIDI is unreasonable
+                        else if (dvalue >= 280.0)
+                            g_transport_bpm = 280.0;
+                        // we are good!
+                        else
+                            g_transport_bpm = dvalue;
+
                         pos_flag = UPDATE_POSITION_FORCED;
                     }
                 } else {
