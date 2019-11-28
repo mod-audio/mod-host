@@ -1037,7 +1037,11 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
                 lv2_atom_forge_long(&forge, pos.bar - 1);
 
                 lv2_atom_forge_key(&forge, g_urids.time_barBeat);
-                lv2_atom_forge_float(&forge, pos.beat - 1 + (g_transport_tick / pos.ticks_per_beat));
+#ifdef __MOD_DEVICES__
+                lv2_atom_forge_float(&forge, pos.beat - 1 + (pos.tick_double / pos.ticks_per_beat));
+#else
+                lv2_atom_forge_float(&forge, pos.beat - 1 + (pos.tick / pos.ticks_per_beat));
+#endif
 
                 lv2_atom_forge_key(&forge, g_urids.time_beat);
                 lv2_atom_forge_double(&forge, pos.beat - 1);
@@ -1892,6 +1896,9 @@ static void JackTimebase(jack_transport_state_t state, jack_nframes_t nframes,
     }
 
     pos->tick = (int32_t)(tick + 0.5);
+#ifdef __MOD_DEVICES__
+    pos->tick_double = tick;
+#endif
     g_transport_tick = tick;
     return;
 
