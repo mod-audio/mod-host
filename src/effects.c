@@ -563,7 +563,7 @@ static void PortRegistration(jack_port_id_t port_id, int reg, void* data);
 static void RunPostPonedEvents(int ignored_effect_id);
 static void* PostPonedEventsThread(void* arg);
 static int ProcessPlugin(jack_nframes_t nframes, void *arg);
-static bool SetPortValue(port_t *port, float value, int effect_id, bool is_bypass);
+static bool SetPortValue(const port_t *port, float value, int effect_id, bool is_bypass);
 static float UpdateValueFromMidi(midi_cc_t* mcc, uint16_t mvalue, bool highres);
 static bool UpdateGlobalJackPosition(enum UpdatePositionFlag flag, bool do_post);
 static int ProcessMidi(jack_nframes_t nframes, void *arg);
@@ -1453,7 +1453,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
     return 0;
 }
 
-static bool SetPortValue(port_t *port, float value, int effect_id, bool is_bypass)
+static bool SetPortValue(const port_t *port, float value, int effect_id, bool is_bypass)
 {
     if (is_bypass)
     {
