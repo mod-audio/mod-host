@@ -485,7 +485,7 @@ static pthread_t     g_postevents_thread;
 
 /* Jack */
 static jack_client_t *g_jack_global_client;
-static jack_nframes_t g_sample_rate, g_block_length;
+static jack_nframes_t g_sample_rate, g_block_length, g_max_allowed_midi_delta;
 static const char **g_capture_ports, **g_playback_ports;
 static size_t g_midi_buffer_size;
 static jack_port_t *g_midi_in_port;
@@ -1646,9 +1646,8 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
                 if (g_previous_midi_event_time != 0)
                 {
                     const uint64_t delta = current - g_previous_midi_event_time;
-                    const uint32_t max_allowed_delta = (uint32_t)(0.2 * g_sample_rate); // max 200ms of allowed delta
 
-                    if (delta < max_allowed_delta)
+                    if (delta < g_max_allowed_midi_delta)
                     {
                         const double filtered_delta = beat_clock_tick_filter(delta);
 
@@ -2453,6 +2452,7 @@ int effects_init(void* client)
     g_block_length = jack_get_buffer_size(g_jack_global_client);
     g_sample_rate = jack_get_sample_rate(g_jack_global_client);
     g_midi_buffer_size = jack_port_type_get_buffer_size(g_jack_global_client, JACK_DEFAULT_MIDI_TYPE);
+    g_max_allowed_midi_delta = (jack_nframes_t)(g_sample_rate * 0.2); // max 200ms of allowed delta
 
     /* initial transport state */
     g_transport_reset = true;
