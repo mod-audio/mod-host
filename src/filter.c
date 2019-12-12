@@ -64,7 +64,7 @@
   *
   * normalized_binomial_coefficients(37)
   */
-static const double coeffs[] = {
+static const double coeffs[BINOMIAL_FILTER_ORDER] = {
   1.4551915228366852e-11,
   5.238689482212067e-10,
   9.167706593871117e-09,
@@ -127,7 +127,7 @@ static const double coeffs[] = {
 // all elements initially 120
 static unsigned int g_delta[AVERAGE_FILTER_STEPS];
 static double g_average[BINOMIAL_FILTER_ORDER];
-static bool g_reset_average;
+static bool g_reset_average = true;
 
 /*
 ************************************************************************************************************************
@@ -159,7 +159,7 @@ double beats_per_minute(const double delta, const jack_nframes_t sample_rate) {
   /*
    * \text{bpm} = \frac{120}{2\cdot{}24}\cdot{}\cfrac{\text{SR}}{\delta t}
    */
-  return (2.5 * (sample_rate)) / delta;
+  return (2.5 * sample_rate) / delta;
 }
 
 
