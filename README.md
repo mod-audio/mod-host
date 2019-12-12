@@ -180,6 +180,14 @@ The commands supported by mod-host are:
         * unmap the Control Chain actuator from a parameter
         e.g.: unmap 0 gain
 
+    cv_map <instance_number> <param_symbol> <source_port_name> <minimum> <maximum>
+        * map a CV source port to a parameter
+        e.g.: midi_map 0 gain 0 1 "Gain" 0.0 -24.0 3.0 33 "dB" 0
+
+    cv_unmap <instance_number> <param_symbol>
+        * unmap the CV actuator from a parameter
+        e.g.: unmap 0 gain
+
     cpu_load
         * return current jack cpu load
 

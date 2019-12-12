@@ -69,6 +69,8 @@ static const char *g_commands[] = {
     "midi_unmap",
     "cc_map",
     "cc_unmap",
+    "cv_map",
+    "cv_unmap",
     "cpu_load",
     "load",
     "save",
@@ -290,7 +292,8 @@ static char **completion(const char *text, int start, int end)
             }
             else if (strcmp(cmd[0], "param_get") == 0 ||
                      strcmp(cmd[0], "midi_unmap") == 0 ||
-                     strcmp(cmd[0], "cc_unmap") == 0)
+                     strcmp(cmd[0], "cc_unmap") == 0 ||
+                     strcmp(cmd[0], "cv_unmap") == 0)
             {
                 if (count == 1)
                 {
@@ -342,6 +345,21 @@ static char **completion(const char *text, int start, int end)
                     get_symbols = 1;
                 }
                 else if (count == 6)
+                {
+                    get_param_info = 1;
+                }
+            }
+            else if (strcmp(cmd[0], "cv_map") == 0)
+            {
+                if (count == 1)
+                {
+                    get_instances = 1;
+                }
+                else if (count == 2)
+                {
+                    get_symbols = 1;
+                }
+                else if (count == 4 || count == 5)
                 {
                     get_param_info = 1;
                 }
