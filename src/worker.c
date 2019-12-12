@@ -51,10 +51,12 @@ static void* worker_func(void* data)
     return NULL;
 }
 
-void worker_init(worker_t *worker, const LV2_Worker_Interface *iface)
+void worker_init(worker_t *worker, LilvInstance *instance, const LV2_Worker_Interface *iface)
 {
     worker->exit = false;
     worker->iface = iface;
+    worker->instance = instance;
+    sem_init(&worker->sem, 0, 0);
     zix_thread_create(&worker->thread, 4096, worker_func, worker);
     worker->requests  = jack_ringbuffer_create(4096);
     worker->responses = jack_ringbuffer_create(4096);

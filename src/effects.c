@@ -35,8 +35,10 @@
 /* Jack */
 #include <jack/jack.h>
 #include <jack/intclient.h>
+#include <jack/metadata.h>
 #include <jack/midiport.h>
 #include <jack/transport.h>
+#include <jack/uuid.h>
 
 /* LV2 and Lilv */
 #include <lilv/lilv.h>
@@ -211,6 +213,19 @@ enum UpdatePositionFlag {
 ************************************************************************************************************************
 */
 
+typedef struct PORT_T port_t;
+
+typedef struct CV_SOURCE_T {
+    jack_port_t *jack_port;
+    float source_min_value;
+    float source_max_value;
+    float source_diff_value;
+    float min_value;
+    float max_value;
+    float diff_value;
+    float prev_value;
+} cv_source_t;
+
 typedef struct PORT_T {
     uint32_t index;
     enum PortType type;
@@ -226,6 +241,7 @@ typedef struct PORT_T {
     float def_value;
     float prev_value;
     LilvScalePoints* scale_points;
+    cv_source_t* cv_source;
 } port_t;
 
 typedef struct PROPERTY_T {
@@ -963,8 +979,7 @@ static void* PostPonedEventsThread(void* arg)
 static int ProcessPlugin(jack_nframes_t nframes, void *arg)
 {
     effect_t *effect;
-    const float *buffer_in;
-    float *buffer_out;
+    port_t *port;
     unsigned int i;
 
     if (arg == NULL) return 0;
@@ -972,7 +987,6 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
 
     if (!g_processing_enabled)
     {
-        port_t *port;
         for (i = 0; i < effect->output_audio_ports_count; i++)
         {
             memset(jack_port_get_buffer(effect->output_audio_ports[i]->jack_port, nframes),
@@ -991,6 +1005,11 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
         }
         return 0;
     }
+
+    /* common variables */
+    const float *buffer_in;
+    float *buffer_out;
+    float value;
 
     /* transport */
     uint8_t pos_buf[256];
@@ -1152,11 +1171,43 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
             memcpy(&fatom, (char*)&atom, sizeof(atom));
             char *body = &fatom[sizeof(atom)];
             jack_ringbuffer_read(effect->events_buffer, body, atom.size);
-            const port_t *port = effect->ports[effect->control_index];
+            port = effect->ports[effect->control_index];
             LV2_Evbuf_Iterator e = lv2_evbuf_end(port->evbuf);
             const LV2_Atom* const ratom = (const LV2_Atom*)fatom;
             lv2_evbuf_write(&e, nframes - 1, 0, ratom->type, ratom->size,
                                 LV2_ATOM_BODY_CONST(ratom));
+        }
+    }
+
+    for (i = 0; i < effect->input_control_ports_count; i++)
+    {
+        port = effect->input_control_ports[i];
+
+        if (port->cv_source)
+        {
+            cv_source_t *cv_source = port->cv_source;
+
+            value = ((float*)jack_port_get_buffer(cv_source->jack_port, 1))[0];
+
+            if (! floats_differ_enough(cv_source->prev_value, value)) {
+                continue;
+            }
+
+            cv_source->prev_value = value;
+
+            // convert value from source port into something relevant for this parameter
+            if (value < cv_source->source_min_value) {
+                value = cv_source->min_value;
+            } else if (value > cv_source->source_max_value) {
+                value = cv_source->max_value;
+            } else {
+                // normalize value to 0-1
+                value = (value - cv_source->source_min_value) / cv_source->source_diff_value;
+                // unnormalize value to full scale
+                value = cv_source->min_value + (value * cv_source->diff_value);
+            }
+
+            *(port->buffer) = value;
         }
     }
 
@@ -1278,13 +1329,11 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
     }
 
     /* MIDI out events */
-    uint32_t p;
-    for (p = 0; p < effect->output_event_ports_count; p++)
+    for (i = 0; i < effect->output_event_ports_count; i++)
     {
-        port_t *port = effect->output_event_ports[p];
-        if (port->jack_port &&
-            port->flow == FLOW_OUTPUT &&
-            port->type == TYPE_EVENT)
+        port = effect->output_event_ports[i];
+
+        if (port->jack_port && port->flow == FLOW_OUTPUT && port->type == TYPE_EVENT)
         {
             void* buf = jack_port_get_buffer(port->jack_port, nframes);
             jack_midi_clear_buffer(buf);
@@ -1313,7 +1362,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
                     effect->output_audio_ports_count == 0 &&
                     effect->input_event_ports_count == effect->output_event_ports_count)
                 {
-                    void* bufIn = jack_port_get_buffer(effect->input_event_ports[p]->jack_port, nframes);
+                    void* bufIn = jack_port_get_buffer(effect->input_event_ports[i]->jack_port, nframes);
                     jack_midi_event_t ev;
 
                     for (i = 0; i < jack_midi_get_event_count(bufIn); ++i)
@@ -1347,24 +1396,27 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
     {
         for (i = 0; i < effect->input_control_ports_count; i++)
         {
-            if (effect->input_control_ports[i]->hints & HINT_TRIGGER)
-                *(effect->input_control_ports[i]->buffer) = effect->input_control_ports[i]->def_value;
+            port = effect->input_control_ports[i];
+
+            if (port->hints & HINT_TRIGGER)
+                *(port->buffer) = port->def_value;
         }
     }
 
     if (effect->hints & HINT_OUTPUT_MONITORS)
     {
         bool needs_post = false;
-        float value;
 
         for (i = 0; i < effect->output_control_ports_count; i++)
         {
-            if ((effect->output_control_ports[i]->hints & HINT_MONITORED) == 0)
+            port_t *port = effect->output_control_ports[i];
+
+            if ((port->hints & HINT_MONITORED) == 0)
                 continue;
 
-            value = *(effect->output_control_ports[i]->buffer);
+            value = *(port->buffer);
 
-            if (! floats_differ_enough(effect->output_control_ports[i]->prev_value, value))
+            if (! floats_differ_enough(port->prev_value, value))
                 continue;
 
             postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
@@ -1372,11 +1424,11 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
             if (posteventptr == NULL)
                 continue;
 
-            effect->output_control_ports[i]->prev_value = value;
+            port->prev_value = value;
 
             posteventptr->event.type = POSTPONED_OUTPUT_MONITOR;
             posteventptr->event.parameter.effect_id = effect->instance;
-            posteventptr->event.parameter.symbol    = effect->output_control_ports[i]->symbol;
+            posteventptr->event.parameter.symbol    = port->symbol;
             posteventptr->event.parameter.value     = value;
 
             pthread_mutex_lock(&g_rtsafe_mutex);
@@ -2861,22 +2913,14 @@ int effects_add(const char *uid, int instance)
     effect->lilv_instance = lilv_instance;
 
     /* Worker */
-    effect->worker.instance = lilv_instance;
-    sem_init(&effect->worker.sem, 0, 0);
-    effect->worker.iface = NULL;
-    effect->worker.requests  = NULL;
-    effect->worker.responses = NULL;
-    effect->worker.response  = NULL;
-
     lilv_worker_interface = lilv_new_uri(g_lv2_data, LV2_WORKER__interface);
     if (lilv_plugin_has_extension_data(effect->lilv_plugin, lilv_worker_interface))
     {
-        const LV2_Worker_Interface *worker_interface;
-        worker_interface =
+        const LV2_Worker_Interface *worker_interface =
             (const LV2_Worker_Interface*) lilv_instance_get_extension_data(effect->lilv_instance,
                                                                            LV2_WORKER__interface);
 
-        worker_init(&effect->worker, worker_interface);
+        worker_init(&effect->worker, lilv_instance, worker_interface);
     }
 
     lilv_license_interface = lilv_new_uri(g_lv2_data, MOD_LICENSE__interface);
@@ -2884,7 +2928,7 @@ int effects_add(const char *uid, int instance)
     {
         effect->license_iface =
             (const MOD_License_Interface*) lilv_instance_get_extension_data(effect->lilv_instance,
-                                                                           MOD_LICENSE__interface);
+                                                                            MOD_LICENSE__interface);
     }
 
     /* Create the URI for identify the ports */
@@ -2935,22 +2979,18 @@ int effects_add(const char *uid, int instance)
     effect->monitors = NULL;
     effect->ports_count = ports_count;
     effect->ports = (port_t **) calloc(ports_count, sizeof(port_t *));
-    for (i = 0; i < ports_count; i++) effect->ports[i] = NULL;
 
     for (i = 0; i < ports_count; i++)
     {
         /* Allocate memory to current port */
         effect->ports[i] = (port_t *) malloc(sizeof(port_t));
-        effect->ports[i]->jack_port = NULL;
-        effect->ports[i]->buffer = NULL;
-        effect->ports[i]->evbuf = NULL;
+        memset(effect->ports[i], 0, sizeof(port_t));
 
         /* Lilv port */
         lilv_port = lilv_plugin_get_port_by_index(plugin, i);
         symbol_node = lilv_port_get_symbol(plugin, lilv_port);
         effect->ports[i]->index = i;
         effect->ports[i]->symbol = lilv_node_as_string(symbol_node);
-        effect->ports[i]->scale_points = NULL;
 
         snprintf(port_name, MAX_CHAR_BUF_SIZE, "%s", lilv_node_as_string(symbol_node));
 
@@ -3131,11 +3171,56 @@ int effects_add(const char *uid, int instance)
                 error = ERR_JACK_PORT_REGISTER;
                 goto error;
             }
+
+            /* Set the minimum value of control */
+            float min_value;
+            LilvNodes* lilvvalue_minimum = lilv_port_get_value(plugin, lilv_port, lilv_mod_minimum);
+            if (lilvvalue_minimum == NULL)
+                lilvvalue_minimum = lilv_port_get_value(plugin, lilv_port, lilv_minimum);
+
+            if (lilvvalue_minimum != NULL)
+                min_value = lilv_node_as_float(lilv_nodes_get_first(lilvvalue_minimum));
+            else
+                min_value = -1.0f;
+
+            /* Set the maximum value of control */
+            float max_value;
+            LilvNodes* lilvvalue_maximum = lilv_port_get_value(plugin, lilv_port, lilv_mod_maximum);
+            if (lilvvalue_maximum == NULL)
+                lilvvalue_maximum = lilv_port_get_value(plugin, lilv_port, lilv_maximum);
+
+            if (lilvvalue_maximum != NULL)
+                max_value = lilv_node_as_float(lilv_nodes_get_first(lilvvalue_maximum));
+            else
+                max_value = 1.0f;
+
+            /* Ensure min < max */
+            if (min_value >= max_value)
+                max_value = min_value + 0.1f;
+
+            effect->ports[i]->min_value = min_value;
+            effect->ports[i]->max_value = max_value;
+
+            jack_uuid_t uuid = jack_port_uuid(jack_port);
+            if (!jack_uuid_empty(uuid)) {
+                char str_value[32];
+                memset(str_value, 0, sizeof(str_value));
+
+                snprintf(str_value, 31, "%f", min_value);
+                jack_set_property(jack_client, uuid, LV2_CORE__minimum, str_value, NULL);
+
+                snprintf(str_value, 31, "%f", max_value);
+                jack_set_property(jack_client, uuid, LV2_CORE__maximum, str_value, NULL);
+            }
+
             effect->ports[i]->jack_port = jack_port;
 
             cv_ports_count++;
             if (lilv_port_is_a(plugin, lilv_port, lilv_input)) input_cv_ports_count++;
             else if (lilv_port_is_a(plugin, lilv_port, lilv_output)) output_cv_ports_count++;
+
+            lilv_nodes_free(lilvvalue_maximum);
+            lilv_nodes_free(lilvvalue_minimum);
         }
         else if (lilv_port_is_a(plugin, lilv_port, lilv_event) ||
                     lilv_port_is_a(plugin, lilv_port, lilv_atom_port))
@@ -4630,6 +4715,98 @@ int effects_cc_unmap(int effect_id, const char *control_symbol)
     UNUSED_PARAM(effect_id);
     UNUSED_PARAM(control_symbol);
 #endif
+}
+
+int effects_cv_map(int effect_id, const char *control_symbol, const char *source_port_name, float minimum, float maximum)
+{
+    if (!InstanceExist(effect_id))
+        return ERR_INSTANCE_NON_EXISTS;
+
+    jack_port_t *source_jack_port = jack_port_by_name(g_jack_global_client, source_port_name);
+
+    // FIXME proper error code
+    if (!source_jack_port)
+        return ERR_JACK_VALUE_OUT_OF_RANGE;
+
+    effect_t *effect = &(g_effects[effect_id]);
+    port_t *port = FindEffectInputPortBySymbol(effect, control_symbol);
+
+    if (port == NULL)
+        return ERR_LV2_INVALID_PARAM_SYMBOL;
+
+    // only 1 source per parameter allowed
+    if (port->cv_source)
+        return ERR_INVALID_OPERATION;
+
+    cv_source_t *cv_source = malloc(sizeof(cv_source_t));
+
+    if (!cv_source)
+        return ERR_MEMORY_ALLOCATION;
+
+    jack_port_t *jack_port =
+        jack_port_register(effect->jack_client, source_port_name, JACK_DEFAULT_AUDIO_TYPE, JackPortIsInput|JackPortIsControlVoltage, 0);
+
+    if (!jack_port) {
+        free(cv_source);
+        return ERR_JACK_PORT_REGISTER;
+    }
+
+    float source_min_value = -1.0f;
+    float source_max_value = 1.0f;
+
+    jack_uuid_t uuid = jack_port_uuid(source_jack_port);
+    if (!jack_uuid_empty(uuid)) {
+        char *value;
+        if (jack_get_property(uuid, LV2_CORE__minimum, &value, NULL) == 0) {
+            source_min_value = atof(value);
+            jack_free(value);
+        }
+        if (jack_get_property(uuid, LV2_CORE__maximum, &value, NULL) == 0) {
+            source_max_value = atof(value);
+            jack_free(value);
+        }
+    }
+
+    cv_source->jack_port = jack_port;
+    cv_source->source_min_value = source_min_value;
+    cv_source->source_max_value = source_max_value;
+    cv_source->source_diff_value = source_max_value - source_min_value;
+    cv_source->min_value = minimum;
+    cv_source->max_value = maximum;
+    cv_source->diff_value = maximum - minimum;
+    cv_source->prev_value = minimum;
+
+    port->cv_source = cv_source;
+
+    jack_connect(effect->jack_client, source_port_name, jack_port_name(jack_port));
+
+    return SUCCESS;
+}
+
+int effects_cv_unmap(int effect_id, const char *control_symbol)
+{
+    if (!InstanceExist(effect_id))
+        return ERR_INSTANCE_NON_EXISTS;
+
+    effect_t *effect = &(g_effects[effect_id]);
+    port_t *port = FindEffectInputPortBySymbol(effect, control_symbol);
+
+    if (port == NULL)
+        return ERR_LV2_INVALID_PARAM_SYMBOL;
+
+    // not really success, but not an error either if the mapping does not exist
+    if (!port->cv_source)
+        return SUCCESS;
+
+    cv_source_t *cv_source = port->cv_source;
+    port->cv_source = NULL;
+
+    if (cv_source->jack_port)
+        jack_port_unregister(effect->jack_client, cv_source->jack_port);
+
+    free(cv_source);
+
+    return SUCCESS;
 }
 
 float effects_jack_cpu_load(void)

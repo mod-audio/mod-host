@@ -373,6 +373,24 @@ static void cc_unmap_cb(proto_t *proto)
     protocol_response_int(resp, proto);
 }
 
+static void cv_map_cb(proto_t *proto)
+{
+    int resp;
+    resp = effects_cv_map(atoi(proto->list[1]),  // effect_id
+                               proto->list[2],   // control_symbol
+                               proto->list[3],   // origin_port_name
+                          atof(proto->list[4]),  // minimum
+                          atof(proto->list[5])); // maximum
+    protocol_response_int(resp, proto);
+}
+
+static void cv_unmap_cb(proto_t *proto)
+{
+    int resp;
+    resp = effects_cv_unmap(atoi(proto->list[1]), proto->list[2]);
+    protocol_response_int(resp, proto);
+}
+
 static void cpu_load_cb(proto_t *proto)
 {
     float value = effects_jack_cpu_load();
@@ -578,6 +596,8 @@ static int mod_host_init(jack_client_t* client, int socket_port, int feedback_po
     protocol_add_command(MIDI_UNMAP, midi_unmap_cb);
     protocol_add_command(CC_MAP, cc_map_cb);
     protocol_add_command(CC_UNMAP, cc_unmap_cb);
+    protocol_add_command(CV_MAP, cv_map_cb);
+    protocol_add_command(CV_UNMAP, cv_unmap_cb);
     protocol_add_command(CPU_LOAD, cpu_load_cb);
     protocol_add_command(LOAD_COMMANDS, load_cb);
     protocol_add_command(SAVE_COMMANDS, save_cb);

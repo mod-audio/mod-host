@@ -57,6 +57,7 @@ int sem_wait(sem_t* sem)
             return 1;
     }
 }
+
 // 0 = ok
 static inline
 int sem_timedwait_secs(sem_t* sem, int secs)
