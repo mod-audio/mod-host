@@ -1645,24 +1645,32 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
 
                 if (g_previous_midi_event_time != 0)
                 {
-                    const double filtered_delta = beat_clock_tick_filter(current - g_previous_midi_event_time);
+                    const uint64_t delta = current - g_previous_midi_event_time;
+                    const uint32_t max_allowed_delta = (uint32_t)(0.2 * g_sample_rate); // max 200ms of allowed delta
 
-                    // rounded to 2 decimal points
-                    dvalue = rint(beats_per_minute(filtered_delta, g_sample_rate) * 100.0) / 100.0;
-
-                    if (dvalue > 0.0 && doubles_differ_enough(g_transport_bpm, dvalue))
+                    if (delta < max_allowed_delta)
                     {
-                        // set a sane low limit
-                        if (dvalue <= 20.0)
-                            g_transport_bpm = 20;
-                        // >280 BPM over MIDI is unreasonable
-                        else if (dvalue >= 280.0)
-                            g_transport_bpm = 280.0;
-                        // we are good!
-                        else
-                            g_transport_bpm = dvalue;
+                        const double filtered_delta = beat_clock_tick_filter(delta);
 
-                        pos_flag = UPDATE_POSITION_FORCED;
+                        // rounded to 2 decimal points
+                        dvalue = rint(beats_per_minute(filtered_delta, g_sample_rate) * 100.0) / 100.0;
+
+                        if (dvalue > 0.0 && doubles_differ_enough(g_transport_bpm, dvalue))
+                        {
+                            // set a sane low limit
+                            if (dvalue <= 20.0)
+                                g_transport_bpm = 20;
+                            // >280 BPM over MIDI is unreasonable
+                            else if (dvalue >= 280.0)
+                                g_transport_bpm = 280.0;
+                            // we are good!
+                            else
+                                g_transport_bpm = dvalue;
+
+                            pos_flag = UPDATE_POSITION_FORCED;
+                        }
+                    } else {
+                        reset_filter();
                     }
                 } else {
                     reset_filter();
@@ -1674,8 +1682,8 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
 
             case 0xFA: // Start
             case 0xFB: // Continue
+                g_previous_midi_event_time = 0;
                 jack_transport_start(g_jack_global_client);
-                reset_filter();
                 break;
 
             case 0xFC: // Stop
