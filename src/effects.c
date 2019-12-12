@@ -563,6 +563,7 @@ static void PortRegistration(jack_port_id_t port_id, int reg, void* data);
 static void RunPostPonedEvents(int ignored_effect_id);
 static void* PostPonedEventsThread(void* arg);
 static int ProcessPlugin(jack_nframes_t nframes, void *arg);
+static bool SetPortValue(port_t *port, float value, int effect_id, bool is_bypass);
 static float UpdateValueFromMidi(midi_cc_t* mcc, uint16_t mvalue, bool highres);
 static bool UpdateGlobalJackPosition(enum UpdatePositionFlag flag, bool do_post);
 static int ProcessMidi(jack_nframes_t nframes, void *arg);
@@ -915,7 +916,6 @@ static void RunPostPonedEvents(int ignored_effect_id)
     fflush(stdout);
 #endif
 
-
     // cleanup memory
     list_for_each_safe(it, it2, &cached_param_set.symbols.siblings)
     {
@@ -1007,6 +1007,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
     }
 
     /* common variables */
+    bool needs_post = false;
     const float *buffer_in;
     float *buffer_out;
     float value;
@@ -1185,15 +1186,10 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
 
         if (port->cv_source)
         {
+            bool is_bypass;
             cv_source_t *cv_source = port->cv_source;
 
             value = ((float*)jack_port_get_buffer(cv_source->jack_port, 1))[0];
-
-            if (! floats_differ_enough(cv_source->prev_value, value)) {
-                continue;
-            }
-
-            cv_source->prev_value = value;
 
             // convert value from source port into something relevant for this parameter
             if (value < cv_source->source_min_value) {
@@ -1207,7 +1203,19 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
                 value = cv_source->min_value + (value * cv_source->diff_value);
             }
 
-            *(port->buffer) = value;
+            // invert value if bypass
+            if ((is_bypass = !strcmp(port->symbol, g_bypass_port_symbol)))
+                value = 1.0f - value;
+
+            // ignore requests for same value
+            if (! floats_differ_enough(cv_source->prev_value, value)) {
+                continue;
+            }
+
+            if (SetPortValue(port, value, effect->instance, is_bypass)) {
+                needs_post = true;
+                cv_source->prev_value = value;
+            }
         }
     }
 
@@ -1405,8 +1413,6 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
 
     if (effect->hints & HINT_OUTPUT_MONITORS)
     {
-        bool needs_post = false;
-
         for (i = 0; i < effect->output_control_ports_count; i++)
         {
             port_t *port = effect->output_control_ports[i];
@@ -1437,16 +1443,70 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
 
             needs_post = true;
         }
-
-        if (needs_post)
-            sem_post(&g_postevents_semaphore);
     }
 
     effect->was_bypassed = effect->bypass > 0.5f;
 
+    if (needs_post)
+        sem_post(&g_postevents_semaphore);
+
     return 0;
 }
 
+static bool SetPortValue(port_t *port, float value, int effect_id, bool is_bypass)
+{
+    if (is_bypass)
+    {
+        effect_t *effect = &g_effects[effect_id];
+        if (effect->enabled_index >= 0)
+            *(effect->ports[effect->enabled_index]->buffer) = (value > 0.5f) ? 0.0f : 1.0f;
+    }
+    else if (effect_id == GLOBAL_EFFECT_ID)
+    {
+        if (!strcmp(port->symbol, g_bpb_port_symbol))
+        {
+            g_transport_bpb = value;
+        }
+        else if (!strcmp(port->symbol, g_bpm_port_symbol))
+        {
+            g_transport_bpm = value;
+        }
+        else if (!strcmp(port->symbol, g_rolling_port_symbol))
+        {
+            if (value > 0.5f)
+            {
+                jack_transport_start(g_jack_global_client);
+            }
+            else
+            {
+                jack_transport_stop(g_jack_global_client);
+                jack_transport_locate(g_jack_global_client, 0);
+            }
+            g_transport_reset = true;
+        }
+    }
+
+    *(port->buffer) = value;
+
+    postponed_event_list_data* const posteventptr =
+        rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
+
+    if (posteventptr == NULL)
+        return false;
+
+    posteventptr->event.type = POSTPONED_PARAM_SET;
+    posteventptr->event.parameter.effect_id = effect_id;
+    posteventptr->event.parameter.symbol    = port->symbol;
+    posteventptr->event.parameter.value     = value;
+
+    pthread_mutex_lock(&g_rtsafe_mutex);
+    list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
+    pthread_mutex_unlock(&g_rtsafe_mutex);
+
+    return true;
+}
+
+// FIXME merge most of this with SetPortValue
 static float UpdateValueFromMidi(midi_cc_t* mcc, uint16_t mvalue, bool highres)
 {
     const uint16_t mvaluediv = highres ? 8192 : 64;
@@ -1459,9 +1519,7 @@ static float UpdateValueFromMidi(midi_cc_t* mcc, uint16_t mvalue, bool highres)
         effect->bypass = bypassed ? 1.0f : 0.0f;
 
         if (effect->enabled_index >= 0)
-        {
             *(effect->ports[effect->enabled_index]->buffer) = bypassed ? 0.0f : 1.0f;
-        }
 
         return bypassed ? 1.0f : 0.0f;
     }
@@ -2320,55 +2378,8 @@ static void CCDataUpdate(void* arg)
         if (!floats_differ_enough(*(assignment->port->buffer), data->value))
             continue;
 
-        if (is_bypass)
-        {
-            effect_t *effect = &g_effects[assignment->effect_id];
-            if (effect->enabled_index >= 0)
-                *(effect->ports[effect->enabled_index]->buffer) = (data->value > 0.5f) ? 0.0f : 1.0f;
-        }
-        else if (assignment->effect_id == GLOBAL_EFFECT_ID)
-        {
-            if (!strcmp(assignment->port->symbol, g_bpb_port_symbol))
-            {
-                g_transport_bpb = data->value;
-            }
-            else if (!strcmp(assignment->port->symbol, g_bpm_port_symbol))
-            {
-                g_transport_bpm = data->value;
-            }
-            else if (!strcmp(assignment->port->symbol, g_rolling_port_symbol))
-            {
-                if (data->value > 0.5f)
-                {
-                    jack_transport_start(g_jack_global_client);
-                }
-                else
-                {
-                    jack_transport_stop(g_jack_global_client);
-                    jack_transport_locate(g_jack_global_client, 0);
-                }
-                g_transport_reset = true;
-            }
-        }
-
-        *(assignment->port->buffer) = data->value;
-
-        postponed_event_list_data* const posteventptr =
-            rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
-
-        if (posteventptr == NULL)
-            continue;
-
-        posteventptr->event.type = POSTPONED_PARAM_SET;
-        posteventptr->event.parameter.effect_id = assignment->effect_id;
-        posteventptr->event.parameter.symbol    = assignment->port->symbol;
-        posteventptr->event.parameter.value     = data->value;
-
-        pthread_mutex_lock(&g_rtsafe_mutex);
-        list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
-        pthread_mutex_unlock(&g_rtsafe_mutex);
-
-        needs_post = true;
+        if (SetPortValue(assignment->port, data->value, assignment->effect_id, is_bypass))
+            needs_post = true;
     }
 
     if (needs_post)
