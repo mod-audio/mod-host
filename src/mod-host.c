@@ -36,9 +36,12 @@
 #include <unistd.h>
 #include <getopt.h>
 #include <jack/jack.h>
+#include <signal.h>
+
+#ifndef SKIP_READLINE
 #include <readline/readline.h>
 #include <readline/history.h>
-#include <signal.h>
+#endif
 
 #ifdef HAVE_FFTW335
 #include <fftw3.h>
@@ -400,6 +403,7 @@ static void cpu_load_cb(proto_t *proto)
     protocol_response(buffer, proto);
 }
 
+#ifndef SKIP_READLINE
 static void load_cb(proto_t *proto)
 {
     FILE *fp;
@@ -449,6 +453,7 @@ static void save_cb(proto_t *proto)
         protocol_response("resp 0", proto);
     }
 }
+#endif
 
 static void bundle_add(proto_t *proto)
 {
@@ -517,6 +522,7 @@ static void quit_cb(proto_t *proto)
     exit(EXIT_SUCCESS);
 }
 
+#ifndef SKIP_READLINE
 static void interactive_mode(void)
 {
     msg_t msg;
@@ -551,6 +557,7 @@ static void interactive_mode(void)
         else break;
     }
 }
+#endif
 
 static void term_signal(int sig)
 {
@@ -599,8 +606,10 @@ static int mod_host_init(jack_client_t* client, int socket_port, int feedback_po
     protocol_add_command(CV_MAP, cv_map_cb);
     protocol_add_command(CV_UNMAP, cv_unmap_cb);
     protocol_add_command(CPU_LOAD, cpu_load_cb);
+#ifndef SKIP_READLINE
     protocol_add_command(LOAD_COMMANDS, load_cb);
     protocol_add_command(SAVE_COMMANDS, save_cb);
+#endif
     protocol_add_command(BUNDLE_ADD, bundle_add);
     protocol_add_command(BUNDLE_REMOVE, bundle_remove);
     protocol_add_command(FEATURE_ENABLE, feature_enable);
@@ -705,7 +714,9 @@ int main(int argc, char **argv)
                     "  -v, --verbose                  verbose messages\n"
                     "  -p, --socket-port=<port>       socket port definition\n"
                     "  -f, --feedback-port=<port>     feedback port definition\n"
+#ifndef SKIP_READLINE
                     "  -i, --interactive              interactive mode\n"
+#endif
                     "  -V, --version                  print program version and exit\n"
                     "  -h, --help                     print this help and exit\n",
                 argv[0]);
@@ -743,6 +754,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
+#ifndef SKIP_READLINE
     /* Interactive mode */
     if (interactive)
     {
@@ -750,6 +762,7 @@ int main(int argc, char **argv)
         return 0;
     }
     else
+#endif
     {
         struct sigaction sig;
         memset(&sig, 0, sizeof(sig));

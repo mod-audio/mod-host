@@ -25,8 +25,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+
+#ifndef SKIP_READLINE
 #include <readline/readline.h>
 #include <readline/history.h>
+#endif
 
 #include "completer.h"
 #include "effects.h"
@@ -162,6 +165,7 @@ static void update_instances_list(void);
 ************************************************************************************************************************
 */
 
+#ifndef SKIP_READLINE
 static char *dupstr(const char *s)
 {
     char *r;
@@ -604,6 +608,7 @@ static void update_instances_list(void)
         pclose(fp);
     }
 }
+#endif
 
 
 /*
@@ -614,6 +619,7 @@ static void update_instances_list(void)
 
 void completer_init(void)
 {
+#ifndef SKIP_READLINE
     rl_attempted_completion_function = completion;
 
     FILE *fp;
@@ -658,4 +664,5 @@ void completer_init(void)
     g_param_range[1] = (float *) malloc(sizeof(float));
     g_param_range[2] = (float *) malloc(sizeof(float));
     g_param_range[3] = (float *) malloc(sizeof(float));
+#endif
 }

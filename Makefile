@@ -41,7 +41,7 @@ CFLAGS += -Wmissing-prototypes -Wstrict-prototypes -Wwrite-strings
 endif
 
 # libraries
-LIBS = $(shell pkg-config --libs jack lilv-0) -lreadline -lpthread -lrt -lm
+LIBS = $(shell pkg-config --libs jack lilv-0) -lpthread -lrt -lm
 
 # include paths
 INCS = $(shell pkg-config --cflags jack lilv-0)
@@ -51,6 +51,12 @@ ifeq ($(shell pkg-config --atleast-version=3.3.5 fftw3 fftw3f && echo true), tru
 LIBS += $(shell pkg-config --libs fftw3 fftw3f) -lfftw3_threads -lfftw3f_threads
 INCS += $(shell pkg-config --cflags fftw3 fftw3f) -DHAVE_FFTW335
 endif
+endif
+
+ifeq ($(SKIP_READLINE), 1)
+INCS += -DSKIP_READLINE
+else
+LIBS += -lreadline
 endif
 
 ifeq ($(shell pkg-config --atleast-version=0.22.0 lilv-0 && echo true), true)
