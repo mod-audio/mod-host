@@ -499,10 +499,10 @@ static double g_transport_tick;
 static bool g_aggregated_midi_enabled;
 static bool g_processing_enabled;
 
-// Wall clock time since program startup;
+// Wall clock time since program startup
 static uint64_t g_monotonic_frame_count = 0;
 
-// Used for the MIDI Beat Clock Slave:
+// Used for the MIDI Beat Clock Slave
 static volatile uint64_t g_previous_midi_event_time = 0;
 
 /* LV2 and Lilv */
@@ -1192,9 +1192,9 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
             value = ((float*)jack_port_get_buffer(cv_source->jack_port, 1))[0];
 
             // convert value from source port into something relevant for this parameter
-            if (value < cv_source->source_min_value) {
+            if (value <= cv_source->source_min_value) {
                 value = cv_source->min_value;
-            } else if (value > cv_source->source_max_value) {
+            } else if (value >= cv_source->source_max_value) {
                 value = cv_source->max_value;
             } else {
                 // normalize value to 0-1
@@ -4773,16 +4773,26 @@ int effects_cv_map(int effect_id, const char *control_symbol, const char *source
     float source_min_value = -1.0f;
     float source_max_value = 1.0f;
 
-    jack_uuid_t uuid = jack_port_uuid(source_jack_port);
-    if (!jack_uuid_empty(uuid)) {
-        char *value;
-        if (jack_get_property(uuid, LV2_CORE__minimum, &value, NULL) == 0) {
-            source_min_value = atof(value);
-            jack_free(value);
-        }
-        if (jack_get_property(uuid, LV2_CORE__maximum, &value, NULL) == 0) {
-            source_max_value = atof(value);
-            jack_free(value);
+    // FIXME internal clients cannot set metadata for now
+
+    if (!strncmp(source_port_name, "mod-spi2jack:", 13)) {
+        source_min_value = 0.0f;
+        source_max_value = !strcmp(source_port_name+13, "exp_pedal") ? 5.0f : 10.0f;
+    } else if (!strncmp(source_port_name, "mod-jack2spi:", 13)) {
+        source_min_value = 0.0f;
+        source_max_value = 10.0f;
+    } else {
+        const jack_uuid_t uuid = jack_port_uuid(source_jack_port);
+        if (!jack_uuid_empty(uuid)) {
+            char *value;
+            if (jack_get_property(uuid, LV2_CORE__minimum, &value, NULL) == 0) {
+                source_min_value = atof(value);
+                jack_free(value);
+            }
+            if (jack_get_property(uuid, LV2_CORE__maximum, &value, NULL) == 0) {
+                source_max_value = atof(value);
+                jack_free(value);
+            }
         }
     }
 
