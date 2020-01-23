@@ -1194,13 +1194,27 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
             // convert value from source port into something relevant for this parameter
             if (value <= cv_source->source_min_value) {
                 value = cv_source->min_value;
+
             } else if (value >= cv_source->source_max_value) {
                 value = cv_source->max_value;
+
             } else {
                 // normalize value to 0-1
                 value = (value - cv_source->source_min_value) / cv_source->source_diff_value;
-                // unnormalize value to full scale
-                value = cv_source->min_value + (value * cv_source->diff_value);
+
+                if (port->hints & HINT_TOGGLE) {
+                    // use min|max values if toggle
+                    value = value > 0.5f ? cv_source->max_value : cv_source->min_value;
+
+                } else {
+                    // otherwise unnormalize value to full scale
+                    value = cv_source->min_value + (value * cv_source->diff_value);
+
+                    // and round to integer if needed
+                    if (port->hints & HINT_INTEGER) {
+                        value = roundf(value);
+                    }
+                }
             }
 
             // invert value if bypass
