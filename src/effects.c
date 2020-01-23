@@ -4784,15 +4784,56 @@ int effects_cv_map(int effect_id, const char *control_symbol, const char *source
     } else {
         const jack_uuid_t uuid = jack_port_uuid(source_jack_port);
         if (!jack_uuid_empty(uuid)) {
-            char *value;
-            if (jack_get_property(uuid, LV2_CORE__minimum, &value, NULL) == 0) {
-                source_min_value = atof(value);
-                jack_free(value);
+            char *value_min = NULL;
+            char *value_max = NULL;
+
+            // get values from jack metadata
+            if (jack_get_property(uuid, LV2_CORE__minimum, &value_min, NULL) == 0 &&
+                jack_get_property(uuid, LV2_CORE__maximum, &value_max, NULL) == 0) {
+                source_min_value = atof(value_min);
+                source_max_value = atof(value_max);
+
+            // find values when client is from mod-host, as fallback
+            } else if (!strncmp(source_port_name, "effect_", 7)) {
+                char effect_str[6];
+                const char *source_symbol = NULL;
+                int source_effect_id = -1;
+
+                memset(effect_str, 0, sizeof(effect_str));
+                strncpy(effect_str, source_port_name+7, 5);
+
+                for (int i=1; i<6; ++i) {
+                    if (effect_str[i] == '\0')
+                        break;
+                    if (effect_str[i] == ':') {
+                        effect_str[i] = '\0';
+                        source_symbol = source_port_name + (8 + i);
+                        source_effect_id = atoi(effect_str);
+                        break;
+                    }
+                }
+
+                if (source_symbol != NULL && InstanceExist(source_effect_id)) {
+                    const effect_t *source_effect = &g_effects[source_effect_id];
+
+                    for (uint32_t i = 0; i < source_effect->output_cv_ports_count; ++i)
+                    {
+                        if (!strcmp(source_effect->output_cv_ports[i]->symbol, source_symbol))
+                        {
+                            const port_t *source_port = source_effect->output_cv_ports[i];
+
+                            source_min_value = source_port->min_value;
+                            source_max_value = source_port->max_value;
+                            break;
+                        }
+                    }
+                }
             }
-            if (jack_get_property(uuid, LV2_CORE__maximum, &value, NULL) == 0) {
-                source_max_value = atof(value);
-                jack_free(value);
-            }
+
+            if (value_min != NULL)
+                jack_free(value_min);
+            if (value_max != NULL)
+                jack_free(value_max);
         }
     }
 
