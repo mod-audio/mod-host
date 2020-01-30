@@ -4825,7 +4825,7 @@ int effects_cv_map(int effect_id, const char *control_symbol, const char *source
             return ERR_MEMORY_ALLOCATION;
 
         jack_port = jack_port_register(effect->jack_client,
-                                       source_port_name,
+                                       port->symbol,
                                        JACK_DEFAULT_AUDIO_TYPE,
                                        JackPortIsInput|JackPortIsControlVoltage, 0);
 
