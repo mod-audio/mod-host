@@ -98,6 +98,14 @@ static const char *g_condition[] = {
     NULL
 };
 
+static const char *g_cv_op_modes[] = {
+    "=",
+    "-",
+    "+",
+    "b",
+    NULL
+};
+
 static const char *g_features[] = {
     "aggregated-midi",
     "processing",
@@ -366,6 +374,10 @@ static char **completion(const char *text, int start, int end)
                 else if (count == 4 || count == 5)
                 {
                     get_param_info = 1;
+                }
+                else if (count == 6)
+                {
+                    g_list = (const char**)g_cv_op_modes;
                 }
             }
             else if (strcmp(cmd[0], "param_monitor") == 0)

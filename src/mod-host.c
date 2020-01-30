@@ -379,11 +379,12 @@ static void cc_unmap_cb(proto_t *proto)
 static void cv_map_cb(proto_t *proto)
 {
     int resp;
-    resp = effects_cv_map(atoi(proto->list[1]),  // effect_id
-                               proto->list[2],   // control_symbol
-                               proto->list[3],   // origin_port_name
-                          atof(proto->list[4]),  // minimum
-                          atof(proto->list[5])); // maximum
+    resp = effects_cv_map(atoi(proto->list[1]), // effect_id
+                               proto->list[2],  // control_symbol
+                               proto->list[3],  // origin_port_name
+                          atof(proto->list[4]), // minimum
+                          atof(proto->list[5]), // maximum
+                               proto->list[6]); // op_mode
     protocol_response_int(resp, proto);
 }
 

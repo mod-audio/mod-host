@@ -150,7 +150,7 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
                    int scalepoints_count, const scalepoint_t *scalepoints);
 int effects_cc_unmap(int effect_id, const char *control_symbol);
 
-int effects_cv_map(int effect_id, const char *control_symbol, const char *source_port_name, float minimum, float maximum);
+int effects_cv_map(int effect_id, const char *control_symbol, const char *source_port_name, float minimum, float maximum, const char* mode);
 int effects_cv_unmap(int effect_id, const char *control_symbol);
 
 float effects_jack_cpu_load(void);
