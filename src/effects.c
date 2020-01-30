@@ -216,6 +216,7 @@ enum UpdatePositionFlag {
 typedef struct PORT_T port_t;
 
 typedef struct CV_SOURCE_T {
+    port_t *port;
     jack_port_t *jack_port;
     float source_min_value;
     float source_max_value;
@@ -242,6 +243,7 @@ typedef struct PORT_T {
     float prev_value;
     LilvScalePoints* scale_points;
     cv_source_t* cv_source;
+    pthread_mutex_t cv_source_mutex;
 } port_t;
 
 typedef struct PROPERTY_T {
@@ -1186,6 +1188,13 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
 
         if (port->cv_source)
         {
+            if (pthread_mutex_trylock(&port->cv_source_mutex) != 0)
+                continue;
+            if (!port->cv_source) {
+                pthread_mutex_unlock(&port->cv_source_mutex);
+                continue;
+            }
+
             bool is_bypass;
             cv_source_t *cv_source = port->cv_source;
 
@@ -1223,6 +1232,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
 
             // ignore requests for same value
             if (! floats_differ_enough(cv_source->prev_value, value)) {
+                pthread_mutex_unlock(&port->cv_source_mutex);
                 continue;
             }
 
@@ -1230,6 +1240,8 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
                 needs_post = true;
                 cv_source->prev_value = value;
             }
+
+            pthread_mutex_unlock(&port->cv_source_mutex);
         }
     }
 
@@ -2456,16 +2468,14 @@ int effects_init(void* client)
         return ERR_MEMORY_ALLOCATION;
     }
 
-    pthread_mutexattr_t atts;
-    pthread_mutexattr_init(&atts);
+    pthread_mutexattr_t mutex_atts;
+    pthread_mutexattr_init(&mutex_atts);
 #ifdef __MOD_DEVICES__
-    pthread_mutexattr_setprotocol(&atts, PTHREAD_PRIO_INHERIT);
+    pthread_mutexattr_setprotocol(&mutex_atts, PTHREAD_PRIO_INHERIT);
 #endif
 
-    pthread_mutex_init(&g_rtsafe_mutex, &atts);
-    pthread_mutex_init(&g_midi_learning_mutex, &atts);
-
-    pthread_mutexattr_destroy(&atts);
+    pthread_mutex_init(&g_rtsafe_mutex, &mutex_atts);
+    pthread_mutex_init(&g_midi_learning_mutex, &mutex_atts);
 
     sem_init(&g_postevents_semaphore, 0, 0);
 
@@ -2503,6 +2513,7 @@ int effects_init(void* client)
         port_bpb->flow = FLOW_INPUT;
         port_bpb->hints = 0x0;
         port_bpb->symbol = g_bpb_port_symbol;
+        pthread_mutex_init(&port_bpb->cv_source_mutex, &mutex_atts);
 
         port_t *port_bpm = ports[1] = calloc(1, sizeof(port_t));
         port_bpm->buffer = &port_bpm->prev_value;
@@ -2514,6 +2525,7 @@ int effects_init(void* client)
         port_bpm->flow = FLOW_INPUT;
         port_bpm->hints = 0x0;
         port_bpm->symbol = g_bpm_port_symbol;
+        pthread_mutex_init(&port_bpm->cv_source_mutex, &mutex_atts);
 
         port_t *port_rolling = ports[2] = calloc(1, sizeof(port_t));
         port_rolling->buffer = &port_rolling->prev_value;
@@ -2525,6 +2537,7 @@ int effects_init(void* client)
         port_rolling->flow = FLOW_INPUT;
         port_rolling->hints = HINT_TOGGLE;
         port_rolling->symbol = g_rolling_port_symbol;
+        pthread_mutex_init(&port_rolling->cv_source_mutex, &mutex_atts);
 
         effect_t *effect = &g_effects[GLOBAL_EFFECT_ID];
         memset(effect, 0, sizeof(effect_t));
@@ -2556,6 +2569,7 @@ int effects_init(void* client)
         effect->bypass_port.flow = FLOW_INPUT;
         effect->bypass_port.hints = HINT_TOGGLE;
         effect->bypass_port.symbol = g_bypass_port_symbol;
+        pthread_mutex_init(&effect->bypass_port.cv_source_mutex, &mutex_atts);
 
         /* virtual presets port */
         effect->preset_value = 0.0f;
@@ -2569,7 +2583,10 @@ int effects_init(void* client)
         effect->presets_port.flow = FLOW_INPUT;
         effect->presets_port.hints = HINT_ENUMERATION|HINT_INTEGER;
         effect->presets_port.symbol = g_presets_port_symbol;
+        pthread_mutex_init(&effect->presets_port.cv_source_mutex, &mutex_atts);
     }
+
+    pthread_mutexattr_destroy(&mutex_atts);
 
     /* Set jack callbacks */
     jack_set_thread_init_callback(g_jack_global_client, JackThreadInit, NULL);
@@ -2823,6 +2840,7 @@ int effects_add(const char *uid, int instance)
     uint32_t cv_ports_count, input_cv_ports_count, output_cv_ports_count;
     uint32_t event_ports_count, input_event_ports_count, output_event_ports_count;
     effect_t *effect;
+    port_t *port;
     int32_t error;
 
     effect_name[31] = '\0';
@@ -3013,39 +3031,46 @@ int effects_add(const char *uid, int instance)
     effect->ports_count = ports_count;
     effect->ports = (port_t **) calloc(ports_count, sizeof(port_t *));
 
+    pthread_mutexattr_t mutex_atts;
+    pthread_mutexattr_init(&mutex_atts);
+#ifdef __MOD_DEVICES__
+    pthread_mutexattr_setprotocol(&mutex_atts, PTHREAD_PRIO_INHERIT);
+#endif
+
     for (i = 0; i < ports_count; i++)
     {
         /* Allocate memory to current port */
-        effect->ports[i] = (port_t *) malloc(sizeof(port_t));
-        memset(effect->ports[i], 0, sizeof(port_t));
+        effect->ports[i] = port = (port_t *) calloc(1, sizeof(port_t));
+
+        pthread_mutex_init(&port->cv_source_mutex, &mutex_atts);
 
         /* Lilv port */
         lilv_port = lilv_plugin_get_port_by_index(plugin, i);
         symbol_node = lilv_port_get_symbol(plugin, lilv_port);
-        effect->ports[i]->index = i;
-        effect->ports[i]->symbol = lilv_node_as_string(symbol_node);
+        port->index = i;
+        port->symbol = lilv_node_as_string(symbol_node);
 
         snprintf(port_name, MAX_CHAR_BUF_SIZE, "%s", lilv_node_as_string(symbol_node));
 
         /* Port flow */
-        effect->ports[i]->flow = FLOW_UNKNOWN;
+        port->flow = FLOW_UNKNOWN;
         if (lilv_port_is_a(plugin, lilv_port, lilv_input))
         {
             jack_flags = JackPortIsInput;
-            effect->ports[i]->flow = FLOW_INPUT;
+            port->flow = FLOW_INPUT;
         }
         else if (lilv_port_is_a(plugin, lilv_port, lilv_output))
         {
             jack_flags = JackPortIsOutput;
-            effect->ports[i]->flow = FLOW_OUTPUT;
+            port->flow = FLOW_OUTPUT;
         }
 
-        effect->ports[i]->type = TYPE_UNKNOWN;
-        effect->ports[i]->hints = 0x0;
+        port->type = TYPE_UNKNOWN;
+        port->hints = 0x0;
 
         if (lilv_port_is_a(plugin, lilv_port, lilv_audio))
         {
-            effect->ports[i]->type = TYPE_AUDIO;
+            port->type = TYPE_AUDIO;
 
             /* Allocate memory to audio buffer */
             audio_buffer = (float *) calloc(g_sample_rate, sizeof(float));
@@ -3056,8 +3081,8 @@ int effects_add(const char *uid, int instance)
                 goto error;
             }
 
-            effect->ports[i]->buffer = audio_buffer;
-            effect->ports[i]->buffer_count = g_sample_rate;
+            port->buffer = audio_buffer;
+            port->buffer_count = g_sample_rate;
             lilv_instance_connect_port(lilv_instance, i, audio_buffer);
 
             /* Jack port creation */
@@ -3068,7 +3093,7 @@ int effects_add(const char *uid, int instance)
                 error = ERR_JACK_PORT_REGISTER;
                 goto error;
             }
-            effect->ports[i]->jack_port = jack_port;
+            port->jack_port = jack_port;
 
             audio_ports_count++;
             if (lilv_port_is_a(plugin, lilv_port, lilv_input)) input_audio_ports_count++;
@@ -3076,7 +3101,7 @@ int effects_add(const char *uid, int instance)
         }
         else if (lilv_port_is_a(plugin, lilv_port, lilv_control))
         {
-            effect->ports[i]->type = TYPE_CONTROL;
+            port->type = TYPE_CONTROL;
 
             /* Allocate memory to control port */
             control_buffer = (float *) malloc(sizeof(float));
@@ -3086,11 +3111,11 @@ int effects_add(const char *uid, int instance)
                 error = ERR_MEMORY_ALLOCATION;
                 goto error;
             }
-            effect->ports[i]->buffer = control_buffer;
-            effect->ports[i]->buffer_count = 1;
+            port->buffer = control_buffer;
+            port->buffer_count = 1;
             lilv_instance_connect_port(lilv_instance, i, control_buffer);
 
-            effect->ports[i]->scale_points = lilv_port_get_scale_points(plugin, lilv_port);
+            port->scale_points = lilv_port_get_scale_points(plugin, lilv_port);
 
             /* Set the minimum value of control */
             float min_value;
@@ -3140,35 +3165,35 @@ int effects_add(const char *uid, int instance)
 
             if (lilv_port_has_property(plugin, lilv_port, lilv_enumeration))
             {
-                effect->ports[i]->hints |= HINT_ENUMERATION;
+                port->hints |= HINT_ENUMERATION;
 
                 // make 2 scalepoint enumeration work as toggle
-                if (lilv_scale_points_size(effect->ports[i]->scale_points) == 2)
-                    effect->ports[i]->hints |= HINT_TOGGLE;
+                if (lilv_scale_points_size(port->scale_points) == 2)
+                    port->hints |= HINT_TOGGLE;
             }
             if (lilv_port_has_property(plugin, lilv_port, lilv_integer))
             {
-                effect->ports[i]->hints |= HINT_INTEGER;
+                port->hints |= HINT_INTEGER;
             }
             if (lilv_port_has_property(plugin, lilv_port, lilv_toggled))
             {
-                effect->ports[i]->hints |= HINT_TOGGLE;
+                port->hints |= HINT_TOGGLE;
             }
             if (lilv_port_has_property(plugin, lilv_port, lilv_trigger))
             {
-                effect->ports[i]->hints |= HINT_TRIGGER;
+                port->hints |= HINT_TRIGGER;
                 effect->hints |= HINT_TRIGGERS;
             }
             if (lilv_port_has_property(plugin, lilv_port, lilv_logarithmic))
             {
-                effect->ports[i]->hints |= HINT_LOGARITHMIC;
+                port->hints |= HINT_LOGARITHMIC;
             }
 
-            effect->ports[i]->jack_port = NULL;
-            effect->ports[i]->def_value = def_value;
-            effect->ports[i]->min_value = min_value;
-            effect->ports[i]->max_value = max_value;
-            effect->ports[i]->prev_value = def_value;
+            port->jack_port = NULL;
+            port->def_value = def_value;
+            port->min_value = min_value;
+            port->max_value = max_value;
+            port->prev_value = def_value;
 
             control_ports_count++;
             if (lilv_port_is_a(plugin, lilv_port, lilv_input)) input_control_ports_count++;
@@ -3180,7 +3205,7 @@ int effects_add(const char *uid, int instance)
         }
         else if (lilv_port_is_a(plugin, lilv_port, lilv_cv))
         {
-            effect->ports[i]->type = TYPE_CV;
+            port->type = TYPE_CV;
 
             /* Allocate memory to cv buffer */
             cv_buffer = (float *) calloc(g_sample_rate, sizeof(float));
@@ -3191,8 +3216,8 @@ int effects_add(const char *uid, int instance)
                 goto error;
             }
 
-            effect->ports[i]->buffer = cv_buffer;
-            effect->ports[i]->buffer_count = g_sample_rate;
+            port->buffer = cv_buffer;
+            port->buffer_count = g_sample_rate;
             lilv_instance_connect_port(lilv_instance, i, cv_buffer);
 
             /* Jack port creation */
@@ -3231,8 +3256,8 @@ int effects_add(const char *uid, int instance)
             if (min_value >= max_value)
                 max_value = min_value + 0.1f;
 
-            effect->ports[i]->min_value = min_value;
-            effect->ports[i]->max_value = max_value;
+            port->min_value = min_value;
+            port->max_value = max_value;
 
             jack_uuid_t uuid = jack_port_uuid(jack_port);
             if (!jack_uuid_empty(uuid)) {
@@ -3246,7 +3271,7 @@ int effects_add(const char *uid, int instance)
                 jack_set_property(jack_client, uuid, LV2_CORE__maximum, str_value, NULL);
             }
 
-            effect->ports[i]->jack_port = jack_port;
+            port->jack_port = jack_port;
 
             cv_ports_count++;
             if (lilv_port_is_a(plugin, lilv_port, lilv_input)) input_cv_ports_count++;
@@ -3258,14 +3283,14 @@ int effects_add(const char *uid, int instance)
         else if (lilv_port_is_a(plugin, lilv_port, lilv_event) ||
                     lilv_port_is_a(plugin, lilv_port, lilv_atom_port))
         {
-            effect->ports[i]->type = TYPE_EVENT;
+            port->type = TYPE_EVENT;
             if (lilv_port_is_a(plugin, lilv_port, lilv_event))
             {
-                effect->ports[i]->hints |= HINT_OLD_EVENT_API;
+                port->hints |= HINT_OLD_EVENT_API;
             }
             else if (lilv_port_supports_event(plugin, lilv_port, lilv_timePosition))
             {
-                effect->ports[i]->hints |= HINT_TRANSPORT;
+                port->hints |= HINT_TRANSPORT;
                 effect->hints |= HINT_TRANSPORT;
             }
 
@@ -3276,7 +3301,7 @@ int effects_add(const char *uid, int instance)
                 error = ERR_JACK_PORT_REGISTER;
                 goto error;
             }
-            effect->ports[i]->jack_port = jack_port;
+            port->jack_port = jack_port;
             event_ports_count++;
 
             if (lilv_port_is_a(plugin, lilv_port, lilv_input)) input_event_ports_count++;
@@ -3555,6 +3580,7 @@ int effects_add(const char *uid, int instance)
     effect->bypass_port.flow = FLOW_INPUT;
     effect->bypass_port.hints = HINT_TOGGLE;
     effect->bypass_port.symbol = g_bypass_port_symbol;
+    pthread_mutex_init(&effect->bypass_port.cv_source_mutex, &mutex_atts);
 
     // virtual presets port
     effect->preset_value = 0.0f;
@@ -3568,6 +3594,9 @@ int effects_add(const char *uid, int instance)
     effect->presets_port.flow = FLOW_INPUT;
     effect->presets_port.hints = HINT_ENUMERATION|HINT_INTEGER;
     effect->presets_port.symbol = g_presets_port_symbol;
+    pthread_mutex_init(&effect->presets_port.cv_source_mutex, &mutex_atts);
+
+    pthread_mutexattr_destroy(&mutex_atts);
 
     lilv_node_free(lilv_audio);
     lilv_node_free(lilv_control);
@@ -4767,21 +4796,43 @@ int effects_cv_map(int effect_id, const char *control_symbol, const char *source
     if (port == NULL)
         return ERR_LV2_INVALID_PARAM_SYMBOL;
 
-    // only 1 source per parameter allowed
-    if (port->cv_source)
-        return ERR_INVALID_OPERATION;
+    cv_source_t *cv_source;
+    jack_port_t *jack_port;
 
-    cv_source_t *cv_source = malloc(sizeof(cv_source_t));
+    // when readdressing to the same port, destroy old data
+    cv_source_t *cv_source_to_delete = NULL;
 
-    if (!cv_source)
-        return ERR_MEMORY_ALLOCATION;
+    // check if this effect port already has as a cv addressing
+    if (port->cv_source) {
+        // if yes, it needs to match existing port (reconfiguring addressing, like changing range)
+        if (port->cv_source->port != port) {
+            return ERR_INVALID_OPERATION;
+        }
 
-    jack_port_t *jack_port =
-        jack_port_register(effect->jack_client, source_port_name, JACK_DEFAULT_AUDIO_TYPE, JackPortIsInput|JackPortIsControlVoltage, 0);
+        cv_source = malloc(sizeof(cv_source_t));
 
-    if (!jack_port) {
-        free(cv_source);
-        return ERR_JACK_PORT_REGISTER;
+        if (!cv_source)
+            return ERR_MEMORY_ALLOCATION;
+
+        jack_port = port->cv_source->jack_port;
+        cv_source_to_delete = port->cv_source;
+
+    } else {
+        // no addressing on this plugin port yet, create new one
+        cv_source = malloc(sizeof(cv_source_t));
+
+        if (!cv_source)
+            return ERR_MEMORY_ALLOCATION;
+
+        jack_port = jack_port_register(effect->jack_client,
+                                       source_port_name,
+                                       JACK_DEFAULT_AUDIO_TYPE,
+                                       JackPortIsInput|JackPortIsControlVoltage, 0);
+
+        if (!jack_port) {
+            free(cv_source);
+            return ERR_JACK_PORT_REGISTER;
+        }
     }
 
     float source_min_value = -1.0f;
@@ -4851,6 +4902,7 @@ int effects_cv_map(int effect_id, const char *control_symbol, const char *source
         }
     }
 
+    cv_source->port = port;
     cv_source->jack_port = jack_port;
     cv_source->source_min_value = source_min_value;
     cv_source->source_max_value = source_max_value;
@@ -4860,9 +4912,14 @@ int effects_cv_map(int effect_id, const char *control_symbol, const char *source
     cv_source->diff_value = maximum - minimum;
     cv_source->prev_value = minimum;
 
+    pthread_mutex_lock(&port->cv_source_mutex);
     port->cv_source = cv_source;
+    pthread_mutex_unlock(&port->cv_source_mutex);
 
     jack_connect(effect->jack_client, source_port_name, jack_port_name(jack_port));
+
+    if (cv_source_to_delete)
+        free(cv_source_to_delete);
 
     return SUCCESS;
 }
@@ -4878,12 +4935,20 @@ int effects_cv_unmap(int effect_id, const char *control_symbol)
     if (port == NULL)
         return ERR_LV2_INVALID_PARAM_SYMBOL;
 
-    // not really success, but not an error either if the mapping does not exist
-    if (!port->cv_source)
-        return SUCCESS;
+    cv_source_t *cv_source;
 
-    cv_source_t *cv_source = port->cv_source;
+    pthread_mutex_lock(&port->cv_source_mutex);
+
+    // not really success, but not an error either if the mapping does not exist
+    if (!port->cv_source) {
+        pthread_mutex_unlock(&port->cv_source_mutex);
+        return SUCCESS;
+    }
+
+    cv_source = port->cv_source;
     port->cv_source = NULL;
+
+    pthread_mutex_unlock(&port->cv_source_mutex);
 
     if (cv_source->jack_port)
         jack_port_unregister(effect->jack_client, cv_source->jack_port);
