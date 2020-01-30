@@ -4779,10 +4779,26 @@ int effects_cc_unmap(int effect_id, const char *control_symbol)
 #endif
 }
 
-int effects_cv_map(int effect_id, const char *control_symbol, const char *source_port_name, float minimum, float maximum)
+int effects_cv_map(int effect_id, const char *control_symbol, const char *source_port_name, float minimum, float maximum, const char* mode)
 {
     if (!InstanceExist(effect_id))
         return ERR_INSTANCE_NON_EXISTS;
+
+    if (!mode || strlen(mode) != 1) {
+        return ERR_INVALID_OPERATION;
+    }
+
+    const char op_mode = mode[0];
+
+    switch (op_mode) {
+    case '=':
+    case '-':
+    case '+':
+    case 'b':
+        break;
+    default:
+        return ERR_INVALID_OPERATION;
+    }
 
     jack_port_t *source_jack_port = jack_port_by_name(g_jack_global_client, source_port_name);
 
@@ -4835,8 +4851,8 @@ int effects_cv_map(int effect_id, const char *control_symbol, const char *source
         }
     }
 
-    float source_min_value = -1.0f;
-    float source_max_value = 1.0f;
+    float source_min_value = -5.0f;
+    float source_max_value = 5.0f;
 
     // FIXME internal clients cannot set metadata for now
 
@@ -4902,11 +4918,40 @@ int effects_cv_map(int effect_id, const char *control_symbol, const char *source
         }
     }
 
+    // just in case
+    if (source_min_value >= source_max_value)
+        source_max_value = source_min_value+0.1f;
+
+    // convert range into valid operational mode (unipolar-, unipolar+ or bipolar)
+    const float source_diff_value = source_max_value - source_min_value;
+
+    switch (op_mode) {
+    case '-':
+        source_min_value = -source_diff_value;
+        source_max_value = 0.0f;
+        break;
+
+    case '+':
+        source_min_value = 0.0f;
+        source_max_value = source_diff_value;
+        break;
+
+    case 'b':
+        if (source_min_value < 0.0f && source_max_value > 0.0f) {
+            // already bipolar, do not modify ranges
+        } else {
+            // make 0 the middlepoint
+            source_min_value = -source_diff_value * 0.5f;
+            source_max_value = source_diff_value * 0.5f;
+        }
+        break;
+    }
+
     cv_source->port = port;
     cv_source->jack_port = jack_port;
     cv_source->source_min_value = source_min_value;
     cv_source->source_max_value = source_max_value;
-    cv_source->source_diff_value = source_max_value - source_min_value;
+    cv_source->source_diff_value = source_diff_value;
     cv_source->min_value = minimum;
     cv_source->max_value = maximum;
     cv_source->diff_value = maximum - minimum;
