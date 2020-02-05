@@ -161,6 +161,9 @@ enum PortHints {
     HINT_TRIGGER       = 1 << 3,
     HINT_LOGARITHMIC   = 1 << 4,
     HINT_MONITORED     = 1 << 5, // outputs only
+    // cv
+    HINT_CV_MOD        = 1 << 0, // uses mod cvport
+    HINT_CV_RANGES     = 1 << 0, // port info includes ranges
     // events
     HINT_TRANSPORT     = 1 << 0,
     HINT_OLD_EVENT_API = 1 << 1,
@@ -1032,8 +1035,8 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
 
         if (effect->transport_rolling != rolling ||
             effect->transport_frame != pos.frame ||
-            effect->transport_bpb != (double)pos.beats_per_bar ||
-            effect->transport_bpm != pos.beats_per_minute ||
+            doubles_differ_enough(effect->transport_bpb, pos.beats_per_bar) ||
+            doubles_differ_enough(effect->transport_bpm, pos.beats_per_minute) ||
             (effect->bypass < 0.5f && effect->was_bypassed))
         {
             effect->transport_rolling = rolling;
@@ -1353,7 +1356,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
         for (i = 0; i < effect->monitors_count; i++)
         {
             int port_id = effect->monitors[i]->port_id;
-            float value = *(effect->ports[port_id]->buffer);
+            value = *(effect->ports[port_id]->buffer);
             if (monitor_check_condition(effect->monitors[i]->op, effect->monitors[i]->value, value) &&
                 floats_differ_enough(value, effect->monitors[i]->last_notified_value)) {
                 if (monitor_send(effect->instance, effect->ports[port_id]->symbol, value) >= 0)
@@ -1441,7 +1444,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
     {
         for (i = 0; i < effect->output_control_ports_count; i++)
         {
-            port_t *port = effect->output_control_ports[i];
+            port = effect->output_control_ports[i];
 
             if ((port->hints & HINT_MONITORED) == 0)
                 continue;
@@ -1650,7 +1653,9 @@ static bool UpdateGlobalJackPosition(enum UpdatePositionFlag flag, bool do_post)
     if (flag == UPDATE_POSITION_SKIP)
         return false;
     if (flag == UPDATE_POSITION_IF_CHANGED &&
-        old_rolling == g_jack_rolling && old_bpb == g_transport_bpb && old_bpm == g_transport_bpm)
+        old_rolling == g_jack_rolling &&
+        !doubles_differ_enough(old_bpb, g_transport_bpb) &&
+        !doubles_differ_enough(old_bpm, g_transport_bpm))
         return false;
 
     postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
@@ -2858,11 +2863,12 @@ int effects_add(const char *uid, int instance)
     LilvNode *lilv_input, *lilv_control_in, *lilv_enabled, *lilv_freeWheeling, *lilv_output;
     LilvNode *lilv_timePosition, *lilv_timeBeatsPerBar, *lilv_timeBeatsPerMinute, *lilv_timeSpeed;
     LilvNode *lilv_enumeration, *lilv_integer, *lilv_toggled, *lilv_trigger, *lilv_logarithmic;
-    LilvNode *lilv_control, *lilv_audio, *lilv_cv, *lilv_event, *lilv_midi;
+    LilvNode *lilv_control, *lilv_audio, *lilv_cv, *lilv_event, *lilv_midi, *lilv_mod_cvport;
     LilvNode *lilv_default, *lilv_mod_default;
     LilvNode *lilv_minimum, *lilv_mod_minimum;
     LilvNode *lilv_maximum, *lilv_mod_maximum;
     LilvNode *lilv_atom_port, *lilv_worker_interface, *lilv_license_interface;
+    const LilvPort* control_in_port;
     const LilvPort *lilv_port;
     const LilvNode *symbol_node;
 
@@ -2902,6 +2908,7 @@ int effects_add(const char *uid, int instance)
     lilv_mod_default = NULL;
     lilv_mod_minimum = NULL;
     lilv_mod_maximum = NULL;
+    lilv_mod_cvport = NULL;
     lilv_event = NULL;
     lilv_atom_port = NULL;
     lilv_worker_interface = NULL;
@@ -3010,6 +3017,7 @@ int effects_add(const char *uid, int instance)
     lilv_mod_default = lilv_new_uri(g_lv2_data, LILV_NS_MOD "default");
     lilv_mod_minimum = lilv_new_uri(g_lv2_data, LILV_NS_MOD "minimum");
     lilv_mod_maximum = lilv_new_uri(g_lv2_data, LILV_NS_MOD "maximum");
+    lilv_mod_cvport = lilv_new_uri(g_lv2_data, LILV_NS_MOD "CVPort");
 
     /* Allocate memory to ports */
     audio_ports_count = 0;
@@ -3203,7 +3211,7 @@ int effects_add(const char *uid, int instance)
             lilv_nodes_free(lilvvalue_minimum);
             lilv_nodes_free(lilvvalue_default);
         }
-        else if (lilv_port_is_a(plugin, lilv_port, lilv_cv))
+        else if (lilv_port_is_a(plugin, lilv_port, lilv_cv) || lilv_port_is_a(plugin, lilv_port, lilv_mod_cvport))
         {
             port->type = TYPE_CV;
 
@@ -3215,6 +3223,9 @@ int effects_add(const char *uid, int instance)
                 error = ERR_MEMORY_ALLOCATION;
                 goto error;
             }
+
+            if (lilv_port_is_a(plugin, lilv_port, lilv_mod_cvport))
+                port->hints |= HINT_CV_MOD;
 
             port->buffer = cv_buffer;
             port->buffer_count = g_sample_rate;
@@ -3239,7 +3250,7 @@ int effects_add(const char *uid, int instance)
             if (lilvvalue_minimum != NULL)
                 min_value = lilv_node_as_float(lilv_nodes_get_first(lilvvalue_minimum));
             else
-                min_value = -1.0f;
+                min_value = -5.0f;
 
             /* Set the maximum value of control */
             float max_value;
@@ -3250,26 +3261,33 @@ int effects_add(const char *uid, int instance)
             if (lilvvalue_maximum != NULL)
                 max_value = lilv_node_as_float(lilv_nodes_get_first(lilvvalue_maximum));
             else
-                max_value = 1.0f;
+                max_value = 5.0f;
 
             /* Ensure min < max */
             if (min_value >= max_value)
+            {
                 max_value = min_value + 0.1f;
+            }
+            else if (lilvvalue_minimum != NULL && lilvvalue_maximum != NULL)
+            {
+                // if range is valid, set metadata
+                port->hints |= HINT_CV_RANGES;
+
+                jack_uuid_t uuid = jack_port_uuid(jack_port);
+                if (!jack_uuid_empty(uuid)) {
+                    char str_value[32];
+                    memset(str_value, 0, sizeof(str_value));
+
+                    snprintf(str_value, 31, "%f", min_value);
+                    jack_set_property(jack_client, uuid, LV2_CORE__minimum, str_value, NULL);
+
+                    snprintf(str_value, 31, "%f", max_value);
+                    jack_set_property(jack_client, uuid, LV2_CORE__maximum, str_value, NULL);
+                }
+            }
 
             port->min_value = min_value;
             port->max_value = max_value;
-
-            jack_uuid_t uuid = jack_port_uuid(jack_port);
-            if (!jack_uuid_empty(uuid)) {
-                char str_value[32];
-                memset(str_value, 0, sizeof(str_value));
-
-                snprintf(str_value, 31, "%f", min_value);
-                jack_set_property(jack_client, uuid, LV2_CORE__minimum, str_value, NULL);
-
-                snprintf(str_value, 31, "%f", max_value);
-                jack_set_property(jack_client, uuid, LV2_CORE__maximum, str_value, NULL);
-            }
 
             port->jack_port = jack_port;
 
@@ -3309,7 +3327,7 @@ int effects_add(const char *uid, int instance)
         }
     }
 
-    const LilvPort* control_in_port = lilv_plugin_get_port_by_designation(plugin, lilv_input, lilv_control_in);
+    control_in_port = lilv_plugin_get_port_by_designation(plugin, lilv_input, lilv_control_in);
     if (control_in_port)
     {
         effect->control_index = lilv_port_get_index(plugin, control_in_port);
@@ -3319,59 +3337,62 @@ int effects_add(const char *uid, int instance)
         effect->control_index = -1;
     }
 
-    const LilvPort* enabled_port = lilv_plugin_get_port_by_designation(plugin, lilv_input, lilv_enabled);
-    if (enabled_port)
+    // special ports
     {
-        effect->enabled_index = lilv_port_get_index(plugin, enabled_port);
-        *(effect->ports[effect->enabled_index]->buffer) = 1.0f;
-    }
-    else
-    {
-        effect->enabled_index = -1;
-    }
+        const LilvPort* enabled_port = lilv_plugin_get_port_by_designation(plugin, lilv_input, lilv_enabled);
+        if (enabled_port)
+        {
+            effect->enabled_index = lilv_port_get_index(plugin, enabled_port);
+            *(effect->ports[effect->enabled_index]->buffer) = 1.0f;
+        }
+        else
+        {
+            effect->enabled_index = -1;
+        }
 
-    const LilvPort* freewheel_port = lilv_plugin_get_port_by_designation(plugin, lilv_input, lilv_freeWheeling);
-    if (freewheel_port)
-    {
-        effect->freewheel_index = lilv_port_get_index(plugin, freewheel_port);
-        *(effect->ports[effect->freewheel_index]->buffer) = 0.0f;
-    }
-    else
-    {
-        effect->freewheel_index = -1;
-    }
+        const LilvPort* freewheel_port = lilv_plugin_get_port_by_designation(plugin, lilv_input, lilv_freeWheeling);
+        if (freewheel_port)
+        {
+            effect->freewheel_index = lilv_port_get_index(plugin, freewheel_port);
+            *(effect->ports[effect->freewheel_index]->buffer) = 0.0f;
+        }
+        else
+        {
+            effect->freewheel_index = -1;
+        }
 
-    const LilvPort* bpb_port = lilv_plugin_get_port_by_designation(plugin, lilv_input, lilv_timeBeatsPerBar);
-    if (bpb_port)
-    {
-        effect->bpb_index = lilv_port_get_index(plugin, bpb_port);
-        *(effect->ports[effect->bpb_index]->buffer) = g_transport_bpb;
-    }
-    else
-    {
-        effect->bpb_index = -1;
-    }
+        const LilvPort* bpb_port = lilv_plugin_get_port_by_designation(plugin, lilv_input, lilv_timeBeatsPerBar);
+        if (bpb_port)
+        {
+            effect->bpb_index = lilv_port_get_index(plugin, bpb_port);
+            *(effect->ports[effect->bpb_index]->buffer) = g_transport_bpb;
+        }
+        else
+        {
+            effect->bpb_index = -1;
+        }
 
-    const LilvPort* bpm_port = lilv_plugin_get_port_by_designation(plugin, lilv_input, lilv_timeBeatsPerMinute);
-    if (bpm_port)
-    {
-        effect->bpm_index = lilv_port_get_index(plugin, bpm_port);
-        *(effect->ports[effect->bpm_index]->buffer) = g_transport_bpm;
-    }
-    else
-    {
-        effect->bpm_index = -1;
-    }
+        const LilvPort* bpm_port = lilv_plugin_get_port_by_designation(plugin, lilv_input, lilv_timeBeatsPerMinute);
+        if (bpm_port)
+        {
+            effect->bpm_index = lilv_port_get_index(plugin, bpm_port);
+            *(effect->ports[effect->bpm_index]->buffer) = g_transport_bpm;
+        }
+        else
+        {
+            effect->bpm_index = -1;
+        }
 
-    const LilvPort* speed_port = lilv_plugin_get_port_by_designation(plugin, lilv_input, lilv_timeSpeed);
-    if (speed_port)
-    {
-        effect->speed_index = lilv_port_get_index(plugin, speed_port);
-        *(effect->ports[effect->speed_index]->buffer) = g_jack_rolling ? 1.0f : 0.0f;
-    }
-    else
-    {
-        effect->speed_index = -1;
+        const LilvPort* speed_port = lilv_plugin_get_port_by_designation(plugin, lilv_input, lilv_timeSpeed);
+        if (speed_port)
+        {
+            effect->speed_index = lilv_port_get_index(plugin, speed_port);
+            *(effect->ports[effect->speed_index]->buffer) = g_jack_rolling ? 1.0f : 0.0f;
+        }
+        else
+        {
+            effect->speed_index = -1;
+        }
     }
 
     /* Allocate memory to indexes */
@@ -3499,7 +3520,7 @@ int effects_add(const char *uid, int instance)
             }
         }
         /* CV ports */
-        else if (lilv_port_is_a(plugin, lilv_port, lilv_cv))
+        else if (lilv_port_is_a(plugin, lilv_port, lilv_cv) || lilv_port_is_a(plugin, lilv_port, lilv_mod_cvport))
         {
             effect->cv_ports[cv_ports_count] = effect->ports[i];
             cv_ports_count++;
@@ -3537,34 +3558,34 @@ int effects_add(const char *uid, int instance)
 
     AllocatePortBuffers(effect);
 
-    // Index writable properties
-    LilvNode *rdfs_label = lilv_new_uri(g_lv2_data, LILV_NS_RDFS "label");
-    LilvNode *patch_writable = lilv_new_uri(g_lv2_data, LV2_PATCH__writable);
-    LilvNodes* properties = lilv_world_find_nodes(
-        g_lv2_data,
-        lilv_plugin_get_uri(effect->lilv_plugin),
-        patch_writable,
-        NULL);
-    effect->properties_count = lilv_nodes_size(properties);
-    effect->properties = (property_t **) calloc(effect->properties_count, sizeof(property_t *));
-    uint32_t j = 0;
-    for (j = 0; j < effect->properties_count; j++) effect->properties[j] = NULL;
-    j = 0;
-
-    LILV_FOREACH(nodes, p, properties)
     {
-        const LilvNode* property = lilv_nodes_get(properties, p);
-        LilvNode*       label    = lilv_nodes_get_first(
-            lilv_world_find_nodes(
-                g_lv2_data, property, rdfs_label, NULL));
-        effect->properties[j] = (property_t *) malloc(sizeof(property_t));
-        effect->properties[j]->label = lilv_node_duplicate(label);
-        effect->properties[j]->property = lilv_node_duplicate(property);
-        j++;
+        // Index writable properties
+        LilvNode *rdfs_label = lilv_new_uri(g_lv2_data, LILV_NS_RDFS "label");
+        LilvNode *patch_writable = lilv_new_uri(g_lv2_data, LV2_PATCH__writable);
+        LilvNodes* properties = lilv_world_find_nodes(
+            g_lv2_data,
+            lilv_plugin_get_uri(effect->lilv_plugin),
+            patch_writable,
+            NULL);
+        effect->properties_count = lilv_nodes_size(properties);
+        effect->properties = (property_t **) calloc(effect->properties_count, sizeof(property_t *));
+
+        uint32_t j = 0;
+        LILV_FOREACH(nodes, p, properties)
+        {
+            const LilvNode* property = lilv_nodes_get(properties, p);
+            LilvNode*       label    = lilv_nodes_get_first(
+                lilv_world_find_nodes(
+                    g_lv2_data, property, rdfs_label, NULL));
+            effect->properties[j] = (property_t *) malloc(sizeof(property_t));
+            effect->properties[j]->label = lilv_node_duplicate(label);
+            effect->properties[j]->property = lilv_node_duplicate(property);
+            j++;
+        }
+        lilv_node_free(patch_writable);
+        lilv_node_free(rdfs_label);
+        lilv_nodes_free(properties);
     }
-    lilv_node_free(patch_writable);
-    lilv_node_free(rdfs_label);
-    lilv_nodes_free(properties);
 
     /* Default value of bypass */
     effect->bypass = 0.0f;
@@ -3623,6 +3644,7 @@ int effects_add(const char *uid, int instance)
     lilv_node_free(lilv_mod_default);
     lilv_node_free(lilv_mod_minimum);
     lilv_node_free(lilv_mod_maximum);
+    lilv_node_free(lilv_mod_cvport);
     lilv_node_free(lilv_atom_port);
     lilv_node_free(lilv_worker_interface);
     lilv_node_free(lilv_license_interface);
@@ -3679,6 +3701,7 @@ int effects_add(const char *uid, int instance)
         lilv_node_free(lilv_mod_default);
         lilv_node_free(lilv_mod_minimum);
         lilv_node_free(lilv_mod_maximum);
+        lilv_node_free(lilv_mod_cvport);
         lilv_node_free(lilv_atom_port);
         lilv_node_free(lilv_worker_interface);
         lilv_node_free(lilv_license_interface);
@@ -4870,12 +4893,15 @@ int effects_cv_map(int effect_id, const char *control_symbol, const char *source
 
             // get values from jack metadata
             if (jack_get_property(uuid, LV2_CORE__minimum, &value_min, NULL) == 0 &&
-                jack_get_property(uuid, LV2_CORE__maximum, &value_max, NULL) == 0) {
+                jack_get_property(uuid, LV2_CORE__maximum, &value_max, NULL) == 0)
+            {
                 source_min_value = atof(value_min);
                 source_max_value = atof(value_max);
 
             // find values when client is from mod-host, as fallback
-            } else if (!strncmp(source_port_name, "effect_", 7)) {
+            }
+            else if (!strncmp(source_port_name, "effect_", 7))
+            {
                 char effect_str[6];
                 const char *source_symbol = NULL;
                 int source_effect_id = -1;
@@ -4923,26 +4949,52 @@ int effects_cv_map(int effect_id, const char *control_symbol, const char *source
         source_max_value = source_min_value+0.1f;
 
     // convert range into valid operational mode (unipolar-, unipolar+ or bipolar)
+    const bool source_is_mod_cv = port->hints & HINT_CV_MOD;
+    const bool source_has_ranges = port->hints & HINT_CV_RANGES;
     const float source_diff_value = source_max_value - source_min_value;
 
     switch (op_mode) {
     case '-':
-        source_min_value = -source_diff_value;
-        source_max_value = 0.0f;
+        if (source_is_mod_cv || source_has_ranges)
+        {
+            source_min_value = -source_diff_value;
+            source_max_value = 0.0f;
+        }
+        else
+        {
+            source_min_value = -1.0f;
+            source_max_value = 0.0f;
+        }
         break;
 
     case '+':
-        source_min_value = 0.0f;
-        source_max_value = source_diff_value;
+        if (source_is_mod_cv || source_has_ranges)
+        {
+            source_min_value = 0.0f;
+            source_max_value = source_diff_value;
+        }
+        else
+        {
+            source_min_value = 0.0f;
+            source_max_value = 1.0f;
+        }
         break;
 
     case 'b':
-        if (source_min_value < 0.0f && source_max_value > 0.0f) {
-            // already bipolar, do not modify ranges
-        } else {
-            // make 0 the middlepoint
-            source_min_value = -source_diff_value * 0.5f;
-            source_max_value = source_diff_value * 0.5f;
+        if (source_is_mod_cv || source_has_ranges)
+        {
+            if (source_min_value < 0.0f && source_max_value > 0.0f) {
+                // already bipolar, do not modify ranges
+            } else {
+                // make 0 the middlepoint
+                source_min_value = -source_diff_value * 0.5f;
+                source_max_value = source_diff_value * 0.5f;
+            }
+        }
+        else
+        {
+            source_min_value = -1.0f;
+            source_max_value = 1.0f;
         }
         break;
     }

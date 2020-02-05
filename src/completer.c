@@ -143,7 +143,7 @@ static const char *g_transport_sync_modes[] = {
 */
 
 static char **g_plugins_list, **g_ports_list, **g_instances_list;
-static const char **g_list, **g_scale_points, **g_symbols;
+static const char *const *g_list, **g_scale_points, **g_symbols;
 static float **g_param_range;
 
 /*
@@ -257,7 +257,7 @@ static char **completion(const char *text, int start, int end)
             {
                 if (count == 1)
                 {
-                    g_list = (const char**)g_plugins_list;
+                    g_list = (const char* const*)g_plugins_list;
                 }
             }
             else if ((strcmp(cmd[0], "remove") == 0) ||
@@ -275,12 +275,12 @@ static char **completion(const char *text, int start, int end)
                 if (count == 1)
                 {
                     update_ports_list("output");
-                    g_list = (const char**)g_ports_list;
+                    g_list = (const char* const*)g_ports_list;
                 }
                 else if (count == 2)
                 {
                     update_ports_list("input");
-                    g_list = (const char**)g_ports_list;
+                    g_list = (const char* const*)g_ports_list;
                 }
             }
             else if (strcmp(cmd[0], "preset_load") == 0 ||
@@ -377,7 +377,7 @@ static char **completion(const char *text, int start, int end)
                 }
                 else if (count == 6)
                 {
-                    g_list = (const char**)g_cv_op_modes;
+                    g_list = (const char* const*)g_cv_op_modes;
                 }
             }
             else if (strcmp(cmd[0], "param_monitor") == 0)
@@ -429,7 +429,7 @@ static char **completion(const char *text, int start, int end)
             if (get_instances)
             {
                 update_instances_list();
-                g_list = (const char**)g_instances_list;
+                g_list = (const char* const*)g_instances_list;
             }
             if (get_presets)
             {
