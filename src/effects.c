@@ -4874,15 +4874,19 @@ int effects_cv_map(int effect_id, const char *control_symbol, const char *source
         }
     }
 
+    bool source_is_mod_cv = false;
+    bool source_has_ranges = false;
     float source_min_value = -5.0f;
     float source_max_value = 5.0f;
 
     // FIXME internal clients cannot set metadata for now
 
     if (!strncmp(source_port_name, "mod-spi2jack:", 13)) {
+        source_is_mod_cv = source_has_ranges = true;
         source_min_value = 0.0f;
         source_max_value = !strcmp(source_port_name+13, "exp_pedal") ? 5.0f : 10.0f;
     } else if (!strncmp(source_port_name, "mod-jack2spi:", 13)) {
+        source_is_mod_cv = source_has_ranges = true;
         source_min_value = 0.0f;
         source_max_value = 10.0f;
     } else {
@@ -4895,8 +4899,11 @@ int effects_cv_map(int effect_id, const char *control_symbol, const char *source
             if (jack_get_property(uuid, LV2_CORE__minimum, &value_min, NULL) == 0 &&
                 jack_get_property(uuid, LV2_CORE__maximum, &value_max, NULL) == 0)
             {
+                source_has_ranges = true;
                 source_min_value = atof(value_min);
                 source_max_value = atof(value_max);
+
+                // TODO set and fetch mod-type port here
 
             // find values when client is from mod-host, as fallback
             }
@@ -4931,6 +4938,12 @@ int effects_cv_map(int effect_id, const char *control_symbol, const char *source
 
                             source_min_value = source_port->min_value;
                             source_max_value = source_port->max_value;
+
+                            if (source_port->hints & HINT_CV_MOD)
+                                source_is_mod_cv = true;
+                            if (source_port->hints & HINT_CV_RANGES)
+                                source_has_ranges = true;
+
                             break;
                         }
                     }
@@ -4949,8 +4962,6 @@ int effects_cv_map(int effect_id, const char *control_symbol, const char *source
         source_max_value = source_min_value+0.1f;
 
     // convert range into valid operational mode (unipolar-, unipolar+ or bipolar)
-    const bool source_is_mod_cv = port->hints & HINT_CV_MOD;
-    const bool source_has_ranges = port->hints & HINT_CV_RANGES;
     const float source_diff_value = source_max_value - source_min_value;
 
     switch (op_mode) {
