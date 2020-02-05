@@ -32,12 +32,18 @@ else
 endif
 
 ifeq ($(TESTBUILD), 1)
-# CFLAGS += -Wconversion -Wsign-conversion
-CFLAGS += -Werror -Wabi -Wcast-qual -Wclobbered -Wdisabled-optimization -Wfloat-equal -Wformat=2
-CFLAGS += -Winit-self -Wmissing-declarations -Woverlength-strings -Wpointer-arith -Wredundant-decls -Wshadow
-CFLAGS += -Wundef -Wuninitialized -Wunused -Wnested-externs
-CFLAGS += -Wstrict-aliasing -fstrict-aliasing -Wstrict-overflow -fstrict-overflow
-CFLAGS += -Wmissing-prototypes -Wstrict-prototypes -Wwrite-strings
+# CFLAGS += -Wconversion -Wsign-conversion -Wdouble-promotion
+CFLAGS += -Werror -Wabi=98 -Wcast-qual -Wclobbered -Wdisabled-optimization
+CFLAGS += -Wfloat-equal -Wlogical-op -Wpointer-arith
+CFLAGS += -Wformat=2 -Woverlength-strings
+# CFLAGS += -Wformat-truncation=2 -Wformat-overflow=2
+CFLAGS += -Wstringop-overflow=4 -Wstringop-truncation
+CFLAGS += -Wmissing-declarations -Wredundant-decls
+CFLAGS += -Wshadow  -Wundef -Wuninitialized -Wunused
+CFLAGS += -Wstrict-aliasing -fstrict-aliasing
+CFLAGS += -Wstrict-overflow -fstrict-overflow
+CFLAGS += -Wduplicated-branches -Wduplicated-cond -Wnull-dereference
+CFLAGS += -Winit-self -Wjump-misses-init -Wmissing-prototypes -Wnested-externs -Wstrict-prototypes -Wwrite-strings
 endif
 
 # libraries
