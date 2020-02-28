@@ -1270,7 +1270,6 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
 
                 // ignore requests for same value
                 if (floats_differ_enough(cv_source->prev_value, value)) {
-                    printf("got CV change as bypass, %f\n", value);
                     if (SetPortValue(port, value, effect->instance, true)) {
                         needs_post = true;
                         cv_source->prev_value = value;
