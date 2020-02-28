@@ -568,7 +568,7 @@ static void PortRegistration(jack_port_id_t port_id, int reg, void* data);
 static void RunPostPonedEvents(int ignored_effect_id);
 static void* PostPonedEventsThread(void* arg);
 static int ProcessPlugin(jack_nframes_t nframes, void *arg);
-static bool SetPortValue(const port_t *port, float value, int effect_id, bool is_bypass);
+static bool SetPortValue(port_t *port, float value, int effect_id, bool is_bypass);
 static float UpdateValueFromMidi(midi_cc_t* mcc, uint16_t mvalue, bool highres);
 static bool UpdateGlobalJackPosition(enum UpdatePositionFlag flag, bool do_post);
 static int ProcessMidi(jack_nframes_t nframes, void *arg);
@@ -1198,7 +1198,6 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
                 continue;
             }
 
-            bool is_bypass;
             cv_source_t *cv_source = port->cv_source;
 
             value = ((float*)jack_port_get_buffer(cv_source->jack_port, 1))[0];
@@ -1229,19 +1228,54 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
                 }
             }
 
-            // invert value if bypass
-            if ((is_bypass = !strcmp(port->symbol, g_bypass_port_symbol)))
-                value = 1.0f - value;
-
             // ignore requests for same value
             if (! floats_differ_enough(cv_source->prev_value, value)) {
                 pthread_mutex_unlock(&port->cv_source_mutex);
                 continue;
             }
 
-            if (SetPortValue(port, value, effect->instance, is_bypass)) {
+            if (SetPortValue(port, value, effect->instance, false)) {
                 needs_post = true;
                 cv_source->prev_value = value;
+            }
+
+            pthread_mutex_unlock(&port->cv_source_mutex);
+        }
+    }
+
+    // handle bypass as CV addressing
+    {
+        port = &effect->bypass_port;
+
+        if (pthread_mutex_trylock(&port->cv_source_mutex) == 0)
+        {
+            if (port->cv_source)
+            {
+                cv_source_t *cv_source = port->cv_source;
+
+                value = ((float*)jack_port_get_buffer(cv_source->jack_port, 1))[0];
+
+                // NOTE: values are reversed as this is bypass special behaviour
+                if (value <= cv_source->source_min_value) {
+                    value = cv_source->max_value;
+
+                } else if (value >= cv_source->source_max_value) {
+                    value = cv_source->min_value;
+
+                } else {
+                    value = ((value - cv_source->source_min_value) / cv_source->source_diff_value) > 0.5f
+                          ? cv_source->min_value
+                          : cv_source->max_value;
+                }
+
+                // ignore requests for same value
+                if (floats_differ_enough(cv_source->prev_value, value)) {
+                    printf("got CV change as bypass, %f\n", value);
+                    if (SetPortValue(port, value, effect->instance, true)) {
+                        needs_post = true;
+                        cv_source->prev_value = value;
+                    }
+                }
             }
 
             pthread_mutex_unlock(&port->cv_source_mutex);
@@ -1482,7 +1516,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
     return 0;
 }
 
-static bool SetPortValue(const port_t *port, float value, int effect_id, bool is_bypass)
+static bool SetPortValue(port_t *port, float value, int effect_id, bool is_bypass)
 {
     if (is_bypass)
     {
@@ -1515,7 +1549,7 @@ static bool SetPortValue(const port_t *port, float value, int effect_id, bool is
         }
     }
 
-    *(port->buffer) = value;
+    port->prev_value = *(port->buffer) = value;
 
     postponed_event_list_data* const posteventptr =
         rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
@@ -2406,7 +2440,7 @@ static void CCDataUpdate(void* arg)
             data->value = 1.0f - data->value;
 
         // ignore requests for same value
-        if (!floats_differ_enough(*(assignment->port->buffer), data->value))
+        if (!floats_differ_enough(assignment->port->prev_value, data->value))
             continue;
 
         if (SetPortValue(assignment->port, data->value, assignment->effect_id, is_bypass))
@@ -4093,7 +4127,7 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
 
     static int last_effect_id = -1;
     static const char *last_symbol = NULL;
-    static float *last_buffer = NULL, last_min, last_max;
+    static float *last_buffer, *last_prev, last_min, last_max;
 
     if (InstanceExist(effect_id))
     {
@@ -4107,7 +4141,7 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
                 else if (value > last_max)
                     value = last_max;
 
-                *last_buffer = value;
+                *last_buffer = *last_prev = value;
                 return SUCCESS;
             }
         }
@@ -4119,6 +4153,7 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
             last_min = port->min_value;
             last_max = port->max_value;
             last_buffer = port->buffer;
+            last_prev   = &port->prev_value;
             last_symbol = port->symbol;
 
             if (value < last_min)
@@ -4126,7 +4161,7 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
             else if (value > last_max)
                 value = last_max;
 
-            *last_buffer = value;
+            *last_prev = *last_buffer = value;
             return SUCCESS;
         }
 
@@ -5018,7 +5053,7 @@ int effects_cv_map(int effect_id, const char *control_symbol, const char *source
     cv_source->min_value = minimum;
     cv_source->max_value = maximum;
     cv_source->diff_value = maximum - minimum;
-    cv_source->prev_value = minimum;
+    cv_source->prev_value = port->prev_value;
 
     pthread_mutex_lock(&port->cv_source_mutex);
     port->cv_source = cv_source;
