@@ -180,9 +180,9 @@ The commands supported by mod-host are:
         * unmap the Control Chain actuator from a parameter
         e.g.: unmap 0 gain
 
-    cv_map <instance_number> <param_symbol> <source_port_name> <minimum> <maximum>
-        * map a CV source port to a parameter
-        e.g.: cv_map 0 gain "AMS CV Source:CV Out 1" -24.0 3.0
+    cv_map <instance_number> <param_symbol> <source_port_name> <minimum> <maximum> <operational-mode>
+        * map a CV source port to a parameter, operational-mode being one of '-', '+', 'b' or '='
+        e.g.: cv_map 0 gain "AMS CV Source:CV Out 1" -24.0 3.0 =
 
     cv_unmap <instance_number> <param_symbol>
         * unmap the CV source port actuator from a parameter
