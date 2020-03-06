@@ -578,7 +578,7 @@ static void JackThreadInit(void *arg);
 static void GetFeatures(effect_t *effect);
 static void TriggerJackTimebase(void);
 
-static property_t *FindEffectPropertyByLabel(effect_t *effect, const char *label);
+static property_t *FindEffectPropertyByURI(effect_t *effect, const char *uri);
 static port_t *FindEffectInputPortBySymbol(effect_t *effect, const char *control_symbol);
 static port_t *FindEffectOutputPortBySymbol(effect_t *effect, const char *control_symbol);
 static const void* GetPortValueForState(const char* symbol, void* user_data, uint32_t* size, uint32_t* type);
@@ -2178,7 +2178,7 @@ static void TriggerJackTimebase(void)
     }
 }
 
-static property_t *FindEffectPropertyByLabel(effect_t *effect, const char *label)
+static property_t *FindEffectPropertyByURI(effect_t *effect, const char *uri)
 {
     // TODO: index properties to make it faster
 
@@ -2186,7 +2186,7 @@ static property_t *FindEffectPropertyByLabel(effect_t *effect, const char *label
 
     for (i = 0; i < effect->properties_count; i++)
     {
-        if (strcmp(label, lilv_node_as_string(effect->properties[i]->label)) == 0)
+        if (strcmp(uri, lilv_node_as_uri(effect->properties[i]->property)) == 0)
             return effect->properties[i];
     }
     return NULL;
@@ -4170,27 +4170,32 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
     return ERR_INSTANCE_NON_EXISTS;
 }
 
-int effects_set_property(int effect_id, const char *label, const char *value)
+int effects_set_property(int effect_id, const char *uri, const char *value)
 {
     if (InstanceExist(effect_id))
     {
-        property_t *prop = FindEffectPropertyByLabel(&(g_effects[effect_id]), label);
+        property_t *prop = FindEffectPropertyByURI(&(g_effects[effect_id]), uri);
         if (prop)
         {
-            const char *property = lilv_node_as_uri(prop->property);
-
             LV2_Atom_Forge forge = g_lv2_atom_forge;
-            LV2_Atom_Forge_Frame frame;
+
             uint8_t buf[1024];
             lv2_atom_forge_set_buffer(&forge, buf, sizeof(buf));
 
+            LV2_Atom_Forge_Frame frame;
             lv2_atom_forge_object(&forge, &frame, 0, g_urids.patch_Set);
-            lv2_atom_forge_key(&forge, g_urids.patch_property);
-            lv2_atom_forge_urid(&forge, g_urid_map.map(g_urid_map.handle, property));
-            lv2_atom_forge_key(&forge, g_urids.patch_value);
-            lv2_atom_forge_path(&forge, value, strlen(value));
 
-            const LV2_Atom* atom = lv2_atom_forge_deref(&forge, frame.ref);
+            lv2_atom_forge_key(&forge, g_urids.patch_property);
+            lv2_atom_forge_urid(&forge, g_urid_map.map(g_urid_map.handle, uri));
+
+            lv2_atom_forge_key(&forge, g_urids.patch_value);
+
+            // TODO use type
+            lv2_atom_forge_path(&forge, value, strlen(value)+1);
+
+            lv2_atom_forge_pop(&forge, &frame);
+
+            const LV2_Atom* atom = (LV2_Atom*)buf; // lv2_atom_forge_deref(&forge, frame.ref);
             jack_ringbuffer_write(g_effects[effect_id].events_buffer, (const char *)atom, lv2_atom_total_size(atom));
             return SUCCESS;
         }
