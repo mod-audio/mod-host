@@ -186,11 +186,11 @@ enum {
     URID_MAP_FEATURE,
     URID_UNMAP_FEATURE,
     OPTIONS_FEATURE,
-    WORKER_FEATURE,
     LICENSE_FEATURE,
     BUF_SIZE_POWER2_FEATURE,
     BUF_SIZE_FIXED_FEATURE,
     BUF_SIZE_BOUNDED_FEATURE,
+    WORKER_FEATURE,
     FEATURE_TERMINATOR
 };
 
@@ -250,8 +250,7 @@ typedef struct PORT_T {
 } port_t;
 
 typedef struct PROPERTY_T {
-    const LilvNode* label;
-    const LilvNode* property;
+    LilvNode* uri;
 } property_t;
 
 typedef struct PROPERTY_EVENT_T {
@@ -2129,20 +2128,21 @@ static void GetFeatures(effect_t *effect)
 
     /* Options Feature is the same for all instances (global declaration) */
 
-    /* Worker Feature */
-    LV2_Feature *work_schedule_feature = (LV2_Feature *) malloc(sizeof(LV2_Feature));
-    work_schedule_feature->URI = LV2_WORKER__schedule;
-    work_schedule_feature->data = NULL;
+    /* Worker Feature, must be last as it can be null */
+    LV2_Feature *work_schedule_feature = NULL;
 
-    LilvNode *lilv_worker_schedule = lilv_new_uri(g_lv2_data, LV2_WORKER__schedule);
-    if (lilv_plugin_has_feature(effect->lilv_plugin, lilv_worker_schedule))
+    LilvNode *lilv_worker_interface = lilv_new_uri(g_lv2_data, LV2_WORKER__interface);
+    if (lilv_plugin_has_extension_data(effect->lilv_plugin, lilv_worker_interface))
     {
         LV2_Worker_Schedule *schedule = (LV2_Worker_Schedule*) malloc(sizeof(LV2_Worker_Schedule));
         schedule->handle = &effect->worker;
         schedule->schedule_work = worker_schedule;
+
+        work_schedule_feature = (LV2_Feature *) malloc(sizeof(LV2_Feature));
+        work_schedule_feature->URI = LV2_WORKER__schedule;
         work_schedule_feature->data = schedule;
     }
-    lilv_node_free(lilv_worker_schedule);
+    lilv_node_free(lilv_worker_interface);
 
     /* Buf-size Feature is the same for all instances (global declaration) */
 
@@ -2151,11 +2151,11 @@ static void GetFeatures(effect_t *effect)
     features[URID_MAP_FEATURE]          = &g_urid_map_feature;
     features[URID_UNMAP_FEATURE]        = &g_urid_unmap_feature;
     features[OPTIONS_FEATURE]           = &g_options_feature;
-    features[WORKER_FEATURE]            = work_schedule_feature;
     features[LICENSE_FEATURE]           = &g_license_feature;
     features[BUF_SIZE_POWER2_FEATURE]   = &g_buf_size_features[0];
     features[BUF_SIZE_FIXED_FEATURE]    = &g_buf_size_features[1];
     features[BUF_SIZE_BOUNDED_FEATURE]  = &g_buf_size_features[2];
+    features[WORKER_FEATURE]            = work_schedule_feature;
     features[FEATURE_TERMINATOR]        = NULL;
 
     effect->features = features;
@@ -2180,13 +2180,9 @@ static void TriggerJackTimebase(void)
 
 static property_t *FindEffectPropertyByURI(effect_t *effect, const char *uri)
 {
-    // TODO: index properties to make it faster
-
-    uint32_t i;
-
-    for (i = 0; i < effect->properties_count; i++)
+    for (uint32_t i = 0; i < effect->properties_count; i++)
     {
-        if (strcmp(uri, lilv_node_as_uri(effect->properties[i]->property)) == 0)
+        if (strcmp(uri, lilv_node_as_uri(effect->properties[i]->uri)) == 0)
             return effect->properties[i];
     }
     return NULL;
@@ -3607,12 +3603,8 @@ int effects_add(const char *uid, int instance)
         LILV_FOREACH(nodes, p, properties)
         {
             const LilvNode* property = lilv_nodes_get(properties, p);
-            LilvNode*       label    = lilv_nodes_get_first(
-                lilv_world_find_nodes(
-                    g_lv2_data, property, rdfs_label, NULL));
             effect->properties[j] = (property_t *) malloc(sizeof(property_t));
-            effect->properties[j]->label = lilv_node_duplicate(label);
-            effect->properties[j]->property = lilv_node_duplicate(property);
+            effect->properties[j]->uri = lilv_node_duplicate(property);
             j++;
         }
         lilv_node_free(patch_writable);
@@ -3926,6 +3918,19 @@ int effects_remove(int effect_id)
                     }
                 }
                 free(effect->ports);
+            }
+
+            if (effect->properties)
+            {
+                for (i = 0; i < effect->properties_count; i++)
+                {
+                    if (effect->properties[i])
+                    {
+                        lilv_free(effect->properties[i]->uri);
+                        free(effect->properties[i]);
+                    }
+                }
+                free(effect->properties);
             }
 
             if (effect->lilv_instance) lilv_instance_deactivate(effect->lilv_instance);
