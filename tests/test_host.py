@@ -13,7 +13,8 @@ def teardown_function(function):
     reset_socket()
 
 def test_load_gain_change_param():
-    load_egamp()
+    r = load_egamp()
+    assert int(r[0]) == 0
     r = s("param_get 0 gain")
     assert int(r[0]) == 0
     assert float(r[1]) == 0.0
@@ -26,7 +27,8 @@ def test_load_gain_change_param():
     assert int(r[0]) == 0
 
 def test_preset_load():
-    load_egamp()
+    r = load_egamp()
+    assert int(r[0]) == 0
     r = s('preset_load 0 urn:test:Gain3')
     assert int(r[0]) == 0
     r = s("param_get 0 gain")
@@ -34,7 +36,8 @@ def test_preset_load():
     assert float(r[1]) == 3.0
 
 def test_preset_save():
-    load_egamp()
+    r = load_egamp()
+    assert int(r[0]) == 0
     r = s('param_set 0 gain 5.0')
     assert int(r[0]) == 0
 
