@@ -2300,8 +2300,11 @@ static void FreeFeatures(effect_t *effect)
 
     if (effect->features)
     {
-        free(effect->features[WORKER_FEATURE]->data);
-        free((void*)effect->features[WORKER_FEATURE]);
+        if (effect->features[WORKER_FEATURE])
+        {
+            free(effect->features[WORKER_FEATURE]->data);
+            free((void*)effect->features[WORKER_FEATURE]);
+        }
         free(effect->features);
     }
 }
