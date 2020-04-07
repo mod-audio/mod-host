@@ -383,7 +383,7 @@ typedef struct MIDI_CC_T {
     float maximum;
     int effect_id;
     const char* symbol;
-    const port_t* port;
+    port_t* port;
 } midi_cc_t;
 
 typedef struct ASSIGNMENT_T {
@@ -1468,7 +1468,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
             port = effect->input_control_ports[i];
 
             if (port->hints & HINT_TRIGGER)
-                *(port->buffer) = port->def_value;
+                port->prev_value = *(port->buffer) = port->def_value;
         }
     }
 
@@ -1585,7 +1585,7 @@ static float UpdateValueFromMidi(midi_cc_t* mcc, uint16_t mvalue, bool highres)
         return bypassed ? 1.0f : 0.0f;
     }
 
-    const port_t* port = mcc->port;
+    port_t* port = mcc->port;
     float value;
 
     if (port->hints & HINT_TRIGGER)
@@ -1657,7 +1657,7 @@ static float UpdateValueFromMidi(midi_cc_t* mcc, uint16_t mvalue, bool highres)
     }
 
     // set param value
-    *(port->buffer) = value;
+    port->prev_value = *(port->buffer) = value;
     return value;
 }
 
@@ -4423,7 +4423,7 @@ int effects_get_parameter_info(int effect_id, const char *control_symbol, float 
 
 int effects_midi_learn(int effect_id, const char *control_symbol, float minimum, float maximum)
 {
-    const port_t *port;
+    port_t *port;
 
     if (!InstanceExist(effect_id))
     {
@@ -4508,7 +4508,7 @@ int effects_midi_learn(int effect_id, const char *control_symbol, float minimum,
 
 int effects_midi_map(int effect_id, const char *control_symbol, int channel, int controller, float minimum, float maximum)
 {
-    const port_t *port;
+    port_t *port;
 
     if (!InstanceExist(effect_id))
     {
@@ -4768,7 +4768,7 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
         // virtual presets port
         port->min_value = minimum;
         port->max_value = maximum;
-        port->def_value = port->prev_value = *port->buffer = value;
+        port->def_value = port->prev_value = *(port->buffer) = value;
     }
 
     const int assignment_id = cc_client_assignment(g_cc_client, &assignment);
