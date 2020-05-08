@@ -2473,7 +2473,7 @@ static bool CheckCCDeviceVersion(int device_id, int major, int minor)
     char buf_major[8], buf_minor[8], *buf = buf_major;
     int device_major, device_minor;
 
-    vsplit = strstr(descriptor, "\"version\":");
+    vsplit = strstr(descriptor, "\"protocol\":");
     if (! vsplit)
         goto free;
 
