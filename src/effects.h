@@ -67,7 +67,7 @@ enum {
     ERR_ASSIGNMENT_FAILED = -304,
 
     ERR_CONTROL_CHAIN_UNAVAILABLE = -401,
-    ERR_LINK_UNAVAILABLE = -402,
+    ERR_ABLETON_LINK_UNAVAILABLE = -402,
 
     ERR_MEMORY_ALLOCATION = -901,
     ERR_INVALID_OPERATION = -902,
@@ -148,6 +148,7 @@ int effects_set_beats_per_bar(float bpb);
 int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int actuator_id,
                    const char* label, float value, float minimum, float maximum, int steps, const char *unit,
                    int scalepoints_count, const scalepoint_t *scalepoints);
+int effects_cc_value_set(int effect_id, const char *control_symbol, float value);
 int effects_cc_unmap(int effect_id, const char *control_symbol);
 
 int effects_cv_map(int effect_id, const char *control_symbol, const char *source_port_name, float minimum, float maximum, const char* mode);

@@ -388,9 +388,11 @@ typedef struct MIDI_CC_T {
 
 typedef struct ASSIGNMENT_T {
     int effect_id;
-    const port_t *port;
+    port_t *port;
     int device_id;
     int assignment_id;
+    int actuator_id;
+    bool supports_set_value;
 } assignment_t;
 
 typedef struct POSTPONED_PARAMETER_EVENT_T {
@@ -589,6 +591,7 @@ static void FreeLicenseData(MOD_License_Handle handle, char *license);
 #ifdef HAVE_CONTROLCHAIN
 static void CCDataUpdate(void* arg);
 static void InitializeControlChainIfNeeded(void);
+static bool CheckCCDeviceVersion(int device_id, int major, int minor);
 #endif
 #ifdef HAVE_HYLIA
 static uint32_t GetHyliaOutputLatency(void);
@@ -2456,6 +2459,63 @@ static void InitializeControlChainIfNeeded(void)
 
     if ((g_cc_client = cc_client_new("/tmp/control-chain.sock")) != NULL)
         cc_client_data_update_cb(g_cc_client, CCDataUpdate);
+}
+
+static bool CheckCCDeviceVersion(int device_id, int major, int minor)
+{
+    char *descriptor = cc_client_device_descriptor(g_cc_client, device_id);
+
+    if (!descriptor)
+        return false;
+
+    // we quickly parse the json ourselves in order to prevent adding more dependencies into mod-host
+    const char *vsplit, *vstart, *vend;
+    char buf_major[8], buf_minor[8], *buf = buf_major;
+    int device_major, device_minor;
+
+    vsplit = strstr(descriptor, "\"version\":");
+    if (! vsplit)
+        goto free;
+
+    vstart = strstr(vsplit+10, "\"");
+    if (! vstart)
+        goto free;
+    ++vstart;
+
+    vend = strstr(vstart, "\"");
+    if (! vend)
+        goto free;
+
+    memset(buf_major, 0, sizeof(buf_major));
+    memset(buf_minor, 0, sizeof(buf_minor));
+
+    for (int i=0; i<7; ++vstart)
+    {
+        if (*vstart >= '0' && *vstart <= '9')
+        {
+            buf[i++] = *vstart;
+            continue;
+        }
+
+        if (*vstart == '.' && buf == buf_major)
+        {
+            i = 0;
+            buf = buf_minor;
+            continue;
+        }
+
+        break;
+    }
+
+    device_major = atoi(buf_major);
+    device_minor = atoi(buf_minor);
+
+    free(descriptor);
+    return device_major >= major && device_minor >= minor;
+
+free:
+    free(descriptor);
+    return false;
 }
 #endif
 
@@ -4725,6 +4785,7 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
         assignment.mode |= CC_MODE_TRIGGER;
 
     // note: logarithmic and tap-tempo missing
+    // CC_MODE_TAP_TEMPO
 
     cc_item_t *item_data;
 
@@ -4786,7 +4847,9 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
     item->effect_id = effect_id;
     item->port = port;
     item->device_id = device_id;
+    item->actuator_id = actuator_id;
     item->assignment_id = assignment_id;
+    item->supports_set_value = CheckCCDeviceVersion(device_id, 0, 6);
 
     return SUCCESS;
 #else
@@ -4804,6 +4867,51 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
     UNUSED_PARAM(unit);
     UNUSED_PARAM(scalepoints_count);
     UNUSED_PARAM(scalepoints);
+#endif
+}
+
+int effects_cc_value_set(int effect_id, const char *control_symbol, float value)
+{
+#ifdef HAVE_CONTROLCHAIN
+    if (!InstanceExist(effect_id))
+        return ERR_INSTANCE_NON_EXISTS;
+    if (!g_cc_client)
+        return ERR_CONTROL_CHAIN_UNAVAILABLE;
+
+    for (int i = 0; i < CC_MAX_DEVICES; i++)
+    {
+        for (int j = 0; j < CC_MAX_ASSIGNMENTS; j++)
+        {
+            assignment_t *assignment = &g_assignments_list[i][j];
+
+            if (assignment->effect_id == ASSIGNMENT_NULL)
+                break;
+
+            if (assignment->effect_id == effect_id && assignment->port != NULL &&
+                strcmp(assignment->port->symbol, control_symbol) == 0)
+            {
+                if (! assignment->supports_set_value)
+                    return ERR_INVALID_OPERATION;
+
+                cc_set_value_t update;
+                update.device_id = assignment->device_id;
+                update.assignment_id = assignment->assignment_id;
+                update.actuator_id = assignment->actuator_id;
+                update.value = value;
+
+                cc_client_value_set(g_cc_client, &update);
+                return SUCCESS;
+            }
+        }
+    }
+
+    return ERR_ASSIGNMENT_INVALID_OP;
+#else
+    return ERR_CONTROL_CHAIN_UNAVAILABLE;
+
+    UNUSED_PARAM(effect_id);
+    UNUSED_PARAM(control_symbol);
+    UNUSED_PARAM(value);
 #endif
 }
 
@@ -5369,7 +5477,7 @@ int effects_transport_sync_mode(const char* mode)
         }
 #endif
         g_transport_sync_mode = TRANSPORT_SYNC_NONE;
-        return ERR_LINK_UNAVAILABLE;
+        return ERR_ABLETON_LINK_UNAVAILABLE;
     }
 
 #ifdef HAVE_HYLIA
