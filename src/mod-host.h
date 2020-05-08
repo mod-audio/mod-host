@@ -72,6 +72,7 @@
 #define MIDI_MAP             "midi_map %i %s %i %i %f %f"
 #define MIDI_UNMAP           "midi_unmap %i %s"
 #define CC_MAP               "cc_map %i %s %i %i %s %f %f %f %i %s %i ..."
+#define CC_VALUE_SET         "cc_value_set %i %s %f"
 #define CC_UNMAP             "cc_unmap %i %s"
 #define CV_MAP               "cv_map %i %s %s %f %f %s"
 #define CV_UNMAP             "cv_unmap %i %s"

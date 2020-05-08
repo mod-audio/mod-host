@@ -369,6 +369,13 @@ static void cc_map_cb(proto_t *proto)
     protocol_response_int(resp, proto);
 }
 
+static void cc_value_set_cb(proto_t *proto)
+{
+    int resp;
+    resp = effects_cc_value_set(atoi(proto->list[1]), proto->list[2], atof(proto->list[3]));
+    protocol_response_int(resp, proto);
+}
+
 static void cc_unmap_cb(proto_t *proto)
 {
     int resp;
@@ -603,6 +610,7 @@ static int mod_host_init(jack_client_t* client, int socket_port, int feedback_po
     protocol_add_command(MIDI_MAP, midi_map_cb);
     protocol_add_command(MIDI_UNMAP, midi_unmap_cb);
     protocol_add_command(CC_MAP, cc_map_cb);
+    protocol_add_command(CC_VALUE_SET, cc_value_set_cb);
     protocol_add_command(CC_UNMAP, cc_unmap_cb);
     protocol_add_command(CV_MAP, cv_map_cb);
     protocol_add_command(CV_UNMAP, cv_unmap_cb);
