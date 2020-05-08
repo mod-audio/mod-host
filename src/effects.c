@@ -591,7 +591,7 @@ static void FreeLicenseData(MOD_License_Handle handle, char *license);
 #ifdef HAVE_CONTROLCHAIN
 static void CCDataUpdate(void* arg);
 static void InitializeControlChainIfNeeded(void);
-static bool CheckCCDeviceVersion(int device_id, int major, int minor);
+static bool CheckCCDeviceProtocolVersion(int device_id, int major, int minor);
 #endif
 #ifdef HAVE_HYLIA
 static uint32_t GetHyliaOutputLatency(void);
@@ -2461,7 +2461,7 @@ static void InitializeControlChainIfNeeded(void)
         cc_client_data_update_cb(g_cc_client, CCDataUpdate);
 }
 
-static bool CheckCCDeviceVersion(int device_id, int major, int minor)
+static bool CheckCCDeviceProtocolVersion(int device_id, int major, int minor)
 {
     char *descriptor = cc_client_device_descriptor(g_cc_client, device_id);
 
@@ -4849,7 +4849,7 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
     item->device_id = device_id;
     item->actuator_id = actuator_id;
     item->assignment_id = assignment_id;
-    item->supports_set_value = CheckCCDeviceVersion(device_id, 0, 6);
+    item->supports_set_value = CheckCCDeviceProtocolVersion(device_id, 0, 6);
 
     return SUCCESS;
 #else
