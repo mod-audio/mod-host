@@ -346,6 +346,18 @@ int jack_initialize(jack_client_t* client, const char* load_init)
     jack_connect(client, ourportname, "system:playback_1");
 #endif
 
+    if (jack_port_by_name(client, "system:playback_3") != NULL)
+    {
+        snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:out_1", ourclientname);
+        jack_connect(client, ourportname, "system:playback_3");
+
+        if (jack_port_by_name(client, "system:playback_4") != NULL)
+        {
+            snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:out_2", ourclientname);
+            jack_connect(client, ourportname, "system:playback_4");
+        }
+    }
+
     return 0;
 }
 
