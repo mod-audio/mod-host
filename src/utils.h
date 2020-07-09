@@ -94,7 +94,7 @@ typedef struct MSG_T {
 ************************************************************************************************************************
 */
 
-// splits the string in each whitespace occurrence and returns a array of strings NULL terminated
+// splits the string in each whitespace occurrence and returns an array of strings NULL terminated
 char** strarr_split(char *str);
 // returns the string array length
 uint32_t strarr_length(char **str_array);

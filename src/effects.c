@@ -22,6 +22,8 @@
 ************************************************************************************************************************
 */
 
+#define _DEFAULT_SOURCE
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -506,6 +508,8 @@ static volatile int  g_postevents_running; // 0: stopped, 1: running, -1: stoppe
 static volatile bool g_postevents_ready;
 static sem_t         g_postevents_semaphore;
 static pthread_t     g_postevents_thread;
+
+static char *g_current_project_folder;
 
 /* Jack */
 static jack_client_t *g_jack_global_client;
@@ -2504,8 +2508,26 @@ static int LogVPrintf(LV2_Log_Handle handle, LV2_URID type, const char* fmt, va_
 }
 static char* StateMakePath(LV2_State_Make_Path_Handle handle, const char *path)
 {
-    // TODO
-    return NULL;
+    if (g_current_project_folder == NULL || path == NULL)
+        return NULL;
+
+    const size_t current_path_size = strlen(g_current_project_folder);
+    const size_t request_path_size = strlen(path);
+
+    char *newpath, *buf;
+    newpath = buf = malloc(current_path_size + request_path_size + 2);
+
+    memcpy(buf, g_current_project_folder, current_path_size);
+    buf += current_path_size;
+    *buf++ = '/';
+    memcpy(buf, path, request_path_size);
+    buf += request_path_size;
+    *buf = '\0';
+
+    char *rpath = realpath(newpath, NULL);
+    free(newpath);
+
+    return rpath;
 
     UNUSED_PARAM(handle);
 }
@@ -2938,6 +2960,8 @@ int effects_init(void* client)
     g_state_mapPath.abstract_path = StateMapAbstractPath;
     g_state_mapPath.absolute_path = StateMapAbsolutePath;
 
+    g_current_project_folder = str_duplicate("/tmp");
+
     lv2_atom_forge_init(&g_lv2_atom_forge, &g_urid_map);
 
     /* Init lilv_instance as NULL for all plugins */
@@ -3049,6 +3073,9 @@ int effects_finish(int close_client)
     hylia_cleanup(g_hylia_instance);
     g_hylia_instance = NULL;
 #endif
+
+    free(g_current_project_folder);
+    g_current_project_folder = NULL;
 
     g_processing_enabled = false;
 
