@@ -562,7 +562,6 @@ static LV2_Feature g_license_feature = { MOD_LICENSE__feature, &g_license };
 static LV2_Feature g_lv2_log_feature = { LV2_LOG__log, &g_lv2_log };
 static LV2_Feature g_options_feature = { LV2_OPTIONS__options, &g_options };
 static LV2_Feature g_state_freePath_feature = { LV2_STATE__freePath, &g_state_freePath };
-static LV2_Feature g_state_makePath_feature = { LV2_STATE__makePath, &g_state_makePath };
 static LV2_Feature g_state_mapPath_feature = { LV2_STATE__mapPath, &g_state_mapPath };
 static LV2_Feature g_uri_map_feature = { LV2_URI_MAP_URI, &g_uri_map };
 static LV2_Feature g_urid_map_feature = { LV2_URID__map, &g_urid_map };
@@ -2167,6 +2166,15 @@ static void GetFeatures(effect_t *effect)
 
     /* Options Feature is the same for all instances (global declaration) */
 
+    /* State path features, includes custom pointer */
+    LV2_State_Make_Path *makePath = (LV2_State_Make_Path*) malloc(sizeof(LV2_State_Make_Path));
+    makePath->handle = effect;
+    makePath->path = StateMakePath;
+
+    LV2_Feature *state_make_path_feature = (LV2_Feature*) malloc(sizeof(LV2_Feature));
+    state_make_path_feature->URI = LV2_STATE__makePath;
+    state_make_path_feature->data = makePath;
+
     /* Worker Feature, must be last as it can be null */
     LV2_Feature *work_schedule_feature = NULL;
 
@@ -2177,7 +2185,7 @@ static void GetFeatures(effect_t *effect)
         schedule->handle = &effect->worker;
         schedule->schedule_work = worker_schedule;
 
-        work_schedule_feature = (LV2_Feature *) malloc(sizeof(LV2_Feature));
+        work_schedule_feature = (LV2_Feature*) malloc(sizeof(LV2_Feature));
         work_schedule_feature->URI = LV2_WORKER__schedule;
         work_schedule_feature->data = schedule;
     }
@@ -2196,7 +2204,7 @@ static void GetFeatures(effect_t *effect)
     features[BUF_SIZE_BOUNDED_FEATURE]  = &g_buf_size_features[2];
     features[LOG_FEATURE]               = &g_lv2_log_feature;
     features[STATE_FREE_PATH_FEATURE]   = &g_state_freePath_feature;
-    features[STATE_MAKE_PATH_FEATURE]   = &g_state_makePath_feature;
+    features[STATE_MAKE_PATH_FEATURE]   = state_make_path_feature;
     features[STATE_MAP_PATH_FEATURE]    = &g_state_mapPath_feature;
     features[WORKER_FEATURE]            = work_schedule_feature;
     features[FEATURE_TERMINATOR]        = NULL;
@@ -2343,6 +2351,11 @@ static void FreeFeatures(effect_t *effect)
 
     if (effect->features)
     {
+        if (effect->features[STATE_MAKE_PATH_FEATURE])
+        {
+            free(effect->features[STATE_MAKE_PATH_FEATURE]->data);
+            free((void*)effect->features[STATE_MAKE_PATH_FEATURE]);
+        }
         if (effect->features[WORKER_FEATURE])
         {
             free(effect->features[WORKER_FEATURE]->data);
@@ -2513,14 +2526,22 @@ static char* StateMakePath(LV2_State_Make_Path_Handle handle, const char *path)
     if (g_current_project_folder == NULL || path == NULL)
         return NULL;
 
+    effect_t *effect = (effect_t*)handle;
+    char effidstr[24] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+    snprintf(effidstr, 23, "effect-%d", effect->instance);
+
     const size_t current_path_size = strlen(g_current_project_folder);
+    const size_t effidstr_size     = strlen(effidstr);
     const size_t request_path_size = strlen(path);
 
     char *newpath, *buf;
-    newpath = buf = malloc(current_path_size + request_path_size + 2);
+    newpath = buf = malloc(current_path_size + effidstr_size + request_path_size + 2);
 
     memcpy(buf, g_current_project_folder, current_path_size);
     buf += current_path_size;
+    *buf++ = '/';
+    memcpy(buf, effidstr, effidstr_size);
+    buf += effidstr_size;
     *buf++ = '/';
     memcpy(buf, path, request_path_size);
     buf += request_path_size;
