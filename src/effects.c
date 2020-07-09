@@ -33,6 +33,7 @@
 #include <limits.h>
 #include <math.h>
 #include <pthread.h>
+#include <sys/stat.h>
 
 /* Jack */
 #include <jack/jack.h>
@@ -2506,6 +2507,7 @@ static int LogVPrintf(LV2_Log_Handle handle, LV2_URID type, const char* fmt, va_
 
     UNUSED_PARAM(handle);
 }
+
 static char* StateMakePath(LV2_State_Make_Path_Handle handle, const char *path)
 {
     if (g_current_project_folder == NULL || path == NULL)
@@ -2523,6 +2525,32 @@ static char* StateMakePath(LV2_State_Make_Path_Handle handle, const char *path)
     memcpy(buf, path, request_path_size);
     buf += request_path_size;
     *buf = '\0';
+
+    if (access(newpath, F_OK) != 0)
+    {
+        if (mkdir(newpath, 0755) != 0)
+        {
+            char*        duppath     = str_duplicate(newpath);
+            const size_t duppath_len = strlen(newpath);
+
+            for (size_t i = 1; i <= duppath_len; ++i)
+            {
+                if (duppath[i] == '/' || duppath[i] == '\0')
+                {
+                    duppath[i] = '\0';
+                    if (mkdir(duppath, 0755) && errno != EEXIST)
+                    {
+                        free(duppath);
+                        free(newpath);
+                        return NULL;
+                    }
+                    duppath[i] = '/';
+                }
+            }
+
+            free(duppath);
+        }
+    }
 
     char *rpath = realpath(newpath, NULL);
     free(newpath);
