@@ -44,19 +44,20 @@
 #include <lilv/lilv.h>
 #include <lv2/lv2plug.in/ns/ext/atom/atom.h>
 #include <lv2/lv2plug.in/ns/ext/atom/forge.h>
+#include <lv2/lv2plug.in/ns/ext/buf-size/buf-size.h>
+#include <lv2/lv2plug.in/ns/ext/event/event.h>
+#include <lv2/lv2plug.in/ns/ext/log/log.h>
 #include <lv2/lv2plug.in/ns/ext/midi/midi.h>
+#include <lv2/lv2plug.in/ns/ext/options/options.h>
+#include <lv2/lv2plug.in/ns/ext/patch/patch.h>
+#include <lv2/lv2plug.in/ns/ext/parameters/parameters.h>
+#include <lv2/lv2plug.in/ns/ext/port-props/port-props.h>
+#include <lv2/lv2plug.in/ns/ext/presets/presets.h>
+#include <lv2/lv2plug.in/ns/ext/state/state.h>
+#include <lv2/lv2plug.in/ns/ext/time/time.h>
 #include <lv2/lv2plug.in/ns/ext/urid/urid.h>
 #include <lv2/lv2plug.in/ns/ext/uri-map/uri-map.h>
-#include <lv2/lv2plug.in/ns/ext/time/time.h>
 #include <lv2/lv2plug.in/ns/ext/worker/worker.h>
-#include <lv2/lv2plug.in/ns/ext/patch/patch.h>
-#include <lv2/lv2plug.in/ns/ext/event/event.h>
-#include <lv2/lv2plug.in/ns/ext/state/state.h>
-#include <lv2/lv2plug.in/ns/ext/presets/presets.h>
-#include <lv2/lv2plug.in/ns/ext/options/options.h>
-#include <lv2/lv2plug.in/ns/ext/port-props/port-props.h>
-#include <lv2/lv2plug.in/ns/ext/buf-size/buf-size.h>
-#include <lv2/lv2plug.in/ns/ext/parameters/parameters.h>
 #include "mod-license.h"
 #include "mod-host.h"
 
@@ -85,6 +86,16 @@
 
 #ifndef LV2_CORE__enabled
 #define LV2_CORE__enabled LV2_CORE_PREFIX "enabled"
+#endif
+
+#ifndef HAVE_LV2_STATE_FREE_PATH
+// forwards compatibility with old lv2 headers
+#define LV2_STATE__freePath LV2_STATE_PREFIX "freePath"
+typedef void* LV2_State_Free_Path_Handle;
+typedef struct {
+    LV2_State_Free_Path_Handle handle;
+    void (*free_path)(LV2_State_Free_Path_Handle handle, char* path);
+} LV2_State_Free_Path;
 #endif
 
 #define LILV_NS_MOD "http://moddevices.com/ns/mod#"
@@ -190,6 +201,10 @@ enum {
     BUF_SIZE_POWER2_FEATURE,
     BUF_SIZE_FIXED_FEATURE,
     BUF_SIZE_BOUNDED_FEATURE,
+    LOG_FEATURE,
+    STATE_FREE_PATH_FEATURE,
+    STATE_MAKE_PATH_FEATURE,
+    STATE_MAP_PATH_FEATURE,
     WORKER_FEATURE,
     FEATURE_TERMINATOR
 };
@@ -358,7 +373,10 @@ typedef struct URIDS_T {
     LV2_URID bufsz_minBlockLength;
     LV2_URID bufsz_nomimalBlockLength;
     LV2_URID bufsz_sequenceSize;
+    LV2_URID log_Error;
+    LV2_URID log_Note;
     LV2_URID log_Trace;
+    LV2_URID log_Warning;
     LV2_URID midi_MidiEvent;
     LV2_URID param_sampleRate;
     LV2_URID patch_Set;
@@ -519,23 +537,31 @@ static LilvNode *g_sample_rate_node;
 /* Global features */
 static Symap* g_symap;
 static urids_t g_urids;
+static MOD_License_Feature g_license;
 static LV2_Atom_Forge g_lv2_atom_forge;
+static LV2_Log_Log g_lv2_log;
+static LV2_Options_Option g_options[6];
+static LV2_State_Free_Path g_state_freePath;
+static LV2_State_Make_Path g_state_makePath;
+static LV2_State_Map_Path g_state_mapPath;
 static LV2_URI_Map_Feature g_uri_map;
 static LV2_URID_Map g_urid_map;
 static LV2_URID_Unmap g_urid_unmap;
-static LV2_Options_Option g_options[6];
-static MOD_License_Feature g_license;
 
-static LV2_Feature g_uri_map_feature = {LV2_URI_MAP_URI, &g_uri_map};
-static LV2_Feature g_urid_map_feature = {LV2_URID__map, &g_urid_map};
-static LV2_Feature g_urid_unmap_feature = {LV2_URID__unmap, &g_urid_unmap};
-static LV2_Feature g_options_feature = {LV2_OPTIONS__options, &g_options};
-static LV2_Feature g_license_feature = {MOD_LICENSE__feature, &g_license};
 static LV2_Feature g_buf_size_features[3] = {
     { LV2_BUF_SIZE__powerOf2BlockLength, NULL },
     { LV2_BUF_SIZE__fixedBlockLength, NULL },
     { LV2_BUF_SIZE__boundedBlockLength, NULL }
-    };
+};
+static LV2_Feature g_license_feature = { MOD_LICENSE__feature, &g_license };
+static LV2_Feature g_lv2_log_feature = { LV2_LOG__log, &g_lv2_log };
+static LV2_Feature g_options_feature = { LV2_OPTIONS__options, &g_options };
+static LV2_Feature g_state_freePath_feature = { LV2_STATE__freePath, &g_state_freePath };
+static LV2_Feature g_state_makePath_feature = { LV2_STATE__makePath, &g_state_makePath };
+static LV2_Feature g_state_mapPath_feature = { LV2_STATE__mapPath, &g_state_mapPath };
+static LV2_Feature g_uri_map_feature = { LV2_URI_MAP_URI, &g_uri_map };
+static LV2_Feature g_urid_map_feature = { LV2_URID__map, &g_urid_map };
+static LV2_Feature g_urid_unmap_feature = { LV2_URID__unmap, &g_urid_unmap };
 
 /* MIDI Learn */
 static pthread_mutex_t g_midi_learning_mutex;
@@ -582,12 +608,17 @@ static void TriggerJackTimebase(void);
 static property_t *FindEffectPropertyByURI(effect_t *effect, const char *uri);
 static port_t *FindEffectInputPortBySymbol(effect_t *effect, const char *control_symbol);
 static port_t *FindEffectOutputPortBySymbol(effect_t *effect, const char *control_symbol);
-static const void* GetPortValueForState(const char* symbol, void* user_data, uint32_t* size, uint32_t* type);
+static const void *GetPortValueForState(const char* symbol, void* user_data, uint32_t* size, uint32_t* type);
 static int LoadPresets(effect_t *effect);
 static void FreeFeatures(effect_t *effect);
+static void FreePluginString(void* handle, char *str);
 static void ConnectToAllHardwareMIDIPorts(void);
-static char* GetLicenseFile(MOD_License_Handle handle, const char *license_uri);
-static void FreeLicenseData(MOD_License_Handle handle, char *license);
+static char *GetLicenseFile(MOD_License_Handle handle, const char *license_uri);
+static int LogPrintf(LV2_Log_Handle handle, LV2_URID type, const char *fmt, ...);
+static int LogVPrintf(LV2_Log_Handle handle, LV2_URID type, const char *fmt, va_list ap);
+static char* StateMakePath(LV2_State_Make_Path_Handle handle, const char *path);
+static char* StateMapAbstractPath(LV2_State_Map_Path_Handle handle, const char *absolute_path);
+static char* StateMapAbsolutePath(LV2_State_Map_Path_Handle handle, const char *abstract_path);
 #ifdef HAVE_CONTROLCHAIN
 static void CCDataUpdate(void* arg);
 static void InitializeControlChainIfNeeded(void);
@@ -2158,6 +2189,10 @@ static void GetFeatures(effect_t *effect)
     features[BUF_SIZE_POWER2_FEATURE]   = &g_buf_size_features[0];
     features[BUF_SIZE_FIXED_FEATURE]    = &g_buf_size_features[1];
     features[BUF_SIZE_BOUNDED_FEATURE]  = &g_buf_size_features[2];
+    features[LOG_FEATURE]               = &g_lv2_log_feature;
+    features[STATE_FREE_PATH_FEATURE]   = &g_state_freePath_feature;
+    features[STATE_MAKE_PATH_FEATURE]   = &g_state_makePath_feature;
+    features[STATE_MAP_PATH_FEATURE]    = &g_state_mapPath_feature;
     features[WORKER_FEATURE]            = work_schedule_feature;
     features[FEATURE_TERMINATOR]        = NULL;
 
@@ -2315,6 +2350,13 @@ static void FreeFeatures(effect_t *effect)
 // back to normal
 #pragma GCC diagnostic pop
 
+static void FreePluginString(void* handle, char *str)
+{
+    return free(str);
+
+    UNUSED_PARAM(handle);
+}
+
 static void ConnectToAllHardwareMIDIPorts(void)
 {
     if (g_jack_global_client == NULL)
@@ -2412,9 +2454,74 @@ end:
     UNUSED_PARAM(handle);
 }
 
-static void FreeLicenseData(MOD_License_Handle handle, char *license)
+static int LogPrintf(LV2_Log_Handle handle, LV2_URID type, const char* fmt, ...)
 {
-    return free(license);
+    int ret;
+    va_list args;
+    va_start(args, fmt);
+    ret = LogVPrintf(handle, type, fmt, args);
+    va_end(args);
+
+    return ret;
+
+    UNUSED_PARAM(handle);
+}
+
+static int LogVPrintf(LV2_Log_Handle handle, LV2_URID type, const char* fmt, va_list ap)
+{
+    int ret = 0;
+
+    // TODO send log to UI side
+
+    if (type == g_urids.log_Error)
+    {
+        fprintf(stderr, "\x1b[31m");
+        ret = vfprintf(stderr, fmt, ap);
+        fprintf(stderr, "\x1b[0m");
+        fflush(stderr);
+    }
+    else if (type == g_urids.log_Note)
+    {
+        ret = vfprintf(stdout, fmt, ap);
+        fflush(stdout);
+    }
+    else if (type == g_urids.log_Trace)
+    {
+        fprintf(stdout, "\x1b[30;1m");
+        ret = vfprintf(stdout, fmt, ap);
+        fprintf(stdout, "\x1b[0m");
+        fflush(stdout);
+    }
+    else if (type == g_urids.log_Warning)
+    {
+        ret = vfprintf(stderr, fmt, ap);
+        fflush(stderr);
+    }
+
+    return ret;
+
+    UNUSED_PARAM(handle);
+}
+static char* StateMakePath(LV2_State_Make_Path_Handle handle, const char *path)
+{
+    // TODO
+    return NULL;
+
+    UNUSED_PARAM(handle);
+}
+
+static char* StateMapAbstractPath(LV2_State_Map_Path_Handle handle, const char *absolute_path)
+{
+    // TODO
+    return NULL;
+
+    UNUSED_PARAM(handle);
+}
+
+static char* StateMapAbsolutePath(LV2_State_Map_Path_Handle handle, const char *abstract_path)
+{
+    // TODO
+    return NULL;
 
     UNUSED_PARAM(handle);
 }
@@ -2746,11 +2853,19 @@ int effects_init(void* client)
     g_urids.bufsz_minBlockLength     = urid_to_id(g_symap, LV2_BUF_SIZE__minBlockLength);
     g_urids.bufsz_nomimalBlockLength = urid_to_id(g_symap, LV2_BUF_SIZE__nominalBlockLength);
     g_urids.bufsz_sequenceSize   = urid_to_id(g_symap, LV2_BUF_SIZE__sequenceSize);
+
+    g_urids.log_Error            = urid_to_id(g_symap, LV2_LOG__Error);
+    g_urids.log_Note             = urid_to_id(g_symap, LV2_LOG__Note);
+    g_urids.log_Trace            = urid_to_id(g_symap, LV2_LOG__Trace);
+    g_urids.log_Warning          = urid_to_id(g_symap, LV2_LOG__Warning);
+
     g_urids.midi_MidiEvent       = urid_to_id(g_symap, LV2_MIDI__MidiEvent);
     g_urids.param_sampleRate     = urid_to_id(g_symap, LV2_PARAMETERS__sampleRate);
+
     g_urids.patch_Set            = urid_to_id(g_symap, LV2_PATCH__Set);
     g_urids.patch_property       = urid_to_id(g_symap, LV2_PATCH__property);
     g_urids.patch_value          = urid_to_id(g_symap, LV2_PATCH__value);
+
     g_urids.time_Position        = urid_to_id(g_symap, LV2_TIME__Position);
     g_urids.time_bar             = urid_to_id(g_symap, LV2_TIME__bar);
     g_urids.time_barBeat         = urid_to_id(g_symap, LV2_TIME__barBeat);
@@ -2807,7 +2922,21 @@ int effects_init(void* client)
 
     g_license.handle = NULL;
     g_license.license = GetLicenseFile;
-    g_license.free = FreeLicenseData;
+    g_license.free = FreePluginString;
+
+    g_lv2_log.handle = NULL;
+    g_lv2_log.printf = LogPrintf;
+    g_lv2_log.vprintf = LogVPrintf;
+
+    g_state_freePath.handle = NULL;
+    g_state_freePath.free_path = FreePluginString;
+
+    g_state_makePath.handle = NULL;
+    g_state_makePath.path = StateMakePath;
+
+    g_state_mapPath.handle = NULL;
+    g_state_mapPath.abstract_path = StateMapAbstractPath;
+    g_state_mapPath.absolute_path = StateMapAbsolutePath;
 
     lv2_atom_forge_init(&g_lv2_atom_forge, &g_urid_map);
 

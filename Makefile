@@ -69,6 +69,10 @@ ifeq ($(shell pkg-config --atleast-version=0.22.0 lilv-0 && echo true), true)
 INCS += -DHAVE_NEW_LILV
 endif
 
+ifeq ($(shell pkg-config --atleast-version=1.18 lv2 && echo true),true)
+INCS += -DHAVE_LV2_STATE_FREE_PATH
+endif
+
 ifeq ($(shell pkg-config --atleast-version=1.9.0 jack && echo true), true)
 INCS += -DHAVE_JACK2
 endif
