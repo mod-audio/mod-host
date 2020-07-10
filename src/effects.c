@@ -2872,6 +2872,8 @@ int effects_init(void* client)
         return ERR_JACK_CLIENT_CREATION;
     }
 
+    memset(g_effects, 0, sizeof(g_effects));
+
     INIT_LIST_HEAD(&g_rtsafe_list);
 
     if (!rtsafe_memory_pool_create(&g_rtsafe_mem_pool, "mod-host", sizeof(postponed_event_list_data),
@@ -2912,7 +2914,8 @@ int effects_init(void* client)
     g_transport_sync_mode = TRANSPORT_SYNC_NONE;
 
     /* this fails to build if GLOBAL_EFFECT_ID >= MAX_INSTANCES */
-    char global_effect_id_static_check[GLOBAL_EFFECT_ID < MAX_INSTANCES?1:-1];
+    char global_effect_id_static_check1[GLOBAL_EFFECT_ID >= MAX_PLUGIN_INSTANCES?1:-1];
+    char global_effect_id_static_check2[GLOBAL_EFFECT_ID < MAX_INSTANCES?1:-1];
 
     /* global ports */
     {
@@ -2955,7 +2958,6 @@ int effects_init(void* client)
         pthread_mutex_init(&port_rolling->cv_source_mutex, &mutex_atts);
 
         effect_t *effect = &g_effects[GLOBAL_EFFECT_ID];
-        memset(effect, 0, sizeof(effect_t));
 
         effect->instance = GLOBAL_EFFECT_ID;
         effect->jack_client = g_jack_global_client;
@@ -3153,10 +3155,6 @@ int effects_init(void* client)
 
     lv2_atom_forge_init(&g_lv2_atom_forge, &g_urid_map);
 
-    /* Init lilv_instance as NULL for all plugins */
-    for (int i = 0; i < MAX_INSTANCES; i++)
-        g_effects[i].lilv_instance = NULL;
-
     /* Init the midi variables */
     for (int i = 0; i < MAX_MIDI_CC_ASSIGN; i++)
     {
@@ -3220,7 +3218,8 @@ int effects_init(void* client)
 
     return SUCCESS;
 
-    UNUSED_PARAM(global_effect_id_static_check);
+    UNUSED_PARAM(global_effect_id_static_check1);
+    UNUSED_PARAM(global_effect_id_static_check2);
 }
 
 int effects_finish(int close_client)
@@ -4324,7 +4323,7 @@ int effects_remove(int effect_id)
         }
 
         start = 0;
-        end = MAX_INSTANCES - 10; // TODO: better way to exclude the Tools (10)
+        end = MAX_PLUGIN_INSTANCES;
     }
     else
     {
@@ -5704,7 +5703,7 @@ int effects_state_load(const char *dir)
     char state_filename[PATH_MAX];
     bzero(state_filename, sizeof(state_filename));
 
-    for (int i = 0; i < MAX_INSTANCES - 10; i++) // FIXME
+    for (int i = 0; i < MAX_PLUGIN_INSTANCES; ++i)
     {
         if (g_effects[i].lilv_instance == NULL)
             continue;
@@ -5762,7 +5761,7 @@ int effects_state_save(const char *dir)
     char state_filename[PATH_MAX];
     bzero(state_filename, sizeof(state_filename));
 
-    for (int i = 0; i < MAX_INSTANCES; i++)
+    for (int i = 0; i < MAX_PLUGIN_INSTANCES; ++i)
     {
         if (g_effects[i].lilv_instance == NULL)
             continue;
