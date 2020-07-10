@@ -475,6 +475,18 @@ static void bundle_remove(proto_t *proto)
     protocol_response("resp 0", proto);
 }
 
+static void state_load(proto_t *proto)
+{
+    effects_state_load(proto->list[1]);
+    protocol_response("resp 0", proto);
+}
+
+static void state_save(proto_t *proto)
+{
+    effects_state_save(proto->list[1]);
+    protocol_response("resp 0", proto);
+}
+
 static void feature_enable(proto_t *proto)
 {
     const char* feature = proto->list[1];
@@ -622,6 +634,8 @@ static int mod_host_init(jack_client_t* client, int socket_port, int feedback_po
     protocol_add_command(BUNDLE_ADD, bundle_add);
     protocol_add_command(BUNDLE_REMOVE, bundle_remove);
     protocol_add_command(FEATURE_ENABLE, feature_enable);
+    protocol_add_command(STATE_LOAD, state_load);
+    protocol_add_command(STATE_SAVE, state_save);
     protocol_add_command(TRANSPORT, transport);
     protocol_add_command(TRANSPORT_SYNC, transport_sync);
     protocol_add_command(OUTPUT_DATA_READY, output_data_ready);

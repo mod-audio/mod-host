@@ -187,6 +187,8 @@ enum PluginHints {
     //HINT_TRANSPORT     = 1 << 0,
     HINT_TRIGGERS        = 1 << 1,
     HINT_OUTPUT_MONITORS = 1 << 2,
+    HINT_HAS_STATE       = 1 << 3,
+    HINT_STATE_UNSAFE    = 1 << 4, // state restore needs mutex protection
 };
 
 enum TransportSyncMode {
@@ -218,7 +220,9 @@ enum PostPonedEventType {
     POSTPONED_MIDI_PROGRAM_CHANGE,
     POSTPONED_MIDI_MAP,
     POSTPONED_TRANSPORT,
-    POSTPONED_JACK_MIDI_CONNECT
+    POSTPONED_JACK_MIDI_CONNECT,
+    POSTPONED_LOG_TRACE, // stack allocated, rt-safe
+    POSTPONED_LOG_MESSAGE // heap allocated
 };
 
 enum UpdatePositionFlag {
@@ -292,7 +296,7 @@ typedef struct EFFECT_T {
     jack_client_t *jack_client;
     LilvInstance *lilv_instance;
     const LilvPlugin *lilv_plugin;
-    const LV2_Feature** features;
+    const LV2_Feature **features;
 
     port_t **ports;
     uint32_t ports_count;
@@ -343,7 +347,8 @@ typedef struct EFFECT_T {
     uint32_t monitors_count;
 
     worker_t worker;
-    const MOD_License_Interface* license_iface;
+    const MOD_License_Interface *license_iface;
+    const LV2_State_Interface *state_iface;
 
     jack_ringbuffer_t *events_buffer;
 
@@ -364,6 +369,9 @@ typedef struct EFFECT_T {
     // virtual presets port
     port_t presets_port;
     float preset_value;
+
+    // thread-safe state restore
+    pthread_mutex_t state_restore_mutex;
 } effect_t;
 
 typedef struct URIDS_T {
@@ -447,6 +455,15 @@ typedef struct POSTPONED_JACK_MIDI_CONNECT_EVENT_T {
     jack_port_id_t port;
 } postponed_jack_midi_connect_event_t;
 
+typedef struct POSTPONED_LOG_TRACE_EVENT_T {
+    char msg[32];
+} postponed_log_trace_event_t;
+
+typedef struct POSTPONED_LOG_MESSAGE_EVENT_T {
+    LogType type;
+    char *msg; // NOTE: heap allocated, needs to be freed on reader side
+} postponed_log_message_event_t;
+
 typedef struct POSTPONED_EVENT_T {
     enum PostPonedEventType type;
     union {
@@ -455,6 +472,8 @@ typedef struct POSTPONED_EVENT_T {
         postponed_midi_map_event_t midi_map;
         postponed_transport_event_t transport;
         postponed_jack_midi_connect_event_t jack_midi_connect;
+        postponed_log_trace_event_t log_trace;
+        postponed_log_message_event_t log_message;
     };
 } postponed_event_t;
 
@@ -620,6 +639,7 @@ static void ConnectToAllHardwareMIDIPorts(void);
 static char *GetLicenseFile(MOD_License_Handle handle, const char *license_uri);
 static int LogPrintf(LV2_Log_Handle handle, LV2_URID type, const char *fmt, ...);
 static int LogVPrintf(LV2_Log_Handle handle, LV2_URID type, const char *fmt, va_list ap);
+static char* GetPluginStateDir(int instance, const char *path);
 static char* StateMakePath(LV2_State_Make_Path_Handle handle, const char *path);
 static char* StateMapAbstractPath(LV2_State_Map_Path_Handle handle, const char *absolute_path);
 static char* StateMapAbsolutePath(LV2_State_Map_Path_Handle handle, const char *abstract_path);
@@ -951,6 +971,30 @@ static void RunPostPonedEvents(int ignored_effect_id)
                     jack_connect(g_jack_global_client, jack_port_name(port), jack_port_name(g_midi_in_port));
             }
             break;
+
+        case POSTPONED_LOG_TRACE:
+            snprintf(buf, MAX_CHAR_BUF_SIZE, "log %d %s", LOG_TRACE, eventptr->event.log_trace.msg);
+            socket_send_feedback(buf);
+            break;
+
+        case POSTPONED_LOG_MESSAGE: {
+            char *msg = eventptr->event.log_message.msg;
+            const int prefix_len = snprintf(buf, MAX_CHAR_BUF_SIZE, "log %d ", eventptr->event.log_message.type);
+            const size_t msg_len = strlen(msg);
+
+            if (prefix_len > 0 && prefix_len < 8) {
+                char* msg2 = malloc(prefix_len + msg_len + 1);
+                if (msg2 != NULL) {
+                    memcpy(msg2, buf, prefix_len);
+                    memcpy(msg2+prefix_len, msg, msg_len + 1);
+                    socket_send_feedback(msg2);
+                    printf("MSG TO SEND TO UI: '%s'\n", msg2);
+                    free(msg2);
+                }
+            }
+            free(msg);
+            break;
+        }
         }
     }
 #ifdef DEBUG
@@ -1027,7 +1071,8 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
     if (arg == NULL) return 0;
     effect = arg;
 
-    if (!g_processing_enabled)
+    if (!g_processing_enabled || (
+        (effect->hints & HINT_STATE_UNSAFE) && pthread_mutex_trylock(&effect->state_restore_mutex) != 0))
     {
         for (i = 0; i < effect->output_audio_ports_count; i++)
         {
@@ -1545,6 +1590,9 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
     }
 
     effect->was_bypassed = effect->bypass > 0.5f;
+
+    if (effect->hints & HINT_STATE_UNSAFE)
+        pthread_mutex_unlock(&effect->state_restore_mutex);
 
     if (needs_post)
         sem_post(&g_postevents_semaphore);
@@ -2487,38 +2535,121 @@ static int LogPrintf(LV2_Log_Handle handle, LV2_URID type, const char* fmt, ...)
 
 static int LogVPrintf(LV2_Log_Handle handle, LV2_URID type, const char* fmt, va_list ap)
 {
-    int ret = 0;
+    int ret = -1;
+    char *strp = NULL;
 
-    // TODO send log to UI side
+    // try to allocate message early, we can only format once so do it now
+    if (type == g_urids.log_Error || type == g_urids.log_Warning || type == g_urids.log_Note)
+    {
+        ret = vasprintf(&strp, fmt, ap);
 
-    if (type == g_urids.log_Error)
-    {
-        fprintf(stderr, "\x1b[31m");
-        ret = vfprintf(stderr, fmt, ap);
-        fprintf(stderr, "\x1b[0m");
-        fflush(stderr);
-    }
-    else if (type == g_urids.log_Note)
-    {
-        ret = vfprintf(stdout, fmt, ap);
-        fflush(stdout);
+        if (ret < 0)
+            return ret;
+
+        if (strp == NULL)
+        {
+            errno = ENOMEM;
+            return -1;
+        }
+
+        if (type == g_urids.log_Error)
+        {
+            fprintf(stderr, "\x1b[31m");
+            fputs(strp, stderr);
+            fprintf(stderr, "\x1b[0m");
+            fflush(stderr);
+        }
+        else if (type == g_urids.log_Warning)
+        {
+            fputs(strp, stderr);
+            fflush(stderr);
+        }
+        else
+        {
+            fputs(strp, stdout);
+            fflush(stdout);
+        }
     }
     else if (type == g_urids.log_Trace)
     {
-        fprintf(stdout, "\x1b[30;1m");
-        ret = vfprintf(stdout, fmt, ap);
-        fprintf(stdout, "\x1b[0m");
-        fflush(stdout);
+        // handled later during event reserve
+        ret = 0;
     }
-    else if (type == g_urids.log_Warning)
+    else
     {
-        ret = vfprintf(stderr, fmt, ap);
-        fflush(stderr);
+        errno = EINVAL;
+        return -1;
     }
 
+    postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
+
+    if (posteventptr == NULL)
+    {
+        free(strp);
+        return ret;
+    }
+
+    if (type == g_urids.log_Trace)
+    {
+        posteventptr->event.type = POSTPONED_LOG_TRACE;
+        ret = vsnprintf(posteventptr->event.log_trace.msg, sizeof(posteventptr->event.log_trace.msg)-1, fmt, ap);
+        posteventptr->event.log_trace.msg[sizeof(posteventptr->event.log_trace.msg)-1] = '\0';
+#ifdef DEBUG
+        fprintf(stdout, "\x1b[30;1m");
+        fputs(posteventptr->event.log_trace.msg, stdout);
+        fprintf(stdout, "\x1b[0m");
+        fflush(stdout);
+#endif
+    }
+    else
+    {
+        posteventptr->event.type = POSTPONED_LOG_MESSAGE;
+
+        if (type == g_urids.log_Error)
+            posteventptr->event.log_message.type = LOG_ERROR;
+        else if (type == g_urids.log_Warning)
+            posteventptr->event.log_message.type = LOG_WARNING;
+        else
+            posteventptr->event.log_message.type = LOG_NOTE;
+
+        posteventptr->event.log_message.msg = strp;
+    }
+
+    pthread_mutex_lock(&g_rtsafe_mutex);
+    list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
+    pthread_mutex_unlock(&g_rtsafe_mutex);
+
+    sem_post(&g_postevents_semaphore);
     return ret;
 
     UNUSED_PARAM(handle);
+}
+
+static char* GetPluginStateDir(int instance, const char *path)
+{
+    if (path == NULL)
+        return NULL;
+
+    char effidstr[24] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+    snprintf(effidstr, 23, "effect-%d", instance);
+
+    const size_t current_path_size = strlen(path);
+    const size_t effidstr_size     = strlen(effidstr);
+
+    char *newpath, *buf;
+    newpath = buf = malloc(current_path_size + effidstr_size + 2);
+
+    if (newpath == NULL)
+        return NULL;
+
+    memcpy(buf, path, current_path_size);
+    buf += current_path_size;
+    *buf++ = '/';
+    memcpy(buf, effidstr, effidstr_size);
+    buf += effidstr_size;
+    *buf = '\0';
+
+    return newpath;
 }
 
 static char* StateMakePath(LV2_State_Make_Path_Handle handle, const char *path)
@@ -2535,7 +2666,10 @@ static char* StateMakePath(LV2_State_Make_Path_Handle handle, const char *path)
     const size_t request_path_size = strlen(path);
 
     char *newpath, *buf;
-    newpath = buf = malloc(current_path_size + effidstr_size + request_path_size + 2);
+    newpath = buf = malloc(current_path_size + effidstr_size + request_path_size + 3);
+
+    if (newpath == NULL)
+        return NULL;
 
     memcpy(buf, g_current_project_folder, current_path_size);
     buf += current_path_size;
@@ -3131,7 +3265,7 @@ int effects_finish(int close_client)
     return SUCCESS;
 }
 
-int effects_add(const char *uid, int instance)
+int effects_add(const char *uri, int instance)
 {
     unsigned int i, ports_count;
     char effect_name[32], port_name[MAX_CHAR_BUF_SIZE+1];
@@ -3164,12 +3298,12 @@ int effects_add(const char *uid, int instance)
     LilvNode *lilv_default, *lilv_mod_default;
     LilvNode *lilv_minimum, *lilv_mod_minimum;
     LilvNode *lilv_maximum, *lilv_mod_maximum;
-    LilvNode *lilv_atom_port, *lilv_worker_interface, *lilv_license_interface;
+    LilvNode *lilv_atom_port, *lilv_worker_interface, *lilv_license_interface, *lilv_state_interface;
     const LilvPort* control_in_port;
     const LilvPort *lilv_port;
     const LilvNode *symbol_node;
 
-    if (!uid) return ERR_LV2_INVALID_URI;
+    if (!uri) return ERR_LV2_INVALID_URI;
     if (!INSTANCE_IS_VALID(instance)) return ERR_INSTANCE_INVALID;
     if (InstanceExist(instance)) return ERR_INSTANCE_ALREADY_EXISTS;
 
@@ -3180,6 +3314,7 @@ int effects_add(const char *uid, int instance)
     effect->instance = instance;
 
     /* Init the pointers */
+    plugin_uri = NULL;
     lilv_instance = NULL;
     lilv_input = NULL;
     lilv_control_in = NULL;
@@ -3210,6 +3345,7 @@ int effects_add(const char *uid, int instance)
     lilv_atom_port = NULL;
     lilv_worker_interface = NULL;
     lilv_license_interface = NULL;
+    lilv_state_interface = NULL;
 
     /* Create a client to Jack */
     snprintf(effect_name, 31, "effect_%i", instance);
@@ -3224,9 +3360,8 @@ int effects_add(const char *uid, int instance)
     effect->jack_client = jack_client;
 
     /* Get the plugin */
-    plugin_uri = lilv_new_uri(g_lv2_data, uid);
+    plugin_uri = lilv_new_uri(g_lv2_data, uri);
     plugin = lilv_plugins_get_by_uri(g_plugins, plugin_uri);
-    lilv_node_free(plugin_uri);
 
     if (!plugin)
     {
@@ -3238,9 +3373,7 @@ int effects_add(const char *uid, int instance)
         g_plugins = lilv_world_get_all_plugins(g_lv2_data);
 
         /* Try get the plugin again */
-        plugin_uri = lilv_new_uri(g_lv2_data, uid);
         plugin = lilv_plugins_get_by_uri(g_plugins, plugin_uri);
-        lilv_node_free(plugin_uri);
 
         if (!plugin)
 #endif
@@ -3255,6 +3388,12 @@ int effects_add(const char *uid, int instance)
 
     /* Features */
     GetFeatures(effect);
+
+    pthread_mutexattr_t mutex_atts;
+    pthread_mutexattr_init(&mutex_atts);
+#ifdef __MOD_DEVICES__
+    pthread_mutexattr_setprotocol(&mutex_atts, PTHREAD_PRIO_INHERIT);
+#endif
 
     /* Create and activate the plugin instance */
     lilv_instance = lilv_plugin_instantiate(plugin, g_sample_rate, effect->features);
@@ -3284,6 +3423,38 @@ int effects_add(const char *uid, int instance)
         effect->license_iface =
             (const MOD_License_Interface*) lilv_instance_get_extension_data(effect->lilv_instance,
                                                                             MOD_LICENSE__interface);
+    }
+
+    lilv_state_interface = lilv_new_uri(g_lv2_data, LV2_STATE__interface);
+    if (lilv_plugin_has_extension_data(effect->lilv_plugin, lilv_state_interface))
+    {
+        effect->state_iface =
+            (const LV2_State_Interface*) lilv_instance_get_extension_data(effect->lilv_instance,
+                                                                          LV2_STATE__interface);
+        effect->hints |= HINT_HAS_STATE;
+
+        LilvNode *lilv_state_thread_safe_restore = lilv_new_uri(g_lv2_data, LV2_STATE__threadSafeRestore);
+        LilvNode *lilv_state_load_default_state = lilv_new_uri(g_lv2_data, LV2_STATE__loadDefaultState);
+
+        if (! lilv_plugin_has_feature(effect->lilv_plugin, lilv_state_thread_safe_restore))
+        {
+            effect->hints |= HINT_STATE_UNSAFE;
+            pthread_mutex_init(&effect->state_restore_mutex, &mutex_atts);
+        }
+
+        if (lilv_plugin_has_feature(effect->lilv_plugin, lilv_state_load_default_state))
+        {
+            LilvState *state = lilv_state_new_from_world(g_lv2_data, &g_urid_map, plugin_uri);
+
+            if (state != NULL) {
+                lilv_state_restore(state, effect->lilv_instance, NULL, NULL,
+                                   LV2_STATE_IS_POD|LV2_STATE_IS_PORTABLE, effect->features);
+                lilv_state_free(state);
+            }
+        }
+
+        lilv_node_free(lilv_state_load_default_state);
+        lilv_node_free(lilv_state_thread_safe_restore);
     }
 
     /* Create the URI for identify the ports */
@@ -3335,12 +3506,6 @@ int effects_add(const char *uid, int instance)
     effect->monitors = NULL;
     effect->ports_count = ports_count;
     effect->ports = (port_t **) calloc(ports_count, sizeof(port_t *));
-
-    pthread_mutexattr_t mutex_atts;
-    pthread_mutexattr_init(&mutex_atts);
-#ifdef __MOD_DEVICES__
-    pthread_mutexattr_setprotocol(&mutex_atts, PTHREAD_PRIO_INHERIT);
-#endif
 
     for (i = 0; i < ports_count; i++)
     {
@@ -3912,6 +4077,7 @@ int effects_add(const char *uid, int instance)
 
     pthread_mutexattr_destroy(&mutex_atts);
 
+    lilv_node_free(plugin_uri);
     lilv_node_free(lilv_audio);
     lilv_node_free(lilv_control);
     lilv_node_free(lilv_cv);
@@ -3941,6 +4107,7 @@ int effects_add(const char *uid, int instance)
     lilv_node_free(lilv_atom_port);
     lilv_node_free(lilv_worker_interface);
     lilv_node_free(lilv_license_interface);
+    lilv_node_free(lilv_state_interface);
 
     /* Jack callbacks */
     jack_set_thread_init_callback(jack_client, JackThreadInit, effect);
@@ -3969,6 +4136,7 @@ int effects_add(const char *uid, int instance)
     return instance;
 
     error:
+        lilv_node_free(plugin_uri);
         lilv_node_free(lilv_audio);
         lilv_node_free(lilv_control);
         lilv_node_free(lilv_cv);
@@ -3998,6 +4166,7 @@ int effects_add(const char *uid, int instance)
         lilv_node_free(lilv_atom_port);
         lilv_node_free(lilv_worker_interface);
         lilv_node_free(lilv_license_interface);
+        lilv_node_free(lilv_state_interface);
 
         effects_remove(instance);
 
@@ -4022,7 +4191,8 @@ int effects_preset_load(int effect_id, const char *uri)
 
             effect = &g_effects[effect_id];
 
-            lilv_state_restore(state, effect->lilv_instance, SetParameterFromState, effect, 0, NULL);
+            lilv_state_restore(state, effect->lilv_instance, SetParameterFromState, effect,
+                               LV2_STATE_IS_POD|LV2_STATE_IS_PORTABLE, effect->features);
             lilv_state_free(state);
             lilv_node_free(preset_uri);
 
@@ -4180,6 +4350,7 @@ int effects_remove(int effect_id)
                 {
                     if (effect->ports[i])
                     {
+                        // TODO destroy port mutexes
                         free(effect->ports[i]->buffer);
                         lilv_scale_points_free(effect->ports[i]->scale_points);
                         free(effect->ports[i]);
@@ -4222,6 +4393,9 @@ int effects_remove(int effect_id)
                 }
                 free(effect->presets);
             }
+
+            if (effect->hints & HINT_STATE_UNSAFE)
+                pthread_mutex_destroy(&effect->state_restore_mutex);
 
             InstanceDelete(j);
         }
@@ -5503,6 +5677,143 @@ void effects_bundle_remove(const char* bpath)
     // refresh plugins
     g_plugins = lilv_world_get_all_plugins(g_lv2_data);
 #endif
+}
+
+int effects_state_load(const char *dir)
+{
+    char *const oldir = g_current_project_folder;
+    char *const dir2 = str_duplicate(dir);
+    g_current_project_folder = dir2;
+    free(oldir);
+
+    if (dir2 == NULL)
+    {
+        free(oldir);
+        return ERR_MEMORY_ALLOCATION;
+    }
+
+    effect_t *effect;
+    LilvState *state;
+
+    char state_filename[PATH_MAX];
+    bzero(state_filename, sizeof(state_filename));
+
+    for (int i = 0; i < MAX_INSTANCES - 10; i++) // FIXME
+    {
+        if (g_effects[i].lilv_instance == NULL)
+            continue;
+        if (g_effects[i].lilv_plugin == NULL)
+            continue;
+        if ((g_effects[i].hints & HINT_HAS_STATE) == 0x0)
+            continue;
+
+        effect = &g_effects[i];
+        snprintf(state_filename, PATH_MAX-1, "%s/effect-%d.ttl", dir2, effect->instance);
+        state = lilv_state_new_from_file(g_lv2_data, &g_urid_map, NULL, state_filename);
+
+        if (state == NULL)
+            continue;
+
+        if (effect->hints & HINT_STATE_UNSAFE)
+            pthread_mutex_lock(&effect->state_restore_mutex);
+
+        lilv_state_restore(state, effect->lilv_instance, NULL, NULL,
+                           LV2_STATE_IS_POD|LV2_STATE_IS_PORTABLE, effect->features);
+
+        if (effect->hints & HINT_STATE_UNSAFE)
+            pthread_mutex_unlock(&effect->state_restore_mutex);
+
+        lilv_state_free(state);
+    }
+
+    return SUCCESS;
+}
+
+int effects_state_save(const char *dir)
+{
+    char *const oldir = g_current_project_folder;
+    char *const dir2 = str_duplicate(dir);
+    g_current_project_folder = dir2;
+
+    if (dir2 == NULL)
+    {
+        free(oldir);
+        return ERR_MEMORY_ALLOCATION;
+    }
+
+    if (access(dir2, F_OK) != 0 && mkdir(dir2, 0755) != 0)
+    {
+        fprintf(stderr, "failed to get access to project folder %s\n", dir2);
+        return ERR_INVALID_OPERATION;
+    }
+
+    effect_t *effect;
+    LilvState *state;
+    FILE *state_file;
+    char *state_str = NULL;
+    char *oldir_plugin, *dir2_plugin;
+
+    char state_filename[PATH_MAX];
+    bzero(state_filename, sizeof(state_filename));
+
+    for (int i = 0; i < MAX_INSTANCES; i++)
+    {
+        if (g_effects[i].lilv_instance == NULL)
+            continue;
+        if (g_effects[i].lilv_plugin == NULL)
+            continue;
+        if ((g_effects[i].hints & HINT_HAS_STATE) == 0x0)
+            continue;
+
+        effect = &g_effects[i];
+
+        dir2_plugin = GetPluginStateDir(effect->instance, dir2);
+
+        if (dir2_plugin != NULL)
+        {
+            oldir_plugin = GetPluginStateDir(effect->instance, oldir);
+
+            state = lilv_state_new_from_instance(effect->lilv_plugin,
+                                                effect->lilv_instance,
+                                                &g_urid_map,
+                                                oldir_plugin,
+                                                dir2_plugin,
+                                                dir2_plugin,
+                                                dir2_plugin,
+                                                NULL, NULL,
+                                                LV2_STATE_IS_POD|LV2_STATE_IS_PORTABLE,
+                                                effect->features);
+
+            if (state != NULL) {
+                state_str = lilv_state_to_string(g_lv2_data, &g_urid_map, &g_urid_unmap, state, "", NULL);
+                lilv_state_free(state);
+            }
+        }
+
+        snprintf(state_filename, PATH_MAX-1, "%s/effect-%d.ttl", dir2, effect->instance);
+
+        if (state_str != NULL && (state_file = fopen(state_filename, "w")) != NULL) {
+            fputs("@prefix lv2:   <http://lv2plug.in/ns/lv2core#> .\n", state_file);
+            fputs("@prefix pset:  <http://lv2plug.in/ns/ext/presets#> .\n", state_file);
+            fputs("@prefix state: <http://lv2plug.in/ns/ext/state#> .\n", state_file);
+            fputs("@prefix xsd:   <http://www.w3.org/2001/XMLSchema#> .\n", state_file);
+            fputs("\n", state_file);
+            fputs(state_str, state_file);
+            fclose(state_file);
+        } else {
+            // no state available, delete file if present
+            unlink(state_filename);
+        }
+
+        lilv_free(state_str);
+        state_str = NULL;
+
+        free(dir2_plugin);
+        free(oldir_plugin);
+    }
+
+    free(oldir);
+    return SUCCESS;
 }
 
 int effects_aggregated_midi_enable(int enable)

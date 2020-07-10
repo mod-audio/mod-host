@@ -70,9 +70,16 @@ enum {
     ERR_ABLETON_LINK_UNAVAILABLE = -402,
 
     ERR_MEMORY_ALLOCATION = -901,
-    ERR_INVALID_OPERATION = -902,
+    ERR_INVALID_OPERATION = -902
 };
 
+/* Log definitions */
+typedef enum {
+    LOG_TRACE = 0,
+    LOG_NOTE = 1,
+    LOG_WARNING = 2,
+    LOG_ERROR = 3
+} LogType;
 
 /*
 ************************************************************************************************************************
@@ -122,7 +129,7 @@ typedef struct {
 
 int effects_init(void* client);
 int effects_finish(int close_client);
-int effects_add(const char *uid, int instance);
+int effects_add(const char *uri, int instance);
 int effects_remove(int effect_id);
 int effects_preset_load(int effect_id, const char *uri);
 int effects_preset_save(int effect_id, const char *dir, const char *file_name, const char *label);
@@ -155,13 +162,15 @@ int effects_cv_map(int effect_id, const char *control_symbol, const char *source
 int effects_cv_unmap(int effect_id, const char *control_symbol);
 
 float effects_jack_cpu_load(void);
-void effects_bundle_add(const char* bundlepath);
-void effects_bundle_remove(const char* bundlepath);
+void effects_bundle_add(const char *bundlepath);
+void effects_bundle_remove(const char *bundlepath);
+int effects_state_load(const char *dir);
+int effects_state_save(const char *dir);
 int effects_aggregated_midi_enable(int enable);
 int effects_processing_enable(int enable);
 int effects_monitor_midi_program(int channel, int enable);
 void effects_transport(int rolling, double beats_per_bar, double beats_per_minute);
-int effects_transport_sync_mode(const char* mode);
+int effects_transport_sync_mode(const char *mode);
 void effects_output_data_ready(void);
 
 /*
