@@ -80,15 +80,19 @@
 #endif
 
 #ifndef LV2_BUF_SIZE__nominalBlockLength
-#define LV2_BUF_SIZE__nominalBlockLength  LV2_BUF_SIZE_PREFIX "nominalBlockLength"
-#endif
-
-#ifndef LILV_URI_CV_PORT
-#define LILV_URI_CV_PORT "http://lv2plug.in/ns/lv2core#CVPort"
+#define LV2_BUF_SIZE__nominalBlockLength LV2_BUF_SIZE_PREFIX "nominalBlockLength"
 #endif
 
 #ifndef LV2_CORE__enabled
 #define LV2_CORE__enabled LV2_CORE_PREFIX "enabled"
+#endif
+
+#ifndef LV2_STATE__threadSafeRestore
+#define LV2_STATE__threadSafeRestore LV2_STATE_PREFIX "threadSafeRestore"
+#endif
+
+#ifndef LILV_URI_CV_PORT
+#define LILV_URI_CV_PORT "http://lv2plug.in/ns/lv2core#CVPort"
 #endif
 
 #ifndef HAVE_LV2_STATE_FREE_PATH
@@ -2721,6 +2725,7 @@ static char* StateMapAbstractPath(LV2_State_Map_Path_Handle handle, const char *
     return NULL;
 
     UNUSED_PARAM(handle);
+    UNUSED_PARAM(absolute_path);
 }
 
 static char* StateMapAbsolutePath(LV2_State_Map_Path_Handle handle, const char *abstract_path)
@@ -2729,6 +2734,7 @@ static char* StateMapAbsolutePath(LV2_State_Map_Path_Handle handle, const char *
     return NULL;
 
     UNUSED_PARAM(handle);
+    UNUSED_PARAM(abstract_path);
 }
 
 #ifdef HAVE_CONTROLCHAIN
@@ -5788,6 +5794,10 @@ int effects_state_save(const char *dir)
                 state_str = lilv_state_to_string(g_lv2_data, &g_urid_map, &g_urid_unmap, state, "", NULL);
                 lilv_state_free(state);
             }
+        }
+        else
+        {
+            oldir_plugin = NULL;
         }
 
         snprintf(state_filename, PATH_MAX-1, "%s/effect-%d.ttl", dir2, effect->instance);
