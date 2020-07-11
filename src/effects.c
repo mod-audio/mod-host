@@ -22,7 +22,9 @@
 ************************************************************************************************************************
 */
 
-#define _DEFAULT_SOURCE
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -120,6 +122,7 @@ typedef struct {
 #include "uridmap.h"
 #include "lv2_evbuf.h"
 #include "worker.h"
+#include "state-paths.h"
 #include "symap.h"
 #include "sha1/sha1.h"
 #include "rtmempool/list.h"
@@ -213,7 +216,7 @@ enum {
     LOG_FEATURE,
     STATE_FREE_PATH_FEATURE,
     STATE_MAKE_PATH_FEATURE,
-    STATE_MAP_PATH_FEATURE,
+    // STATE_MAP_PATH_FEATURE,
     WORKER_FEATURE,
     FEATURE_TERMINATOR
 };
@@ -367,7 +370,7 @@ typedef struct EFFECT_T {
     float bypass;
     bool was_bypassed;
 
-    // cached plugin information, avoids itenerating controls each cycle
+    // cached plugin information, avoids iterating controls each cycle
     enum PluginHints hints;
 
     // virtual presets port
@@ -376,6 +379,9 @@ typedef struct EFFECT_T {
 
     // thread-safe state restore
     pthread_mutex_t state_restore_mutex;
+
+    // state save/restore custom directory
+    const char* state_dir;
 } effect_t;
 
 typedef struct URIDS_T {
@@ -533,8 +539,6 @@ static volatile bool g_postevents_ready;
 static sem_t         g_postevents_semaphore;
 static pthread_t     g_postevents_thread;
 
-static char *g_current_project_folder;
-
 /* Jack */
 static jack_client_t *g_jack_global_client;
 static jack_nframes_t g_sample_rate, g_block_length, g_max_allowed_midi_delta;
@@ -561,6 +565,7 @@ static volatile uint64_t g_previous_midi_event_time = 0;
 static LilvWorld *g_lv2_data;
 static const LilvPlugins *g_plugins;
 static LilvNode *g_sample_rate_node;
+static char *g_lv2_scratch_dir;
 
 /* Global features */
 static Symap* g_symap;
@@ -570,8 +575,6 @@ static LV2_Atom_Forge g_lv2_atom_forge;
 static LV2_Log_Log g_lv2_log;
 static LV2_Options_Option g_options[6];
 static LV2_State_Free_Path g_state_freePath;
-static LV2_State_Make_Path g_state_makePath;
-static LV2_State_Map_Path g_state_mapPath;
 static LV2_URI_Map_Feature g_uri_map;
 static LV2_URID_Map g_urid_map;
 static LV2_URID_Unmap g_urid_unmap;
@@ -585,7 +588,6 @@ static LV2_Feature g_license_feature = { MOD_LICENSE__feature, &g_license };
 static LV2_Feature g_lv2_log_feature = { LV2_LOG__log, &g_lv2_log };
 static LV2_Feature g_options_feature = { LV2_OPTIONS__options, &g_options };
 static LV2_Feature g_state_freePath_feature = { LV2_STATE__freePath, &g_state_freePath };
-static LV2_Feature g_state_mapPath_feature = { LV2_STATE__mapPath, &g_state_mapPath };
 static LV2_Feature g_uri_map_feature = { LV2_URI_MAP_URI, &g_uri_map };
 static LV2_Feature g_urid_map_feature = { LV2_URID__map, &g_urid_map };
 static LV2_Feature g_urid_unmap_feature = { LV2_URID__unmap, &g_urid_unmap };
@@ -643,10 +645,14 @@ static void ConnectToAllHardwareMIDIPorts(void);
 static char *GetLicenseFile(MOD_License_Handle handle, const char *license_uri);
 static int LogPrintf(LV2_Log_Handle handle, LV2_URID type, const char *fmt, ...);
 static int LogVPrintf(LV2_Log_Handle handle, LV2_URID type, const char *fmt, va_list ap);
-static char* GetPluginStateDir(int instance, const char *path);
-static char* StateMakePath(LV2_State_Make_Path_Handle handle, const char *path);
-static char* StateMapAbstractPath(LV2_State_Map_Path_Handle handle, const char *absolute_path);
-static char* StateMapAbsolutePath(LV2_State_Map_Path_Handle handle, const char *abstract_path);
+static char* MakePluginStatePathFromSratchDir(LV2_State_Make_Path_Handle handle, const char *path);
+static char* MakePluginStatePathDuringLoadSave(LV2_State_Make_Path_Handle handle, const char *path);
+/*
+static char* MapAbstractPluginStatePathFromSratchDir(LV2_State_Map_Path_Handle handle, const char *absolute_path);
+static char* MapAbstractPluginStatePathDuringLoadSave(LV2_State_Map_Path_Handle handle, const char *absolute_path);
+static char* MapAbsolutePluginStatePathFromSratchDir(LV2_State_Map_Path_Handle handle, const char *abstract_path);
+static char* MapAbsolutePluginStatePathDuringLoadSave(LV2_State_Map_Path_Handle handle, const char *abstract_path);
+*/
 #ifdef HAVE_CONTROLCHAIN
 static void CCDataUpdate(void* arg);
 static void InitializeControlChainIfNeeded(void);
@@ -976,6 +982,38 @@ static void RunPostPonedEvents(int ignored_effect_id)
             }
             break;
 
+        // these are handled later, during "cleanup"
+        case POSTPONED_LOG_TRACE:
+        case POSTPONED_LOG_MESSAGE:
+            break;
+        }
+    }
+#ifdef DEBUG
+    printf("DEBUG: After the queue iteration\n");
+    fflush(stdout);
+#endif
+
+    // cleanup memory
+    list_for_each_safe(it, it2, &cached_param_set.symbols.siblings)
+    {
+        psymbol = list_entry(it, postponed_cached_symbol_list_data, siblings);
+        free(psymbol);
+    }
+    list_for_each_safe(it, it2, &cached_output_mon.symbols.siblings)
+    {
+        psymbol = list_entry(it, postponed_cached_symbol_list_data, siblings);
+        free(psymbol);
+    }
+
+    // cleanup memory of rt queue, safely
+    // also take the chance to handle non-critical events that need to be in order
+    list_for_each_safe(it, it2, &queue)
+    {
+        eventptr = list_entry(it, postponed_event_list_data, siblings);
+        rtsafe_memory_pool_deallocate(g_rtsafe_mem_pool, eventptr);
+
+        switch (eventptr->event.type)
+        {
         case POSTPONED_LOG_TRACE:
             snprintf(buf, MAX_CHAR_BUF_SIZE, "log %d %s", LOG_TRACE, eventptr->event.log_trace.msg);
             socket_send_feedback(buf);
@@ -999,30 +1037,10 @@ static void RunPostPonedEvents(int ignored_effect_id)
             free(msg);
             break;
         }
+
+        default:
+            break;
         }
-    }
-#ifdef DEBUG
-    printf("DEBUG: After the queue iteration\n");
-    fflush(stdout);
-#endif
-
-    // cleanup memory
-    list_for_each_safe(it, it2, &cached_param_set.symbols.siblings)
-    {
-        psymbol = list_entry(it, postponed_cached_symbol_list_data, siblings);
-        free(psymbol);
-    }
-    list_for_each_safe(it, it2, &cached_output_mon.symbols.siblings)
-    {
-        psymbol = list_entry(it, postponed_cached_symbol_list_data, siblings);
-        free(psymbol);
-    }
-
-    // cleanup memory of rt queue, safely
-    list_for_each_safe(it, it2, &queue)
-    {
-        eventptr = list_entry(it, postponed_event_list_data, siblings);
-        rtsafe_memory_pool_deallocate(g_rtsafe_mem_pool, eventptr);
     }
 
     if (g_postevents_ready && !got_only_jack_midi_requests)
@@ -2221,11 +2239,22 @@ static void GetFeatures(effect_t *effect)
     /* State path features, includes custom pointer */
     LV2_State_Make_Path *makePath = (LV2_State_Make_Path*) malloc(sizeof(LV2_State_Make_Path));
     makePath->handle = effect;
-    makePath->path = StateMakePath;
+    makePath->path = MakePluginStatePathFromSratchDir;
 
     LV2_Feature *state_make_path_feature = (LV2_Feature*) malloc(sizeof(LV2_Feature));
     state_make_path_feature->URI = LV2_STATE__makePath;
     state_make_path_feature->data = makePath;
+
+    /*
+    LV2_State_Map_Path *mapPath = (LV2_State_Map_Path*) malloc(sizeof(LV2_State_Map_Path));
+    mapPath->handle = effect;
+    mapPath->abstract_path = MapAbstractPluginStatePathFromSratchDir;
+    mapPath->absolute_path = MapAbsolutePluginStatePathFromSratchDir;
+
+    LV2_Feature *state_map_path_feature = (LV2_Feature*) malloc(sizeof(LV2_Feature));
+    state_map_path_feature->URI = LV2_STATE__mapPath;
+    state_map_path_feature->data = mapPath;
+    */
 
     /* Worker Feature, must be last as it can be null */
     LV2_Feature *work_schedule_feature = NULL;
@@ -2257,7 +2286,7 @@ static void GetFeatures(effect_t *effect)
     features[LOG_FEATURE]               = &g_lv2_log_feature;
     features[STATE_FREE_PATH_FEATURE]   = &g_state_freePath_feature;
     features[STATE_MAKE_PATH_FEATURE]   = state_make_path_feature;
-    features[STATE_MAP_PATH_FEATURE]    = &g_state_mapPath_feature;
+    // features[STATE_MAP_PATH_FEATURE]    = state_map_path_feature;
     features[WORKER_FEATURE]            = work_schedule_feature;
     features[FEATURE_TERMINATOR]        = NULL;
 
@@ -2408,6 +2437,13 @@ static void FreeFeatures(effect_t *effect)
             free(effect->features[STATE_MAKE_PATH_FEATURE]->data);
             free((void*)effect->features[STATE_MAKE_PATH_FEATURE]);
         }
+        /*
+        if (effect->features[STATE_MAP_PATH_FEATURE])
+        {
+            free(effect->features[STATE_MAP_PATH_FEATURE]->data);
+            free((void*)effect->features[STATE_MAP_PATH_FEATURE]);
+        }
+        */
         if (effect->features[WORKER_FEATURE])
         {
             free(effect->features[WORKER_FEATURE]->data);
@@ -2629,113 +2665,43 @@ static int LogVPrintf(LV2_Log_Handle handle, LV2_URID type, const char* fmt, va_
     UNUSED_PARAM(handle);
 }
 
-static char* GetPluginStateDir(int instance, const char *path)
+static char* MakePluginStatePathFromSratchDir(LV2_State_Make_Path_Handle handle, const char *path)
 {
-    if (path == NULL)
-        return NULL;
-
-    char effidstr[24] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
-    snprintf(effidstr, 23, "effect-%d", instance);
-
-    const size_t current_path_size = strlen(path);
-    const size_t effidstr_size     = strlen(effidstr);
-
-    char *newpath, *buf;
-    newpath = buf = malloc(current_path_size + effidstr_size + 2);
-
-    if (newpath == NULL)
-        return NULL;
-
-    memcpy(buf, path, current_path_size);
-    buf += current_path_size;
-    *buf++ = '/';
-    memcpy(buf, effidstr, effidstr_size);
-    buf += effidstr_size;
-    *buf = '\0';
-
-    return newpath;
-}
-
-static char* StateMakePath(LV2_State_Make_Path_Handle handle, const char *path)
-{
-    if (g_current_project_folder == NULL || path == NULL)
-        return NULL;
-
     effect_t *effect = (effect_t*)handle;
-    char effidstr[24] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
-    snprintf(effidstr, 23, "effect-%d", effect->instance);
-
-    const size_t current_path_size = strlen(g_current_project_folder);
-    const size_t effidstr_size     = strlen(effidstr);
-    const size_t request_path_size = strlen(path);
-
-    char *newpath, *buf;
-    newpath = buf = malloc(current_path_size + effidstr_size + request_path_size + 3);
-
-    if (newpath == NULL)
-        return NULL;
-
-    memcpy(buf, g_current_project_folder, current_path_size);
-    buf += current_path_size;
-    *buf++ = '/';
-    memcpy(buf, effidstr, effidstr_size);
-    buf += effidstr_size;
-    *buf++ = '/';
-    memcpy(buf, path, request_path_size);
-    buf += request_path_size;
-    *buf = '\0';
-
-    if (access(newpath, F_OK) != 0)
-    {
-        if (mkdir(newpath, 0755) != 0)
-        {
-            char*        duppath     = str_duplicate(newpath);
-            const size_t duppath_len = strlen(newpath);
-
-            for (size_t i = 1; i <= duppath_len; ++i)
-            {
-                if (duppath[i] == '/' || duppath[i] == '\0')
-                {
-                    duppath[i] = '\0';
-                    if (mkdir(duppath, 0755) && errno != EEXIST)
-                    {
-                        free(duppath);
-                        free(newpath);
-                        return NULL;
-                    }
-                    duppath[i] = '/';
-                }
-            }
-
-            free(duppath);
-        }
-    }
-
-    char *rpath = realpath(newpath, NULL);
-    free(newpath);
-
-    return rpath;
-
-    UNUSED_PARAM(handle);
+    return MakePluginStatePath(effect->instance, g_lv2_scratch_dir, path);
 }
 
-static char* StateMapAbstractPath(LV2_State_Map_Path_Handle handle, const char *absolute_path)
+static char* MakePluginStatePathDuringLoadSave(LV2_State_Make_Path_Handle handle, const char *path)
 {
-    // TODO
-    return NULL;
-
-    UNUSED_PARAM(handle);
-    UNUSED_PARAM(absolute_path);
+    effect_t *effect = (effect_t*)handle;
+    return MakePluginStatePath(effect->instance, effect->state_dir, path);
 }
 
-static char* StateMapAbsolutePath(LV2_State_Map_Path_Handle handle, const char *abstract_path)
+/*
+static char* MapAbstractPluginStatePathFromSratchDir(LV2_State_Map_Path_Handle handle, const char *absolute_path)
 {
-    // TODO
-    return NULL;
-
-    UNUSED_PARAM(handle);
-    UNUSED_PARAM(abstract_path);
+    effect_t *effect = (effect_t*)handle;
+    return MapAbstractPluginStatePath(effect->instance, g_lv2_scratch_dir, absolute_path);
 }
+
+static char* MapAbstractPluginStatePathDuringLoadSave(LV2_State_Map_Path_Handle handle, const char *absolute_path)
+{
+    effect_t *effect = (effect_t*)handle;
+    return MapAbstractPluginStatePath(effect->instance, effect->state_dir, absolute_path);
+}
+
+static char* MapAbsolutePluginStatePathFromSratchDir(LV2_State_Map_Path_Handle handle, const char *abstract_path)
+{
+    effect_t *effect = (effect_t*)handle;
+    return MapAbstractPluginStatePath(effect->instance, g_lv2_scratch_dir, abstract_path);
+}
+
+static char* MapAbsolutePluginStatePathDuringLoadSave(LV2_State_Map_Path_Handle handle, const char *abstract_path)
+{
+    effect_t *effect = (effect_t*)handle;
+    return MapAbstractPluginStatePath(effect->instance, effect->state_dir, abstract_path);
+}
+*/
 
 #ifdef HAVE_CONTROLCHAIN
 static void CCDataUpdate(void* arg)
@@ -3144,14 +3110,7 @@ int effects_init(void* client)
     g_state_freePath.handle = NULL;
     g_state_freePath.free_path = FreePluginString;
 
-    g_state_makePath.handle = NULL;
-    g_state_makePath.path = StateMakePath;
-
-    g_state_mapPath.handle = NULL;
-    g_state_mapPath.abstract_path = StateMapAbstractPath;
-    g_state_mapPath.absolute_path = StateMapAbsolutePath;
-
-    g_current_project_folder = str_duplicate("/tmp");
+    g_lv2_scratch_dir = str_duplicate("/tmp/mod-host-scratch-dir");
 
     lv2_atom_forge_init(&g_lv2_atom_forge, &g_urid_map);
 
@@ -3262,8 +3221,8 @@ int effects_finish(int close_client)
     g_hylia_instance = NULL;
 #endif
 
-    free(g_current_project_folder);
-    g_current_project_folder = NULL;
+    free(g_lv2_scratch_dir);
+    g_lv2_scratch_dir = NULL;
 
     g_processing_enabled = false;
 
@@ -4290,6 +4249,7 @@ int effects_remove(int effect_id)
     uint32_t i;
     int j, start, end;
     effect_t *effect;
+    char state_filename[g_lv2_scratch_dir != NULL ? PATH_MAX : 1];
 
     // stop postpone events thread
     if (g_postevents_running == 1)
@@ -4399,8 +4359,20 @@ int effects_remove(int effect_id)
                 free(effect->presets);
             }
 
-            if (effect->hints & HINT_STATE_UNSAFE)
-                pthread_mutex_destroy(&effect->state_restore_mutex);
+            if (effect->hints & HINT_HAS_STATE)
+            {
+                if (g_lv2_scratch_dir != NULL)
+                {
+                    // recursively delete state folder
+                    bzero(state_filename, sizeof(state_filename));
+                    snprintf(state_filename, PATH_MAX-1, "%s/effect-%d",
+                             g_lv2_scratch_dir, effect->instance);
+                    RecursivelyRemovePluginPath(state_filename);
+                }
+
+                if (effect->hints & HINT_STATE_UNSAFE)
+                    pthread_mutex_destroy(&effect->state_restore_mutex);
+            }
 
             InstanceDelete(j);
         }
@@ -5686,22 +5658,40 @@ void effects_bundle_remove(const char* bpath)
 
 int effects_state_load(const char *dir)
 {
-    char *const oldir = g_current_project_folder;
-    char *const dir2 = str_duplicate(dir);
-    g_current_project_folder = dir2;
-    free(oldir);
-
-    if (dir2 == NULL)
-    {
-        free(oldir);
-        return ERR_MEMORY_ALLOCATION;
-    }
-
     effect_t *effect;
     LilvState *state;
 
     char state_filename[PATH_MAX];
     bzero(state_filename, sizeof(state_filename));
+
+    LV2_State_Make_Path makePath = {
+        NULL, MakePluginStatePathDuringLoadSave
+    };
+    const LV2_Feature feature_makePath = { LV2_STATE__makePath, &makePath };
+
+    /*
+    LV2_State_Map_Path mapPath = {
+        NULL, MapAbstractPluginStatePathDuringLoadSave, MapAbsolutePluginStatePathDuringLoadSave
+    };
+    */
+
+    // const LV2_Feature feature_mapPath = { LV2_STATE__mapPath, &mapPath };
+    const LV2_Feature* features[] = {
+        &g_uri_map_feature,
+        &g_urid_map_feature,
+        &g_urid_unmap_feature,
+        &g_options_feature,
+        &g_license_feature,
+        &g_buf_size_features[0],
+        &g_buf_size_features[1],
+        &g_buf_size_features[2],
+        &g_lv2_log_feature,
+        &g_state_freePath_feature,
+        &feature_makePath,
+        // &feature_mapPath,
+        NULL, // worker
+        NULL
+    };
 
     for (int i = 0; i < MAX_PLUGIN_INSTANCES; ++i)
     {
@@ -5713,17 +5703,28 @@ int effects_state_load(const char *dir)
             continue;
 
         effect = &g_effects[i];
-        snprintf(state_filename, PATH_MAX-1, "%s/effect-%d.ttl", dir2, effect->instance);
+        snprintf(state_filename, PATH_MAX-1, "%s/effect-%d.ttl", dir, effect->instance);
         state = lilv_state_new_from_file(g_lv2_data, &g_urid_map, NULL, state_filename);
 
         if (state == NULL)
             continue;
 
+        makePath.handle = effect;
+        // mapPath.handle = effect;
+        features[WORKER_FEATURE] = effect->features[WORKER_FEATURE];
+
         if (effect->hints & HINT_STATE_UNSAFE)
             pthread_mutex_lock(&effect->state_restore_mutex);
 
-        lilv_state_restore(state, effect->lilv_instance, NULL, NULL,
-                           LV2_STATE_IS_POD|LV2_STATE_IS_PORTABLE, effect->features);
+        effect->state_dir = dir;
+
+        lilv_state_restore(state,
+                           effect->lilv_instance,
+                           NULL, NULL,
+                           LV2_STATE_IS_POD|LV2_STATE_IS_PORTABLE,
+                           features);
+
+        effect->state_dir = NULL;
 
         if (effect->hints & HINT_STATE_UNSAFE)
             pthread_mutex_unlock(&effect->state_restore_mutex);
@@ -5736,19 +5737,9 @@ int effects_state_load(const char *dir)
 
 int effects_state_save(const char *dir)
 {
-    char *const oldir = g_current_project_folder;
-    char *const dir2 = str_duplicate(dir);
-    g_current_project_folder = dir2;
-
-    if (dir2 == NULL)
+    if (access(dir, F_OK) != 0 && mkdir(dir, 0755) != 0)
     {
-        free(oldir);
-        return ERR_MEMORY_ALLOCATION;
-    }
-
-    if (access(dir2, F_OK) != 0 && mkdir(dir2, 0755) != 0)
-    {
-        fprintf(stderr, "failed to get access to project folder %s\n", dir2);
+        fprintf(stderr, "failed to get access to project folder %s\n", dir);
         return ERR_INVALID_OPERATION;
     }
 
@@ -5756,10 +5747,39 @@ int effects_state_save(const char *dir)
     LilvState *state;
     FILE *state_file;
     char *state_str = NULL;
-    char *oldir_plugin, *dir2_plugin;
+    char *scratch_dir, *plugin_dir;
 
     char state_filename[PATH_MAX];
     bzero(state_filename, sizeof(state_filename));
+
+    LV2_State_Make_Path makePath = {
+        NULL, MakePluginStatePathDuringLoadSave
+    };
+    const LV2_Feature feature_makePath = { LV2_STATE__makePath, &makePath };
+
+    /*
+    LV2_State_Map_Path mapPath = {
+        NULL, MapAbstractPluginStatePathDuringLoadSave, MapAbsolutePluginStatePathDuringLoadSave
+    };
+    */
+
+    // const LV2_Feature feature_mapPath = { LV2_STATE__mapPath, &mapPath };
+    const LV2_Feature* features[] = {
+        &g_uri_map_feature,
+        &g_urid_map_feature,
+        &g_urid_unmap_feature,
+        &g_options_feature,
+        &g_license_feature,
+        &g_buf_size_features[0],
+        &g_buf_size_features[1],
+        &g_buf_size_features[2],
+        &g_lv2_log_feature,
+        &g_state_freePath_feature,
+        &feature_makePath,
+        // &feature_mapPath,
+        NULL, // worker
+        NULL
+    };
 
     for (int i = 0; i < MAX_PLUGIN_INSTANCES; ++i)
     {
@@ -5772,22 +5792,30 @@ int effects_state_save(const char *dir)
 
         effect = &g_effects[i];
 
-        dir2_plugin = GetPluginStateDir(effect->instance, dir2);
+        plugin_dir = GetPluginStateDir(effect->instance, dir);
 
-        if (dir2_plugin != NULL)
+        if (plugin_dir != NULL)
         {
-            oldir_plugin = GetPluginStateDir(effect->instance, oldir);
+            scratch_dir = GetPluginStateDir(effect->instance, g_lv2_scratch_dir);
+
+            makePath.handle = effect;
+            // mapPath.handle = effect;
+            features[WORKER_FEATURE] = effect->features[WORKER_FEATURE];
+
+            effect->state_dir = dir;
 
             state = lilv_state_new_from_instance(effect->lilv_plugin,
-                                                effect->lilv_instance,
-                                                &g_urid_map,
-                                                oldir_plugin,
-                                                dir2_plugin,
-                                                dir2_plugin,
-                                                dir2_plugin,
-                                                NULL, NULL,
-                                                LV2_STATE_IS_POD|LV2_STATE_IS_PORTABLE,
-                                                effect->features);
+                                                 effect->lilv_instance,
+                                                 &g_urid_map,
+                                                 scratch_dir,
+                                                 plugin_dir,
+                                                 plugin_dir,
+                                                 plugin_dir,
+                                                 NULL, NULL, // control port values
+                                                 LV2_STATE_IS_POD|LV2_STATE_IS_PORTABLE,
+                                                 features);
+
+            effect->state_dir = NULL;
 
             if (state != NULL) {
                 state_str = lilv_state_to_string(g_lv2_data, &g_urid_map, &g_urid_unmap, state, "", NULL);
@@ -5796,10 +5824,10 @@ int effects_state_save(const char *dir)
         }
         else
         {
-            oldir_plugin = NULL;
+            scratch_dir = NULL;
         }
 
-        snprintf(state_filename, PATH_MAX-1, "%s/effect-%d.ttl", dir2, effect->instance);
+        snprintf(state_filename, PATH_MAX-1, "%s/effect-%d.ttl", dir, effect->instance);
 
         if (state_str != NULL && (state_file = fopen(state_filename, "w")) != NULL) {
             fputs("@prefix lv2:   <http://lv2plug.in/ns/lv2core#> .\n", state_file);
@@ -5817,11 +5845,18 @@ int effects_state_save(const char *dir)
         lilv_free(state_str);
         state_str = NULL;
 
-        free(dir2_plugin);
-        free(oldir_plugin);
+        free(plugin_dir);
+        free(scratch_dir);
     }
 
-    free(oldir);
+    // TODO search and remove old unused state ttls
+    /*
+    for file in dir/effect*.ttl; do
+        if (g_effect[instance].lilv_instance == NULL)
+            unlink(state_filename);
+    done
+    */
+
     return SUCCESS;
 }
 
