@@ -1010,7 +1010,6 @@ static void RunPostPonedEvents(int ignored_effect_id)
     list_for_each_safe(it, it2, &queue)
     {
         eventptr = list_entry(it, postponed_event_list_data, siblings);
-        rtsafe_memory_pool_deallocate(g_rtsafe_mem_pool, eventptr);
 
         switch (eventptr->event.type)
         {
@@ -1041,6 +1040,8 @@ static void RunPostPonedEvents(int ignored_effect_id)
         default:
             break;
         }
+
+        rtsafe_memory_pool_deallocate(g_rtsafe_mem_pool, eventptr);
     }
 
     if (g_postevents_ready && !got_only_jack_midi_requests)
