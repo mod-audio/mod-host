@@ -5229,7 +5229,7 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
 
 int effects_cc_value_set(int effect_id, const char *control_symbol, float value)
 {
-#ifdef HAVE_CONTROLCHAIN
+#if 0 // def HAVE_CONTROLCHAIN
     if (!InstanceExist(effect_id))
         return ERR_INSTANCE_NON_EXISTS;
     if (!g_cc_client)
