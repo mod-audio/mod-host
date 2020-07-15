@@ -212,39 +212,7 @@ char* MakePluginStatePath(int instance, const char *dir, const char *path)
         free(duppath);
     }
 
-    /*
-    char *rpath = realpath(newpath, NULL);
-
-    if (rpath != NULL)
-    {
-        free(newpath);
-        return rpath;
-    }
-    */
-
     return newpath;
-}
-
-char* MapAbstractPluginStatePath(int instance, const char *dir, const char *absolute_path)
-{
-    if (dir == NULL || absolute_path == NULL)
-        return NULL;
-
-    // TODO
-    return NULL;
-
-    UNUSED_PARAM(instance);
-}
-
-char* MapAbsolutePluginStatePath(int instance, const char *dir, const char *abstract_path)
-{
-    if (dir == NULL || abstract_path == NULL)
-        return NULL;
-
-    // TODO
-    return NULL;
-
-    UNUSED_PARAM(instance);
 }
 
 int RecursivelyRemovePluginPath(const char *path)

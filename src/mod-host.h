@@ -83,6 +83,7 @@
 #define BUNDLE_REMOVE        "bundle_remove %s"
 #define STATE_LOAD           "state_load %s"
 #define STATE_SAVE           "state_save %s"
+#define STATE_TMPDIR         "state_tmpdir %s"
 #define FEATURE_ENABLE       "feature_enable %s %i"
 #define TRANSPORT            "transport %i %f %f"
 #define TRANSPORT_SYNC       "transport_sync %s"

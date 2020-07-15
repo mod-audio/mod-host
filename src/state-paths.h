@@ -38,11 +38,7 @@
 */
 
 char* GetPluginStateDir(int instance, const char *dir);
-
 char* MakePluginStatePath(int instance, const char *dir, const char *path);
-char* MapAbstractPluginStatePath(int instance, const char *dir, const char *absolute_path);
-char* MapAbsolutePluginStatePath(int instance, const char *dir, const char *abstract_path);
-
 int RecursivelyRemovePluginPath(const char *path);
 
 /*
