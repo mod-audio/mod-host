@@ -62,6 +62,7 @@
 #define EFFECT_PARAM_SET     "param_set %i %s %s"
 #define EFFECT_PARAM_GET     "param_get %i %s"
 #define EFFECT_PARAM_MON     "param_monitor %i %s %s %f"
+#define EFFECT_PATCH_SET     "patch_set %i %s %i %s"
 #define EFFECT_LICENSEE      "licensee %i"
 #define EFFECT_SET_BPM       "set_bpm %f"
 #define EFFECT_SET_BPB       "set_bpb %f"

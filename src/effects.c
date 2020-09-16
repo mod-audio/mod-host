@@ -4584,37 +4584,223 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
     return ERR_INSTANCE_NON_EXISTS;
 }
 
-int effects_set_property(int effect_id, const char *uri, const char *value)
+static inline
+bool lv2_atom_forge_property_set(LV2_Atom_Forge *forge, LV2_URID urid, const char *value, size_t size, LV2_URID type)
 {
+    LV2_Atom_Forge_Frame frame;
+    lv2_atom_forge_object(forge, &frame, 0, g_urids.patch_Set);
+
+    lv2_atom_forge_key(forge, g_urids.patch_property);
+    lv2_atom_forge_urid(forge, urid);
+
+    lv2_atom_forge_key(forge, g_urids.patch_value);
+
+    // handle simple types first
+    /**/ if (type == forge->Bool)
+        lv2_atom_forge_bool(forge, atoi(value) != 0);
+    else if (type == forge->Int)
+        lv2_atom_forge_int(forge, atoi(value));
+    else if (type == forge->Long)
+        lv2_atom_forge_long(forge, atol(value));
+    else if (type == forge->Float)
+        lv2_atom_forge_float(forge, atof(value));
+    else if (type == forge->Double)
+        lv2_atom_forge_double(forge, atof(value));
+    else if (type == forge->String)
+        lv2_atom_forge_string(forge, value, size);
+    else if (type == forge->URI)
+        lv2_atom_forge_uri(forge, value, size);
+    else if (type == forge->Path)
+        lv2_atom_forge_path(forge, value, size);
+
+    // vector (array of a specific type)
+    // 1st value is type, then the values, separated by zero with a final zero
+    else if (type == forge->Vector)
+    {
+        const LV2_URID child_type = g_urid_map.map(g_urid_map.handle, value);
+
+        // 1st pass, get size
+        uint32_t elem_size;
+        /**/ if (child_type == forge->Bool)
+            elem_size = sizeof(int32_t);
+        else if (child_type == forge->Int)
+            elem_size = sizeof(int32_t);
+        else if (child_type == forge->Long)
+            elem_size = sizeof(int64_t);
+        else if (child_type == forge->Float)
+            elem_size = sizeof(float);
+        else if (child_type == forge->Double)
+            elem_size = sizeof(double);
+        else
+            return false;
+
+        uint32_t n_elems = 0;
+
+        for (const char *s = value + strlen(value) + 1; *s != '\0'; s += strlen(s) + 1)
+            ++n_elems;
+
+        if (n_elems != 0)
+        {
+          uint32_t i = 0;
+          void* elems = malloc(elem_size * n_elems);
+
+            // 2nd pass, fill up data
+            /**/ if (child_type == forge->Bool)
+            {
+                for (const char *s = value + strlen(value) + 1; *s != '\0'; s += strlen(s) + 1)
+                    ((int32_t*)elems)[i++] = atoi(s) != 0;
+            }
+            else if (child_type == forge->Int)
+            {
+                for (const char *s = value + strlen(value) + 1; *s != '\0'; s += strlen(s) + 1)
+                    ((int32_t*)elems)[i++] = atoi(s);
+            }
+            else if (child_type == forge->Long)
+            {
+                for (const char *s = value + strlen(value) + 1; *s != '\0'; s += strlen(s) + 1)
+                    ((int64_t*)elems)[i++] = atol(s);
+            }
+            else if (child_type == forge->Float)
+            {
+                for (const char *s = value + strlen(value) + 1; *s != '\0'; s += strlen(s) + 1)
+                    ((float*)elems)[i++] = atof(s);
+            }
+            else if (child_type == forge->Double)
+            {
+                for (const char *s = value + strlen(value) + 1; *s != '\0'; s += strlen(s) + 1)
+                    ((double*)elems)[i++] = atof(s);
+            }
+
+            lv2_atom_forge_vector(forge, elem_size, child_type, n_elems, elems);
+            free(elems);
+        }
+    }
+
+    // tuple (dictonary-like object)
+    // pair of type and then, all separated by zero with a final zero
+    else if (type == forge->Tuple)
+    {
+        uint32_t n_elems = 0;
+
+        for (const char *s = value + strlen(value) + 1; *s != '\0'; s += strlen(s) + 1)
+        {
+            ++n_elems;
+
+            if (n_elems % 2)
+            {
+                // verify that child type is valid
+                const LV2_URID child_type = g_urid_map.map(g_urid_map.handle, value);
+
+                if (child_type == forge->Bool)
+                    continue;
+                if (child_type == forge->Int)
+                    continue;
+                if (child_type == forge->Long)
+                    continue;
+                if (child_type == forge->Float)
+                    continue;
+                if (child_type == forge->Double)
+                    continue;
+                if (child_type == forge->String)
+                    continue;
+                if (child_type == forge->URI)
+                    continue;
+                if (child_type == forge->Path)
+                    continue;
+
+                return false;
+            }
+        }
+
+        if (n_elems % 2)
+            return false;
+
+        LV2_Atom_Forge_Frame tuple_frame;
+        lv2_atom_forge_tuple(forge, &tuple_frame);
+
+        for (const char *s = value + strlen(value) + 1; *s != '\0'; s += strlen(s) + 1)
+        {
+            const LV2_URID child_type = g_urid_map.map(g_urid_map.handle, value);
+            value += strlen(value) + 1;
+
+            /**/ if (child_type == forge->Bool)
+                lv2_atom_forge_bool(forge, atoi(value) != 0);
+            else if (child_type == forge->Int)
+                lv2_atom_forge_int(forge, atoi(value));
+            else if (child_type == forge->Long)
+                lv2_atom_forge_long(forge, atol(value));
+            else if (child_type == forge->Float)
+                lv2_atom_forge_float(forge, atof(value));
+            else if (child_type == forge->Double)
+                lv2_atom_forge_double(forge, atof(value));
+            else if (child_type == forge->String)
+                lv2_atom_forge_string(forge, value, strlen(value));
+            else if (child_type == forge->URI)
+                lv2_atom_forge_uri(forge, value, strlen(value));
+            else if (child_type == forge->Path)
+                lv2_atom_forge_path(forge, value, strlen(value));
+        }
+
+        lv2_atom_forge_pop(forge, &tuple_frame);
+    }
+
+    // unsupported type
+    else
+    {
+        return false;
+    }
+
+    lv2_atom_forge_pop(forge, &frame);
+
+    return true;
+}
+
+int effects_set_property(int effect_id, const char *uri, const char *value, size_t size, const char *types)
+{
+    if (size > 32*1024) { // 32K
+        return ERR_MEMORY_ALLOCATION;
+    }
+
     if (InstanceExist(effect_id))
     {
         property_t *prop = FindEffectPropertyByURI(&(g_effects[effect_id]), uri);
         if (prop)
         {
             LV2_Atom_Forge forge = g_lv2_atom_forge;
+            const LV2_URID urid = g_urid_map.map(g_urid_map.handle, uri);
+            const LV2_URID type = g_urid_map.map(g_urid_map.handle, types);
 
-            uint8_t buf[1024];
+            if (type == forge.Bool || type == forge.Int || type == forge.Long)
+                size *= 2;
+            else if (type == forge.Float || type == forge.Double)
+                size *= 3;
+
+            // size as used by the forge (can overshoot for string->number conversion)
+            uint8_t *buf = malloc(sizeof(LV2_Atom_Object)
+                                  + 4U * sizeof(uint32_t) /* keys */
+                                  + sizeof(LV2_Atom_URID)
+                                  + size + 1U);
+
+            if (!buf) {
+                return ERR_MEMORY_ALLOCATION;
+            }
+
             lv2_atom_forge_set_buffer(&forge, buf, sizeof(buf));
 
-            LV2_Atom_Forge_Frame frame;
-            lv2_atom_forge_object(&forge, &frame, 0, g_urids.patch_Set);
+            if (lv2_atom_forge_property_set(&forge, urid, value, size, type))
+            {
+                const LV2_Atom* atom = (LV2_Atom*)buf;
+                jack_ringbuffer_write(g_effects[effect_id].events_buffer, (const char*)atom, lv2_atom_total_size(atom));
+                free(buf);
+                return SUCCESS;
+            }
 
-            lv2_atom_forge_key(&forge, g_urids.patch_property);
-            lv2_atom_forge_urid(&forge, g_urid_map.map(g_urid_map.handle, uri));
-
-            lv2_atom_forge_key(&forge, g_urids.patch_value);
-
-            // TODO use type
-            lv2_atom_forge_path(&forge, value, strlen(value)+1);
-
-            lv2_atom_forge_pop(&forge, &frame);
-
-            const LV2_Atom* atom = (LV2_Atom*)buf; // lv2_atom_forge_deref(&forge, frame.ref);
-            jack_ringbuffer_write(g_effects[effect_id].events_buffer, (const char *)atom, lv2_atom_total_size(atom));
-            return SUCCESS;
+            free(buf);
+            return ERR_INVALID_OPERATION;
         }
-        return ERR_LV2_INVALID_PARAM_SYMBOL;
+        return ERR_LV2_INVALID_URI;
     }
+
     return ERR_INSTANCE_NON_EXISTS;
 }
 
