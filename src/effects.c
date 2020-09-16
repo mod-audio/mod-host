@@ -4639,41 +4639,41 @@ bool lv2_atom_forge_property_set(LV2_Atom_Forge *forge, LV2_URID urid, const cha
         for (const char *s = value + strlen(value) + 1; *s != '\0'; s += strlen(s) + 1)
             ++n_elems;
 
-        if (n_elems != 0)
+        if (n_elems == 0)
+            return false;
+
+        uint32_t i = 0;
+        void* elems = malloc(elem_size * n_elems);
+
+        // 2nd pass, fill up data
+        /**/ if (child_type == forge->Bool)
         {
-          uint32_t i = 0;
-          void* elems = malloc(elem_size * n_elems);
-
-            // 2nd pass, fill up data
-            /**/ if (child_type == forge->Bool)
-            {
-                for (const char *s = value + strlen(value) + 1; *s != '\0'; s += strlen(s) + 1)
-                    ((int32_t*)elems)[i++] = atoi(s) != 0;
-            }
-            else if (child_type == forge->Int)
-            {
-                for (const char *s = value + strlen(value) + 1; *s != '\0'; s += strlen(s) + 1)
-                    ((int32_t*)elems)[i++] = atoi(s);
-            }
-            else if (child_type == forge->Long)
-            {
-                for (const char *s = value + strlen(value) + 1; *s != '\0'; s += strlen(s) + 1)
-                    ((int64_t*)elems)[i++] = atol(s);
-            }
-            else if (child_type == forge->Float)
-            {
-                for (const char *s = value + strlen(value) + 1; *s != '\0'; s += strlen(s) + 1)
-                    ((float*)elems)[i++] = atof(s);
-            }
-            else if (child_type == forge->Double)
-            {
-                for (const char *s = value + strlen(value) + 1; *s != '\0'; s += strlen(s) + 1)
-                    ((double*)elems)[i++] = atof(s);
-            }
-
-            lv2_atom_forge_vector(forge, elem_size, child_type, n_elems, elems);
-            free(elems);
+            for (const char *s = value + strlen(value) + 1; *s != '\0'; s += strlen(s) + 1)
+                ((int32_t*)elems)[i++] = atoi(s) != 0;
         }
+        else if (child_type == forge->Int)
+        {
+            for (const char *s = value + strlen(value) + 1; *s != '\0'; s += strlen(s) + 1)
+                ((int32_t*)elems)[i++] = atoi(s);
+        }
+        else if (child_type == forge->Long)
+        {
+            for (const char *s = value + strlen(value) + 1; *s != '\0'; s += strlen(s) + 1)
+                ((int64_t*)elems)[i++] = atol(s);
+        }
+        else if (child_type == forge->Float)
+        {
+            for (const char *s = value + strlen(value) + 1; *s != '\0'; s += strlen(s) + 1)
+                ((float*)elems)[i++] = atof(s);
+        }
+        else if (child_type == forge->Double)
+        {
+            for (const char *s = value + strlen(value) + 1; *s != '\0'; s += strlen(s) + 1)
+                ((double*)elems)[i++] = atof(s);
+        }
+
+        lv2_atom_forge_vector(forge, elem_size, child_type, n_elems, elems);
+        free(elems);
     }
 
     // tuple (dictonary-like object)
