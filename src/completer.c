@@ -37,6 +37,8 @@
 #include "effects.h"
 #include "utils.h"
 
+// entire code on this file can be disabled with this macro
+#ifndef SKIP_READLINE
 
 /*
 ************************************************************************************************************************
@@ -161,6 +163,7 @@ static char **g_plugins_list, **g_ports_list, **g_instances_list;
 static const char *const *g_list, **g_scale_points, **g_symbols;
 static float **g_param_range;
 
+
 /*
 ************************************************************************************************************************
 *           LOCAL FUNCTION PROTOTYPES
@@ -188,7 +191,6 @@ static void update_instances_list(void);
 ************************************************************************************************************************
 */
 
-#ifndef SKIP_READLINE
 static char *dupstr(const char *s)
 {
     char *r;
@@ -654,7 +656,8 @@ static void update_instances_list(void)
         pclose(fp);
     }
 }
-#endif
+
+#endif // SKIP_READLINE
 
 
 /*
