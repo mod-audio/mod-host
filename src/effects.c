@@ -279,6 +279,7 @@ typedef struct PORT_T {
 
 typedef struct PROPERTY_T {
     LilvNode* uri;
+    LilvNode* type;
 } property_t;
 
 typedef struct PROPERTY_EVENT_T {
@@ -399,6 +400,7 @@ typedef struct URIDS_T {
     LV2_URID log_Warning;
     LV2_URID midi_MidiEvent;
     LV2_URID param_sampleRate;
+    LV2_URID patch_Get;
     LV2_URID patch_Set;
     LV2_URID patch_property;
     LV2_URID patch_value;
@@ -2994,6 +2996,7 @@ int effects_init(void* client)
     g_urids.midi_MidiEvent       = urid_to_id(g_symap, LV2_MIDI__MidiEvent);
     g_urids.param_sampleRate     = urid_to_id(g_symap, LV2_PARAMETERS__sampleRate);
 
+    g_urids.patch_Get            = urid_to_id(g_symap, LV2_PATCH__Get);
     g_urids.patch_Set            = urid_to_id(g_symap, LV2_PATCH__Set);
     g_urids.patch_property       = urid_to_id(g_symap, LV2_PATCH__property);
     g_urids.patch_value          = urid_to_id(g_symap, LV2_PATCH__value);
@@ -3939,9 +3942,9 @@ int effects_add(const char *uri, int instance)
 
     {
         // Index writable properties
-        LilvNode *rdfs_label = lilv_new_uri(g_lv2_data, LILV_NS_RDFS "label");
+        LilvNode *rdfs_range = lilv_new_uri(g_lv2_data, LILV_NS_RDFS "range");
         LilvNode *patch_writable = lilv_new_uri(g_lv2_data, LV2_PATCH__writable);
-        LilvNodes* properties = lilv_world_find_nodes(
+        LilvNodes *properties = lilv_world_find_nodes(
             g_lv2_data,
             lilv_plugin_get_uri(effect->lilv_plugin),
             patch_writable,
@@ -3955,10 +3958,11 @@ int effects_add(const char *uri, int instance)
             const LilvNode* property = lilv_nodes_get(properties, p);
             effect->properties[j] = (property_t *) malloc(sizeof(property_t));
             effect->properties[j]->uri = lilv_node_duplicate(property);
+            effect->properties[j]->type = lilv_world_get(g_lv2_data, property, rdfs_range, NULL);
             j++;
         }
         lilv_node_free(patch_writable);
-        lilv_node_free(rdfs_label);
+        lilv_node_free(rdfs_range);
         lilv_nodes_free(properties);
     }
 
@@ -4320,7 +4324,8 @@ int effects_remove(int effect_id)
                 {
                     if (effect->properties[i])
                     {
-                        lilv_free(effect->properties[i]->uri);
+                        lilv_node_free(effect->properties[i]->uri);
+                        lilv_node_free(effect->properties[i]->type);
                         free(effect->properties[i]);
                     }
                 }
@@ -4584,6 +4589,25 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
     return ERR_INSTANCE_NON_EXISTS;
 }
 
+int effects_get_parameter(int effect_id, const char *control_symbol, float *value)
+{
+    const port_t *port;
+
+    if (InstanceExist(effect_id))
+    {
+        port = FindEffectInputPortBySymbol(&(g_effects[effect_id]), control_symbol);
+        if (port)
+        {
+           (*value) = *(port->buffer);
+           return SUCCESS;
+        }
+
+        return ERR_LV2_INVALID_PARAM_SYMBOL;
+    }
+
+    return ERR_INSTANCE_NON_EXISTS;
+}
+
 static inline
 bool lv2_atom_forge_property_set(LV2_Atom_Forge *forge, LV2_URID urid, const char *value, size_t size, LV2_URID type)
 {
@@ -4755,7 +4779,7 @@ bool lv2_atom_forge_property_set(LV2_Atom_Forge *forge, LV2_URID urid, const cha
     return true;
 }
 
-int effects_set_property(int effect_id, const char *uri, const char *value, size_t size, const char *types)
+int effects_set_property(int effect_id, const char *uri, size_t size, const char *value)
 {
     if (size > 32*1024) { // 32K
         return ERR_MEMORY_ALLOCATION;
@@ -4763,34 +4787,47 @@ int effects_set_property(int effect_id, const char *uri, const char *value, size
 
     if (InstanceExist(effect_id))
     {
-        property_t *prop = FindEffectPropertyByURI(&(g_effects[effect_id]), uri);
-        if (prop)
+        effect_t *effect = &g_effects[effect_id];
+
+        if (!effect->events_buffer) {
+            return ERR_INVALID_OPERATION;
+        }
+
+        property_t *prop = FindEffectPropertyByURI(effect, uri);
+        if (prop && prop->type)
         {
             LV2_Atom_Forge forge = g_lv2_atom_forge;
             const LV2_URID urid = g_urid_map.map(g_urid_map.handle, uri);
-            const LV2_URID type = g_urid_map.map(g_urid_map.handle, types);
+            const LV2_URID type = g_urid_map.map(g_urid_map.handle, lilv_node_as_uri(prop->type));
 
-            if (type == forge.Bool || type == forge.Int || type == forge.Long)
-                size *= 2;
-            else if (type == forge.Float || type == forge.Double)
-                size *= 3;
+            if (type == forge.Bool || type == forge.Int || type == forge.Float)
+            {
+                if (size < 4)
+                    size = 4;
+            }
+            else if (type == forge.Long || type == forge.Double)
+            {
+                if (size < 8)
+                    size = 8;
+            }
 
             // size as used by the forge (can overshoot for string->number conversion)
-            uint8_t *buf = malloc(sizeof(LV2_Atom_Object)
-                                  + 4U * sizeof(uint32_t) /* keys */
-                                  + sizeof(LV2_Atom_URID)
-                                  + size + 1U);
+            size_t bufsize = sizeof(LV2_Atom_Object)
+                           + 4U * sizeof(uint32_t) /* keys */
+                           + sizeof(LV2_Atom_URID)
+                           + size + 1U;
+            uint8_t *buf = malloc(bufsize);
 
             if (!buf) {
                 return ERR_MEMORY_ALLOCATION;
             }
 
-            lv2_atom_forge_set_buffer(&forge, buf, sizeof(buf));
+            lv2_atom_forge_set_buffer(&forge, buf, bufsize);
 
             if (lv2_atom_forge_property_set(&forge, urid, value, size, type))
             {
                 const LV2_Atom* atom = (LV2_Atom*)buf;
-                jack_ringbuffer_write(g_effects[effect_id].events_buffer, (const char*)atom, lv2_atom_total_size(atom));
+                jack_ringbuffer_write(effect->events_buffer, (const char*)atom, lv2_atom_total_size(atom));
                 free(buf);
                 return SUCCESS;
             }
@@ -4804,20 +4841,37 @@ int effects_set_property(int effect_id, const char *uri, const char *value, size
     return ERR_INSTANCE_NON_EXISTS;
 }
 
-int effects_get_parameter(int effect_id, const char *control_symbol, float *value)
+int effects_get_property(int effect_id, const char *uri)
 {
-    const port_t *port;
-
     if (InstanceExist(effect_id))
     {
-        port = FindEffectInputPortBySymbol(&(g_effects[effect_id]), control_symbol);
-        if (port)
-        {
-           (*value) = *(port->buffer);
-           return SUCCESS;
+        effect_t *effect = &g_effects[effect_id];
+
+        if (!effect->events_buffer) {
+            return ERR_INVALID_OPERATION;
         }
 
-        return ERR_LV2_INVALID_PARAM_SYMBOL;
+        property_t *prop = FindEffectPropertyByURI(effect, uri);
+        if (prop)
+        {
+            uint8_t buf[1024];
+
+            LV2_Atom_Forge forge = g_lv2_atom_forge;
+            lv2_atom_forge_set_buffer(&forge, buf, sizeof(buf));
+
+            LV2_Atom_Forge_Frame frame;
+            lv2_atom_forge_object(&forge, &frame, 0, g_urids.patch_Get);
+
+            lv2_atom_forge_key(&forge, g_urids.patch_property);
+            lv2_atom_forge_urid(&forge, g_urid_map.map(g_urid_map.handle, uri));
+
+            lv2_atom_forge_pop(&forge, &frame);
+
+            const LV2_Atom* atom = (LV2_Atom*)buf;
+            jack_ringbuffer_write(effect->events_buffer, (const char*)atom, lv2_atom_total_size(atom));
+            return SUCCESS;
+        }
+        return ERR_LV2_INVALID_URI;
     }
 
     return ERR_INSTANCE_NON_EXISTS;
