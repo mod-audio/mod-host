@@ -4701,7 +4701,7 @@ bool lv2_atom_forge_property_set(LV2_Atom_Forge *forge, LV2_URID urid, const cha
     }
 
     // tuple (dictonary-like object)
-    // pair of type and then, all separated by zero with a final zero
+    // pair of type and then value, all separated by zero with a final zero
     else if (type == forge->Tuple)
     {
         uint32_t n_elems = 0;
@@ -4812,10 +4812,10 @@ int effects_set_property(int effect_id, const char *uri, size_t size, const char
             }
 
             // size as used by the forge (can overshoot for string->number conversion)
-            size_t bufsize = sizeof(LV2_Atom_Object)
-                           + 4U * sizeof(uint32_t) /* keys */
-                           + sizeof(LV2_Atom_URID)
-                           + size + 1U;
+            size_t bufsize = lv2_atom_pad_size(sizeof(LV2_Atom_Object))
+                           + 2U * lv2_atom_pad_size(2U * sizeof(uint32_t)) /* keys */
+                           + lv2_atom_pad_size(sizeof(LV2_Atom_URID))
+                           + lv2_atom_pad_size(sizeof(LV2_Atom) + size) + 8U;
             uint8_t *buf = malloc(bufsize);
 
             if (!buf) {
