@@ -63,8 +63,8 @@
 #include <lv2/lv2plug.in/ns/ext/urid/urid.h>
 #include <lv2/lv2plug.in/ns/ext/uri-map/uri-map.h>
 #include <lv2/lv2plug.in/ns/ext/worker/worker.h>
-#include "mod-license.h"
-#include "mod-host.h"
+#include "lv2/control-input-port-change-request.h"
+#include "lv2/mod-license.h"
 
 #ifdef HAVE_CONTROLCHAIN
 /* Control Chain */
@@ -75,6 +75,8 @@
 /* Hylia / Link */
 #include <hylia.h>
 #endif
+
+#include "mod-host.h"
 
 #ifndef HAVE_NEW_LILV
 #define lilv_free(x) free(x)
@@ -216,6 +218,7 @@ enum {
     LOG_FEATURE,
     STATE_FREE_PATH_FEATURE,
     STATE_MAKE_PATH_FEATURE,
+    CTRLPORT_REQUEST_FEATURE,
     WORKER_FEATURE,
     FEATURE_TERMINATOR
 };
@@ -646,6 +649,8 @@ static void ConnectToAllHardwareMIDIPorts(void);
 static char *GetLicenseFile(MOD_License_Handle handle, const char *license_uri);
 static int LogPrintf(LV2_Log_Handle handle, LV2_URID type, const char *fmt, ...);
 static int LogVPrintf(LV2_Log_Handle handle, LV2_URID type, const char *fmt, va_list ap);
+static LV2_ControlInputPort_Change_Status RequestControlPortChange(LV2_ControlInputPort_Change_Request_Handle handle,
+                                                                   uint32_t index, float value);
 static char* MakePluginStatePathFromSratchDir(LV2_State_Make_Path_Handle handle, const char *path);
 static char* MakePluginStatePathDuringLoadSave(LV2_State_Make_Path_Handle handle, const char *path);
 #ifdef HAVE_CONTROLCHAIN
@@ -2238,6 +2243,16 @@ static void GetFeatures(effect_t *effect)
     state_make_path_feature->URI = LV2_STATE__makePath;
     state_make_path_feature->data = makePath;
 
+    /* ControlInputPort change request feature, includes custom pointer */
+    LV2_ControlInputPort_Change_Request *ctrlportReqChange
+        = (LV2_ControlInputPort_Change_Request*) malloc(sizeof(LV2_ControlInputPort_Change_Request));
+    ctrlportReqChange->handle = effect;
+    ctrlportReqChange->request_change = RequestControlPortChange;
+
+    LV2_Feature *ctrlportReqChange_feature = (LV2_Feature*) malloc(sizeof(LV2_Feature));
+    ctrlportReqChange_feature->URI = LV2_CONTROL_INPUT_PORT_CHANGE_REQUEST_URI;
+    ctrlportReqChange_feature->data = ctrlportReqChange;
+
     /* Worker Feature, must be last as it can be null */
     LV2_Feature *work_schedule_feature = NULL;
 
@@ -2268,6 +2283,7 @@ static void GetFeatures(effect_t *effect)
     features[LOG_FEATURE]               = &g_lv2_log_feature;
     features[STATE_FREE_PATH_FEATURE]   = &g_state_freePath_feature;
     features[STATE_MAKE_PATH_FEATURE]   = state_make_path_feature;
+    features[CTRLPORT_REQUEST_FEATURE]  = ctrlportReqChange_feature;
     features[WORKER_FEATURE]            = work_schedule_feature;
     features[FEATURE_TERMINATOR]        = NULL;
 
@@ -2425,6 +2441,11 @@ static void FreeFeatures(effect_t *effect)
             free((void*)effect->features[STATE_MAP_PATH_FEATURE]);
         }
         */
+        if (effect->features[CTRLPORT_REQUEST_FEATURE])
+        {
+            free(effect->features[CTRLPORT_REQUEST_FEATURE]->data);
+            free((void*)effect->features[CTRLPORT_REQUEST_FEATURE]);
+        }
         if (effect->features[WORKER_FEATURE])
         {
             free(effect->features[WORKER_FEATURE]->data);
@@ -2644,6 +2665,29 @@ static int LogVPrintf(LV2_Log_Handle handle, LV2_URID type, const char* fmt, va_
     return ret;
 
     UNUSED_PARAM(handle);
+}
+
+static LV2_ControlInputPort_Change_Status RequestControlPortChange(LV2_ControlInputPort_Change_Request_Handle handle,
+                                                                   uint32_t index, float value)
+{
+    effect_t *effect = (effect_t*)handle;
+
+    if (index >= effect->ports_count)
+        return LV2_CONTROL_INPUT_PORT_CHANGE_ERR_INVALID_INDEX;
+
+    port_t *port = effect->ports[index];
+
+    if (port->type != TYPE_CONTROL || port->flow != FLOW_INPUT)
+        return LV2_CONTROL_INPUT_PORT_CHANGE_ERR_INVALID_INDEX;
+
+    // ignore requests for same value
+    if (!floats_differ_enough(port->prev_value, value))
+        return LV2_CONTROL_INPUT_PORT_CHANGE_SUCCESS;
+
+    if (SetPortValue(port, value, effect->instance, false))
+        sem_post(&g_postevents_semaphore);
+
+    return LV2_CONTROL_INPUT_PORT_CHANGE_SUCCESS;
 }
 
 static char* MakePluginStatePathFromSratchDir(LV2_State_Make_Path_Handle handle, const char *path)
