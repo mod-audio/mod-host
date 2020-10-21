@@ -3262,6 +3262,7 @@ int effects_add(const char *uri, int instance)
     LilvNode *lilv_default, *lilv_mod_default;
     LilvNode *lilv_minimum, *lilv_mod_minimum;
     LilvNode *lilv_maximum, *lilv_mod_maximum;
+    LilvNode *lilv_preferMomentaryOff, *lilv_preferMomentaryOn;
     LilvNode *lilv_atom_port, *lilv_worker_interface, *lilv_license_interface, *lilv_state_interface;
     const LilvPort* control_in_port;
     const LilvPort *lilv_port;
@@ -3305,6 +3306,8 @@ int effects_add(const char *uri, int instance)
     lilv_mod_minimum = NULL;
     lilv_mod_maximum = NULL;
     lilv_mod_cvport = NULL;
+    lilv_preferMomentaryOff = NULL;
+    lilv_preferMomentaryOn = NULL;
     lilv_event = NULL;
     lilv_atom_port = NULL;
     lilv_worker_interface = NULL;
@@ -3450,6 +3453,8 @@ int effects_add(const char *uri, int instance)
     lilv_mod_minimum = lilv_new_uri(g_lv2_data, LILV_NS_MOD "minimum");
     lilv_mod_maximum = lilv_new_uri(g_lv2_data, LILV_NS_MOD "maximum");
     lilv_mod_cvport = lilv_new_uri(g_lv2_data, LILV_NS_MOD "CVPort");
+    lilv_preferMomentaryOff = lilv_new_uri(g_lv2_data, LILV_NS_MOD "preferMomentaryOffByDefault");
+    lilv_preferMomentaryOn = lilv_new_uri(g_lv2_data, LILV_NS_MOD "preferMomentaryOnByDefault");
 
     /* Allocate memory to ports */
     audio_ports_count = 0;
@@ -3586,14 +3591,29 @@ int effects_add(const char *uri, int instance)
 
             /* Set the default value of control */
             float def_value;
-            LilvNodes* lilvvalue_default = lilv_port_get_value(plugin, lilv_port, lilv_mod_default);
-            if (lilvvalue_default == NULL)
-                lilvvalue_default = lilv_port_get_value(plugin, lilv_port, lilv_default);
 
-            if (lilvvalue_default != NULL)
-                def_value = lilv_node_as_float(lilv_nodes_get_first(lilvvalue_default));
-            else
+
+            if (lilv_port_has_property(plugin, lilv_port, lilv_preferMomentaryOff))
+            {
+                def_value = max_value;
+            }
+            else if (lilv_port_has_property(plugin, lilv_port, lilv_preferMomentaryOn))
+            {
                 def_value = min_value;
+            }
+            else
+            {
+                LilvNodes* lilvvalue_default = lilv_port_get_value(plugin, lilv_port, lilv_mod_default);
+                if (lilvvalue_default == NULL)
+                    lilvvalue_default = lilv_port_get_value(plugin, lilv_port, lilv_default);
+
+                if (lilvvalue_default != NULL)
+                    def_value = lilv_node_as_float(lilv_nodes_get_first(lilvvalue_default));
+                else
+                    def_value = min_value;
+
+                lilv_nodes_free(lilvvalue_default);
+            }
 
             (*control_buffer) = def_value;
 
@@ -3635,7 +3655,6 @@ int effects_add(const char *uri, int instance)
 
             lilv_nodes_free(lilvvalue_maximum);
             lilv_nodes_free(lilvvalue_minimum);
-            lilv_nodes_free(lilvvalue_default);
         }
         else if (lilv_port_is_a(plugin, lilv_port, lilv_cv) || lilv_port_is_a(plugin, lilv_port, lilv_mod_cvport))
         {
@@ -4069,6 +4088,8 @@ int effects_add(const char *uri, int instance)
     lilv_node_free(lilv_mod_minimum);
     lilv_node_free(lilv_mod_maximum);
     lilv_node_free(lilv_mod_cvport);
+    lilv_node_free(lilv_preferMomentaryOff);
+    lilv_node_free(lilv_preferMomentaryOn);
     lilv_node_free(lilv_atom_port);
     lilv_node_free(lilv_worker_interface);
     lilv_node_free(lilv_license_interface);
@@ -4128,6 +4149,8 @@ int effects_add(const char *uri, int instance)
         lilv_node_free(lilv_mod_minimum);
         lilv_node_free(lilv_mod_maximum);
         lilv_node_free(lilv_mod_cvport);
+        lilv_node_free(lilv_preferMomentaryOff);
+        lilv_node_free(lilv_preferMomentaryOn);
         lilv_node_free(lilv_atom_port);
         lilv_node_free(lilv_worker_interface);
         lilv_node_free(lilv_license_interface);
