@@ -283,6 +283,7 @@ typedef struct PORT_T {
 typedef struct PROPERTY_T {
     LilvNode* uri;
     LilvNode* type;
+    bool monitored;
 } property_t;
 
 typedef struct PROPERTY_EVENT_T {
@@ -4004,29 +4005,50 @@ int effects_add(const char *uri, int instance)
     AllocatePortBuffers(effect);
 
     {
-        // Index writable properties
+        // Index readable and writable properties
         LilvNode *rdfs_range = lilv_new_uri(g_lv2_data, LILV_NS_RDFS "range");
         LilvNode *patch_writable = lilv_new_uri(g_lv2_data, LV2_PATCH__writable);
-        LilvNodes *properties = lilv_world_find_nodes(
+        LilvNode *patch_readable = lilv_new_uri(g_lv2_data, LV2_PATCH__readable);
+        LilvNodes *writable_properties = lilv_world_find_nodes(
             g_lv2_data,
             lilv_plugin_get_uri(effect->lilv_plugin),
             patch_writable,
             NULL);
-        effect->properties_count = lilv_nodes_size(properties);
+        LilvNodes *readable_properties = lilv_world_find_nodes(
+            g_lv2_data,
+            lilv_plugin_get_uri(effect->lilv_plugin),
+            patch_readable,
+            NULL);
+        effect->properties_count = lilv_nodes_size(writable_properties) + lilv_nodes_size(readable_properties);
         effect->properties = (property_t **) calloc(effect->properties_count, sizeof(property_t *));
 
+        // TODO mix readable and writable
         uint32_t j = 0;
-        LILV_FOREACH(nodes, p, properties)
+        LILV_FOREACH(nodes, p, writable_properties)
         {
-            const LilvNode* property = lilv_nodes_get(properties, p);
+            const LilvNode* property = lilv_nodes_get(writable_properties, p);
             effect->properties[j] = (property_t *) malloc(sizeof(property_t));
             effect->properties[j]->uri = lilv_node_duplicate(property);
             effect->properties[j]->type = lilv_world_get(g_lv2_data, property, rdfs_range, NULL);
+            effect->properties[j]->monitored = true; // always true for writable properties
             j++;
         }
-        lilv_node_free(patch_writable);
+        j = 0;
+        LILV_FOREACH(nodes, p, readable_properties)
+        {
+            const LilvNode* property = lilv_nodes_get(readable_properties, p);
+            effect->properties[j] = (property_t *) malloc(sizeof(property_t));
+            effect->properties[j]->uri = lilv_node_duplicate(property);
+            effect->properties[j]->type = lilv_world_get(g_lv2_data, property, rdfs_range, NULL);
+            effect->properties[j]->monitored = false; // optional
+            j++;
+        }
+
         lilv_node_free(rdfs_range);
-        lilv_nodes_free(properties);
+        lilv_node_free(patch_writable);
+        lilv_node_free(patch_readable);
+        lilv_nodes_free(writable_properties);
+        lilv_nodes_free(readable_properties);
     }
 
     /* Default value of bypass */
@@ -4969,46 +4991,57 @@ int effects_monitor_parameter(int effect_id, const char *control_symbol, const c
         return ERR_ASSIGNMENT_INVALID_OP;
 
 
+    effect_t *effect = &g_effects[effect_id];
     const LilvNode *symbol = lilv_new_string(g_lv2_data, control_symbol);
-    const LilvPort *port = lilv_plugin_get_port_by_symbol(g_effects[effect_id].lilv_plugin, symbol);
+    const LilvPort *port = lilv_plugin_get_port_by_symbol(effect->lilv_plugin, symbol);
 
-    int port_id = lilv_port_get_index(g_effects[effect_id].lilv_plugin, port);
+    int port_id = lilv_port_get_index(effect->lilv_plugin, port);
 
-    g_effects[effect_id].monitors_count++;
-    g_effects[effect_id].monitors =
-        (monitor_t**)realloc(g_effects[effect_id].monitors, sizeof(monitor_t *) * g_effects[effect_id].monitors_count);
+    effect->monitors_count++;
+    effect->monitors =
+        (monitor_t**)realloc(effect->monitors, sizeof(monitor_t *) * effect->monitors_count);
 
-    int idx = g_effects[effect_id].monitors_count - 1;
-    g_effects[effect_id].monitors[idx] = (monitor_t*)malloc(sizeof(monitor_t));
-    g_effects[effect_id].monitors[idx]->port_id = port_id;
-    g_effects[effect_id].monitors[idx]->op = iop;
-    g_effects[effect_id].monitors[idx]->value = value;
-    g_effects[effect_id].monitors[idx]->last_notified_value = 0.0;
+    int idx = effect->monitors_count - 1;
+    effect->monitors[idx] = (monitor_t*)malloc(sizeof(monitor_t));
+    effect->monitors[idx]->port_id = port_id;
+    effect->monitors[idx]->op = iop;
+    effect->monitors[idx]->value = value;
+    effect->monitors[idx]->last_notified_value = 0.0;
     return SUCCESS;
 }
 
-int effects_monitor_output_parameter(int effect_id, const char *control_symbol)
+int effects_monitor_output_parameter(int effect_id, const char *control_symbol_or_uri)
 {
     port_t *port;
 
     if (!InstanceExist(effect_id))
         return ERR_INSTANCE_NON_EXISTS;
 
-    port = FindEffectOutputPortBySymbol(&(g_effects[effect_id]), control_symbol);
+    effect_t *effect = &g_effects[effect_id];
+    port = FindEffectOutputPortBySymbol(effect, control_symbol_or_uri);
 
-    if (port == NULL)
-        return ERR_LV2_INVALID_PARAM_SYMBOL;
+    if (port != NULL)
+    {
+        // check if already monitored
+        if (port->hints & HINT_MONITORED)
+            return SUCCESS;
 
-    // check if already monitored
-    if (port->hints & HINT_MONITORED)
-        return SUCCESS;
+        // set prev_value
+        port->prev_value = (*port->buffer);
+        port->hints |= HINT_MONITORED;
+    }
+    else
+    {
+        property_t *property = FindEffectPropertyByURI(effect, control_symbol_or_uri);
 
-    // set prev_value
-    port->prev_value = (*port->buffer);
-    port->hints |= HINT_MONITORED;
+        if (property == NULL)
+            return ERR_LV2_INVALID_PARAM_SYMBOL;
+
+        property->monitored = true;
+    }
 
     // activate output monitor
-    g_effects[effect_id].hints |= HINT_OUTPUT_MONITORS;
+    effect->hints |= HINT_OUTPUT_MONITORS;
 
     return SUCCESS;
 }
