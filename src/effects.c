@@ -397,6 +397,7 @@ typedef struct URIDS_T {
     LV2_URID atom_Float;
     LV2_URID atom_Int;
     LV2_URID atom_Long;
+    LV2_URID atom_Object;
     LV2_URID atom_Path;
     LV2_URID atom_String;
     LV2_URID atom_Tuple;
@@ -1759,39 +1760,42 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
                         if (can_write_midi && jack_midi_event_write(buf, frames, body, size) == ENOBUFS)
                             can_write_midi = false;
                     }
-                    else if (effect->events_out_buffer && type == g_urids.patch_Set)
+                    else if (effect->events_out_buffer && type == g_urids.atom_Object)
                     {
-                        const LV2_Atom_Object *obj    = (const LV2_Atom_Object*)body;
-                        const LV2_Atom_URID *subject  = NULL;
-                        const LV2_Atom_URID *property = NULL;
-                        const LV2_Atom      *value    = NULL;
+                        const LV2_Atom_Object_Body *objbody = (const LV2_Atom_Object_Body*)body;
 
-                        lv2_atom_object_get(obj,
-                                            g_urids.patch_subject,  (const LV2_Atom**)&subject,
-                                            g_urids.patch_property, (const LV2_Atom**)&property,
-                                            g_urids.patch_value,    &value,
-                                            0);
+                        if (objbody->otype == g_urids.patch_Set)
+                        {
+                            const LV2_Atom_URID *subject  = NULL;
+                            const LV2_Atom_URID *property = NULL;
+                            const LV2_Atom      *value    = NULL;
 
-                        // return (!subject || (subject->atom.type == self->uris.atom_URID && subject->body == self->uris.plugin));
-                        if (jack_ringbuffer_write_space(effect->events_out_buffer) < sizeof(LV2_Atom) + value->size)
-                            continue;
+                            lv2_atom_object_body_get(size, objbody,
+                                                     g_urids.patch_subject,  (const LV2_Atom**)&subject,
+                                                     g_urids.patch_property, (const LV2_Atom**)&property,
+                                                     g_urids.patch_value,    &value,
+                                                     0);
 
-                        jack_ringbuffer_write(effect->events_out_buffer, (const char*)&property->atom.type, sizeof(uint32_t));
-                        jack_ringbuffer_write(effect->events_out_buffer, (const char*)value, lv2_atom_total_size(value));
+                            if (jack_ringbuffer_write_space(effect->events_out_buffer) < sizeof(LV2_Atom) + value->size)
+                                continue;
 
-                        postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
+                            jack_ringbuffer_write(effect->events_out_buffer, (const char*)&property->atom.type, sizeof(uint32_t));
+                            jack_ringbuffer_write(effect->events_out_buffer, (const char*)value, lv2_atom_total_size(value));
 
-                        if (posteventptr == NULL)
-                            continue;
+                            postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
 
-                        posteventptr->event.type = POSTPONED_PROCESS_OUTPUT_BUFFER;
-                        posteventptr->event.process_out_buf.effect_id = effect->instance;
+                            if (posteventptr == NULL)
+                                continue;
 
-                        pthread_mutex_lock(&g_rtsafe_mutex);
-                        list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
-                        pthread_mutex_unlock(&g_rtsafe_mutex);
+                            posteventptr->event.type = POSTPONED_PROCESS_OUTPUT_BUFFER;
+                            posteventptr->event.process_out_buf.effect_id = effect->instance;
 
-                        needs_post = true;
+                            pthread_mutex_lock(&g_rtsafe_mutex);
+                            list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
+                            pthread_mutex_unlock(&g_rtsafe_mutex);
+
+                            needs_post = true;
+                        }
                     }
                 }
             }
@@ -3260,6 +3264,7 @@ int effects_init(void* client)
     g_urids.atom_Float           = urid_to_id(g_symap, LV2_ATOM__Float);
     g_urids.atom_Int             = urid_to_id(g_symap, LV2_ATOM__Int);
     g_urids.atom_Long            = urid_to_id(g_symap, LV2_ATOM__Long);
+    g_urids.atom_Object          = urid_to_id(g_symap, LV2_ATOM__Object);
     g_urids.atom_Path            = urid_to_id(g_symap, LV2_ATOM__Path);
     g_urids.atom_String          = urid_to_id(g_symap, LV2_ATOM__String);
     g_urids.atom_Tuple           = urid_to_id(g_symap, LV2_ATOM__Tuple);
@@ -5322,6 +5327,23 @@ int effects_monitor_output_parameter(int effect_id, const char *control_symbol_o
         // set prev_value
         port->prev_value = (*port->buffer);
         port->hints |= HINT_MONITORED;
+
+        // simulate an output monitor event here, to report current value
+        postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
+
+        if (posteventptr != NULL)
+        {
+            posteventptr->event.type = POSTPONED_OUTPUT_MONITOR;
+            posteventptr->event.parameter.effect_id = effect->instance;
+            posteventptr->event.parameter.symbol    = port->symbol;
+            posteventptr->event.parameter.value     = port->prev_value;
+
+            pthread_mutex_lock(&g_rtsafe_mutex);
+            list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
+            pthread_mutex_unlock(&g_rtsafe_mutex);
+
+            sem_post(&g_postevents_semaphore);
+        }
     }
     else
     {
