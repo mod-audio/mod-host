@@ -4727,7 +4727,7 @@ bool lv2_atom_forge_property_set(LV2_Atom_Forge *forge, LV2_URID urid, const cha
         lv2_atom_forge_path(forge, value, size);
 
     // vector (array of a specific type)
-    // 1st value is type, then the values, separated by zero with a final zero
+    // 1st value is type, then the values; separated by zero with a final zero
     else if (type == forge->Vector)
     {
         const LV2_URID child_type = g_urid_map.map(g_urid_map.handle, value);
@@ -4790,7 +4790,7 @@ bool lv2_atom_forge_property_set(LV2_Atom_Forge *forge, LV2_URID urid, const cha
     }
 
     // tuple (dictonary-like object)
-    // pair of type and then value, all separated by zero with a final zero
+    // pair of type and then value; all separated by zero with a final zero
     else if (type == forge->Tuple)
     {
         uint32_t n_elems = 0;
@@ -4940,27 +4940,30 @@ int effects_get_property(int effect_id, const char *uri)
             return ERR_INVALID_OPERATION;
         }
 
-        property_t *prop = FindEffectPropertyByURI(effect, uri);
-        if (prop)
+        uint8_t buf[1024];
+
+        LV2_Atom_Forge forge = g_lv2_atom_forge;
+        lv2_atom_forge_set_buffer(&forge, buf, sizeof(buf));
+
+        LV2_Atom_Forge_Frame frame;
+        lv2_atom_forge_object(&forge, &frame, 0, g_urids.patch_Get);
+
+        if (uri && *uri != '\0')
         {
-            uint8_t buf[1024];
+            property_t *prop = FindEffectPropertyByURI(effect, uri);
 
-            LV2_Atom_Forge forge = g_lv2_atom_forge;
-            lv2_atom_forge_set_buffer(&forge, buf, sizeof(buf));
-
-            LV2_Atom_Forge_Frame frame;
-            lv2_atom_forge_object(&forge, &frame, 0, g_urids.patch_Get);
+            if (! prop)
+                return ERR_LV2_INVALID_URI;
 
             lv2_atom_forge_key(&forge, g_urids.patch_property);
             lv2_atom_forge_urid(&forge, g_urid_map.map(g_urid_map.handle, uri));
-
-            lv2_atom_forge_pop(&forge, &frame);
-
-            const LV2_Atom* atom = (LV2_Atom*)buf;
-            jack_ringbuffer_write(effect->events_buffer, (const char*)atom, lv2_atom_total_size(atom));
-            return SUCCESS;
         }
-        return ERR_LV2_INVALID_URI;
+
+        lv2_atom_forge_pop(&forge, &frame);
+
+        const LV2_Atom* atom = (LV2_Atom*)buf;
+        jack_ringbuffer_write(effect->events_buffer, (const char*)atom, lv2_atom_total_size(atom));
+        return SUCCESS;
     }
 
     return ERR_INSTANCE_NON_EXISTS;
