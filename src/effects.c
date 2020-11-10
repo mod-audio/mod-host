@@ -58,6 +58,7 @@
 #include <lv2/lv2plug.in/ns/ext/parameters/parameters.h>
 #include <lv2/lv2plug.in/ns/ext/port-props/port-props.h>
 #include <lv2/lv2plug.in/ns/ext/presets/presets.h>
+#include <lv2/lv2plug.in/ns/ext/resize-port/resize-port.h>
 #include <lv2/lv2plug.in/ns/ext/state/state.h>
 #include <lv2/lv2plug.in/ns/ext/time/time.h>
 #include <lv2/lv2plug.in/ns/ext/urid/urid.h>
@@ -231,7 +232,8 @@ enum PostPonedEventType {
     POSTPONED_TRANSPORT,
     POSTPONED_JACK_MIDI_CONNECT,
     POSTPONED_LOG_TRACE, // stack allocated, rt-safe
-    POSTPONED_LOG_MESSAGE // heap allocated
+    POSTPONED_LOG_MESSAGE, // heap allocated
+    POSTPONED_PROCESS_OUTPUT_BUFFER
 };
 
 enum UpdatePositionFlag {
@@ -361,7 +363,8 @@ typedef struct EFFECT_T {
     const MOD_License_Interface *license_iface;
     const LV2_State_Interface *state_iface;
 
-    jack_ringbuffer_t *events_buffer;
+    jack_ringbuffer_t *events_in_buffer;
+    jack_ringbuffer_t *events_out_buffer;
 
     // previous transport state
     bool transport_rolling;
@@ -389,10 +392,16 @@ typedef struct EFFECT_T {
 } effect_t;
 
 typedef struct URIDS_T {
-    LV2_URID atom_Float;
+    LV2_URID atom_Bool;
     LV2_URID atom_Double;
+    LV2_URID atom_Float;
     LV2_URID atom_Int;
     LV2_URID atom_Long;
+    LV2_URID atom_Path;
+    LV2_URID atom_String;
+    LV2_URID atom_Tuple;
+    LV2_URID atom_URI;
+    LV2_URID atom_Vector;
     LV2_URID atom_eventTransfer;
     LV2_URID bufsz_maxBlockLength;
     LV2_URID bufsz_minBlockLength;
@@ -407,6 +416,7 @@ typedef struct URIDS_T {
     LV2_URID patch_Get;
     LV2_URID patch_Set;
     LV2_URID patch_property;
+    LV2_URID patch_subject;
     LV2_URID patch_value;
     LV2_URID time_Position;
     LV2_URID time_bar;
@@ -479,6 +489,10 @@ typedef struct POSTPONED_LOG_MESSAGE_EVENT_T {
     char *msg; // NOTE: heap allocated, needs to be freed on reader side
 } postponed_log_message_event_t;
 
+typedef struct POSTPONED_PROCESS_OUTPUT_BUFFER_EVENT_T {
+    int effect_id;
+} postponed_process_output_buffer_event_t;
+
 typedef struct POSTPONED_EVENT_T {
     enum PostPonedEventType type;
     union {
@@ -489,6 +503,7 @@ typedef struct POSTPONED_EVENT_T {
         postponed_jack_midi_connect_event_t jack_midi_connect;
         postponed_log_trace_event_t log_trace;
         postponed_log_message_event_t log_message;
+        postponed_process_output_buffer_event_t process_out_buf;
     };
 } postponed_event_t;
 
@@ -497,17 +512,27 @@ typedef struct POSTPONED_EVENT_LIST_DATA {
     struct list_head siblings;
 } postponed_event_list_data;
 
+typedef struct POSTPONED_CACHED_EFFECT_LIST_DATA {
+    int effect_id;
+    struct list_head siblings;
+} postponed_cached_effect_list_data;
+
+typedef struct POSTPONED_CACHED_EFFECT_EVENTS {
+    int last_effect_id;
+    postponed_cached_effect_list_data effects;
+} postponed_cached_effect_events;
+
 typedef struct POSTPONED_CACHED_SYMBOL_LIST_DATA {
     int effect_id;
     char symbol[MAX_CHAR_BUF_SIZE+1];
     struct list_head siblings;
 } postponed_cached_symbol_list_data;
 
-typedef struct POSTPONED_CACHED_EVENTS {
+typedef struct POSTPONED_CACHED_SYMBOL_EVENTS {
     int last_effect_id;
     char last_symbol[MAX_CHAR_BUF_SIZE+1];
     postponed_cached_symbol_list_data symbols;
-} postponed_cached_events;
+} postponed_cached_symbol_events;
 
 
 /*
@@ -774,7 +799,43 @@ static void PortRegistration(jack_port_id_t port_id, int reg, void* data)
     UNUSED_PARAM(data);
 }
 
-static bool ShouldIgnorePostPonedEvent(postponed_parameter_event_t* ev, postponed_cached_events* cached_events)
+static bool ShouldIgnorePostPonedEffectEvent(int effect_id, postponed_cached_effect_events* cached_events)
+{
+    if (effect_id == cached_events->last_effect_id)
+    {
+        // already received this event, like just now
+        return true;
+    }
+
+    // we received some events, but last one was different
+    // we might be getting interleaved events, so let's check if it's there
+    struct list_head *it;
+    list_for_each(it, &cached_events->effects.siblings)
+    {
+        postponed_cached_effect_list_data* const peffect = list_entry(it, postponed_cached_effect_list_data, siblings);
+
+        if (effect_id == peffect->effect_id)
+        {
+            // haha! found you little bastard!
+            return true;
+        }
+    }
+
+    // we'll process this event because it's the "last" of its type
+    // also add it to the list of received events
+    postponed_cached_effect_list_data* const peffect = malloc(sizeof(postponed_cached_effect_list_data));
+
+    if (peffect)
+    {
+        peffect->effect_id = effect_id;
+        list_add_tail(&peffect->siblings, &cached_events->effects.siblings);
+    }
+
+    return false;
+}
+
+static bool ShouldIgnorePostPonedSymbolEvent(postponed_parameter_event_t* ev,
+                                             postponed_cached_symbol_events* cached_events)
 {
     // symbol must not be null
     if (ev->symbol == NULL)
@@ -850,15 +911,17 @@ static void RunPostPonedEvents(int ignored_effect_id)
     // cached data, to make sure we only handle similar events once
     bool got_midi_program = false;
     bool got_transport = false;
-    postponed_cached_events cached_param_set, cached_output_mon;
-    postponed_cached_symbol_list_data *psymbol;
+    postponed_cached_effect_events cached_process_out_buf;
+    postponed_cached_symbol_events cached_param_set, cached_output_mon;
 
+    cached_process_out_buf.last_effect_id = -1;
     cached_param_set.last_effect_id = -1;
     cached_output_mon.last_effect_id = -1;
     cached_param_set.last_symbol[0] = '\0';
     cached_param_set.last_symbol[MAX_CHAR_BUF_SIZE] = '\0';
     cached_output_mon.last_symbol[0] = '\0';
     cached_output_mon.last_symbol[MAX_CHAR_BUF_SIZE] = '\0';
+    INIT_LIST_HEAD(&cached_process_out_buf.effects.siblings);
     INIT_LIST_HEAD(&cached_param_set.symbols.siblings);
     INIT_LIST_HEAD(&cached_output_mon.symbols.siblings);
 
@@ -890,7 +953,7 @@ static void RunPostPonedEvents(int ignored_effect_id)
         case POSTPONED_PARAM_SET:
             if (eventptr->event.parameter.effect_id == ignored_effect_id)
                 continue;
-            if (ShouldIgnorePostPonedEvent(&eventptr->event.parameter, &cached_param_set))
+            if (ShouldIgnorePostPonedSymbolEvent(&eventptr->event.parameter, &cached_param_set))
                 continue;
 
             snprintf(buf, MAX_CHAR_BUF_SIZE, "param_set %i %s %f", eventptr->event.parameter.effect_id,
@@ -906,7 +969,7 @@ static void RunPostPonedEvents(int ignored_effect_id)
         case POSTPONED_OUTPUT_MONITOR:
             if (eventptr->event.parameter.effect_id == ignored_effect_id)
                 continue;
-            if (ShouldIgnorePostPonedEvent(&eventptr->event.parameter, &cached_output_mon))
+            if (ShouldIgnorePostPonedSymbolEvent(&eventptr->event.parameter, &cached_output_mon))
                 continue;
 
             snprintf(buf, MAX_CHAR_BUF_SIZE, "output_set %i %s %f", eventptr->event.parameter.effect_id,
@@ -981,6 +1044,123 @@ static void RunPostPonedEvents(int ignored_effect_id)
             }
             break;
 
+        case POSTPONED_PROCESS_OUTPUT_BUFFER:
+            if (eventptr->event.process_out_buf.effect_id == ignored_effect_id)
+                continue;
+            if (ShouldIgnorePostPonedEffectEvent(eventptr->event.process_out_buf.effect_id, &cached_process_out_buf))
+                continue;
+
+            if (INSTANCE_IS_VALID(eventptr->event.process_out_buf.effect_id))
+            {
+                effect_t *effect = &g_effects[eventptr->event.process_out_buf.effect_id];
+                const size_t space = jack_ringbuffer_read_space(effect->events_out_buffer);
+
+                uint32_t key;
+                LV2_Atom atom;
+                bool supported;
+
+                for (size_t j = 0; j < space; j += sizeof(uint32_t) + sizeof(LV2_Atom) + atom.size)
+                {
+                    jack_ringbuffer_read(effect->events_out_buffer, (char*)&key, sizeof(uint32_t));
+                    jack_ringbuffer_read(effect->events_out_buffer, (char*)&atom, sizeof(LV2_Atom));
+
+                    char *buf = calloc(1, sizeof(atom) + atom.size);
+                    char *body = buf + sizeof(atom);
+                    jack_ringbuffer_read(effect->events_out_buffer, body, atom.size);
+
+                    supported = true;
+                    int wrtn = snprintf(buf, MAX_CHAR_BUF_SIZE, "patch_set %i %s ", effect->instance,
+                                                                                    id_to_urid(g_symap, key));
+                    if (atom.type == g_urids.atom_Bool)
+                    {
+                        snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "%i", ((LV2_Atom_Bool*)body)->body != 0 ? 1 : 0);
+                    }
+                    else if (atom.type == g_urids.atom_Int)
+                    {
+                        snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "%i", ((LV2_Atom_Int*)body)->body);
+                    }
+                    else if (atom.type == g_urids.atom_Long)
+                    {
+                        snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "%" PRId64, ((LV2_Atom_Long*)body)->body);
+                    }
+                    else if (atom.type == g_urids.atom_Float)
+                    {
+                        snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "%f", ((LV2_Atom_Float*)body)->body);
+                    }
+                    else if (atom.type == g_urids.atom_Double)
+                    {
+                        snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "%f", ((LV2_Atom_Double*)body)->body);
+                    }
+                    else if (atom.type == g_urids.atom_String || atom.type == g_urids.atom_URI || atom.type == g_urids.atom_Path)
+                    {
+                        snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "%s", body);
+                    }
+                    else if (atom.type == g_urids.atom_Vector)
+                    {
+                        LV2_Atom_Vector *vector = (LV2_Atom_Vector*)body;
+                        wrtn += snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "%u\n", vector->body.child_size);
+
+                        if (vector->body.child_type == g_urids.atom_Bool)
+                        {
+                            for (uint32_t v = 0; v < vector->body.child_size; ++v)
+                                wrtn += snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn,
+                                                 "%i\n", ((LV2_Atom_Bool*)body)->body != 0 ? 1 : 0);
+                        }
+                        else if (vector->body.child_type == g_urids.atom_Int)
+                        {
+                            for (uint32_t v = 0; v < vector->body.child_size; ++v)
+                                wrtn += snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn,
+                                                 "%i\n", ((LV2_Atom_Int*)body)->body);
+                        }
+                        else if (vector->body.child_type == g_urids.atom_Long)
+                        {
+                            for (uint32_t v = 0; v < vector->body.child_size; ++v)
+                                wrtn += snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn,
+                                                 "%" PRId64 "\n", ((LV2_Atom_Long*)body)->body);
+                        }
+                        else if (vector->body.child_type == g_urids.atom_Float)
+                        {
+                            for (uint32_t v = 0; v < vector->body.child_size; ++v)
+                                wrtn += snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn,
+                                                 "%f\n", ((LV2_Atom_Float*)body)->body);
+                        }
+                        else if (vector->body.child_type == g_urids.atom_Double)
+                        {
+                            for (uint32_t v = 0; v < vector->body.child_size; ++v)
+                                wrtn += snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn,
+                                                 "%f\n", ((LV2_Atom_Float*)body)->body);
+                        }
+                        // TODO string, path, uri
+                        else
+                        {
+                            supported = false;
+                        }
+                    }
+
+                    /*
+                    else if (atom.type == g_urids.atom_Tuple)
+                    {
+                        // LV2_Atom_Tuple *tuple = (LV2_Atom_Tuple*)body;
+                        // TODO
+                    }
+                    */
+
+                    else
+                    {
+                        supported = false;
+                    }
+
+                    if (supported)
+                        socket_send_feedback(buf);
+
+                    free(buf);
+                }
+            }
+
+            // save for fast checkup next time
+            cached_process_out_buf.last_effect_id = eventptr->event.process_out_buf.effect_id;
+            break;
+
         // these are handled later, during "cleanup"
         case POSTPONED_LOG_TRACE:
         case POSTPONED_LOG_MESSAGE:
@@ -993,6 +1173,14 @@ static void RunPostPonedEvents(int ignored_effect_id)
 #endif
 
     // cleanup memory
+    postponed_cached_effect_list_data *peffect;
+    postponed_cached_symbol_list_data *psymbol;
+
+    list_for_each_safe(it, it2, &cached_process_out_buf.effects.siblings)
+    {
+        peffect = list_entry(it, postponed_cached_effect_list_data, siblings);
+        free(peffect);
+    }
     list_for_each_safe(it, it2, &cached_param_set.symbols.siblings)
     {
         psymbol = list_entry(it, postponed_cached_symbol_list_data, siblings);
@@ -1268,18 +1456,18 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
         lv2_evbuf_reset(effect->output_event_ports[i]->evbuf, false);
 
     /* control in events */
-    if (effect->events_buffer && effect->control_index >= 0)
+    if (effect->events_in_buffer && effect->control_index >= 0)
     {
-        const size_t space = jack_ringbuffer_read_space(effect->events_buffer);
+        const size_t space = jack_ringbuffer_read_space(effect->events_in_buffer);
         LV2_Atom atom;
         size_t j;
         for (j = 0; j < space; j += sizeof(atom) + atom.size)
         {
-            jack_ringbuffer_read(effect->events_buffer, (char*)&atom, sizeof(atom));
+            jack_ringbuffer_read(effect->events_in_buffer, (char*)&atom, sizeof(atom));
             char fatom[sizeof(atom)+atom.size];
             memcpy(&fatom, (char*)&atom, sizeof(atom));
             char *body = &fatom[sizeof(atom)];
-            jack_ringbuffer_read(effect->events_buffer, body, atom.size);
+            jack_ringbuffer_read(effect->events_in_buffer, body, atom.size);
             port = effect->ports[effect->control_index];
             LV2_Evbuf_Iterator e = lv2_evbuf_end(port->evbuf);
             const LV2_Atom* const ratom = (const LV2_Atom*)fatom;
@@ -1506,44 +1694,49 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
     {
         port = effect->output_event_ports[i];
 
-        if (port->jack_port && port->flow == FLOW_OUTPUT && port->type == TYPE_EVENT)
+        if (port->flow == FLOW_OUTPUT && port->type == TYPE_EVENT)
         {
-            void* buf = jack_port_get_buffer(port->jack_port, nframes);
-            jack_midi_clear_buffer(buf);
+            void *buf = port->jack_port ? jack_port_get_buffer(port->jack_port, nframes) : NULL;
+
+            if (buf != NULL)
+                jack_midi_clear_buffer(buf);
 
             if (effect->bypass > 0.5f && effect->enabled_index < 0)
             {
                 // effect is now bypassed, but wasn't before
-                if (!effect->was_bypassed)
+                if (buf != NULL)
                 {
-                    jack_midi_data_t bufNotesOff[3] = {
-                        0xB0, // CC
-                        0x7B, // all-notes-off
-                        0
-                    };
-
-                    int j=0;
-
-                    do {
-                        if (jack_midi_event_write(buf, 0, bufNotesOff, 3) != 0)
-                            break;
-                        bufNotesOff[0] += 1;
-                    } while (++j < 16);
-                }
-
-                if (effect->input_audio_ports_count == 0 &&
-                    effect->output_audio_ports_count == 0 &&
-                    effect->input_event_ports_count == effect->output_event_ports_count)
-                {
-                    void* bufIn = jack_port_get_buffer(effect->input_event_ports[i]->jack_port, nframes);
-                    jack_midi_event_t ev;
-
-                    for (i = 0; i < jack_midi_get_event_count(bufIn); ++i)
+                    if (!effect->was_bypassed)
                     {
-                        if (jack_midi_event_get(&ev, bufIn, i) == 0)
-                        {
-                            if (jack_midi_event_write(buf, ev.time, ev.buffer, ev.size) != 0)
+                        jack_midi_data_t bufNotesOff[3] = {
+                            0xB0, // CC
+                            0x7B, // all-notes-off
+                            0
+                        };
+
+                        int j=0;
+
+                        do {
+                            if (jack_midi_event_write(buf, 0, bufNotesOff, 3) != 0)
                                 break;
+                            bufNotesOff[0] += 1;
+                        } while (++j < 16);
+                    }
+
+                    if (effect->input_audio_ports_count == 0 &&
+                        effect->output_audio_ports_count == 0 &&
+                        effect->input_event_ports_count == effect->output_event_ports_count)
+                    {
+                        void* bufIn = jack_port_get_buffer(effect->input_event_ports[i]->jack_port, nframes);
+                        jack_midi_event_t ev;
+
+                        for (i = 0; i < jack_midi_get_event_count(bufIn); ++i)
+                        {
+                            if (jack_midi_event_get(&ev, bufIn, i) == 0)
+                            {
+                                if (jack_midi_event_write(buf, ev.time, ev.buffer, ev.size) != 0)
+                                    break;
+                            }
                         }
                     }
                 }
@@ -1551,14 +1744,54 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
             else
             {
                 LV2_Evbuf_Iterator it;
+                bool can_write_midi = true;
+
                 for (it = lv2_evbuf_begin(port->evbuf); lv2_evbuf_is_valid(it); it = lv2_evbuf_next(it))
                 {
                     uint32_t frames, subframes, type, size;
                     uint8_t* body;
-                    lv2_evbuf_get(it, &frames, &subframes, &type, &size, &body);
-                    if (type == g_urids.midi_MidiEvent)
+
+                    if (! lv2_evbuf_get(it, &frames, &subframes, &type, &size, &body))
+                        continue;
+
+                    if (buf != NULL && type == g_urids.midi_MidiEvent)
                     {
-                        jack_midi_event_write(buf, frames, body, size);
+                        if (can_write_midi && jack_midi_event_write(buf, frames, body, size) == ENOBUFS)
+                            can_write_midi = false;
+                    }
+                    else if (effect->events_out_buffer && type == g_urids.patch_Set)
+                    {
+                        const LV2_Atom_Object *obj    = (const LV2_Atom_Object*)body;
+                        const LV2_Atom_URID *subject  = NULL;
+                        const LV2_Atom_URID *property = NULL;
+                        const LV2_Atom      *value    = NULL;
+
+                        lv2_atom_object_get(obj,
+                                            g_urids.patch_subject,  (const LV2_Atom**)&subject,
+                                            g_urids.patch_property, (const LV2_Atom**)&property,
+                                            g_urids.patch_value,    &value,
+                                            0);
+
+                        // return (!subject || (subject->atom.type == self->uris.atom_URID && subject->body == self->uris.plugin));
+                        if (jack_ringbuffer_write_space(effect->events_out_buffer) < sizeof(LV2_Atom) + value->size)
+                            continue;
+
+                        jack_ringbuffer_write(effect->events_out_buffer, (const char*)&property->atom.type, sizeof(uint32_t));
+                        jack_ringbuffer_write(effect->events_out_buffer, (const char*)value, lv2_atom_total_size(value));
+
+                        postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
+
+                        if (posteventptr == NULL)
+                            continue;
+
+                        posteventptr->event.type = POSTPONED_PROCESS_OUTPUT_BUFFER;
+                        posteventptr->event.process_out_buf.effect_id = effect->instance;
+
+                        pthread_mutex_lock(&g_rtsafe_mutex);
+                        list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
+                        pthread_mutex_unlock(&g_rtsafe_mutex);
+
+                        needs_post = true;
                     }
                 }
             }
@@ -2118,7 +2351,7 @@ static void JackTimebase(jack_transport_state_t state, jack_nframes_t nframes,
 
     if (new_pos || g_transport_reset) // Is caching involved? No.
     {
-      // Do we have to set every "constant" data field every time?
+        // Do we have to set every "constant" data field every time?
         pos->valid = JackPositionBBT;
         pos->beat_type = 4.0f;
         pos->ticks_per_beat = TRANSPORT_TICKS_PER_BEAT;
@@ -2144,10 +2377,10 @@ static void JackTimebase(jack_transport_state_t state, jack_nframes_t nframes,
         else
 #endif
         {
-      /// ????
-      // 1. analyse frame position. 2. calculate ticks. 3. derive values for everything else???
+            /// ????
+            // 1. analyse frame position. 2. calculate ticks. 3. derive values for everything else???
 
-      // What is min? why 60?
+            // What is min? why 60?
             const double min = (double)pos->frame / (double)(g_sample_rate * 60);
             abs_tick = min * pos->beats_per_minute * TRANSPORT_TICKS_PER_BEAT;
             abs_beat = abs_tick / TRANSPORT_TICKS_PER_BEAT;
@@ -2163,12 +2396,12 @@ static void JackTimebase(jack_transport_state_t state, jack_nframes_t nframes,
     }
     else // not new_pos nor g_transport_reset
     {
-      // update the current tick with the beat.
+        // update the current tick with the beat.
         tick = g_transport_tick +
               (nframes * TRANSPORT_TICKS_PER_BEAT *
            pos->beats_per_minute / (double)(g_sample_rate * 60));
 
-    // why adjust? why can overflow happen?
+        // why adjust? why can overflow happen?
         while (tick >= TRANSPORT_TICKS_PER_BEAT)
         {
             tick -= TRANSPORT_TICKS_PER_BEAT;
@@ -2362,7 +2595,7 @@ static void SetParameterFromState(const char* symbol, void* user_data,
             return;
         realvalue = *((const double*)value);
     }
-    else if (type == g_urids.atom_Int)
+    else if (type == g_urids.atom_Int || type == g_urids.atom_Bool)
     {
         if (size != sizeof(int32_t))
             return;
@@ -3022,10 +3255,16 @@ int effects_init(void* client)
     g_urid_unmap.handle = g_symap;
     g_urid_unmap.unmap = id_to_urid;
 
-    g_urids.atom_Float           = urid_to_id(g_symap, LV2_ATOM__Float);
     g_urids.atom_Double          = urid_to_id(g_symap, LV2_ATOM__Double);
+    g_urids.atom_Bool            = urid_to_id(g_symap, LV2_ATOM__Bool);
+    g_urids.atom_Float           = urid_to_id(g_symap, LV2_ATOM__Float);
     g_urids.atom_Int             = urid_to_id(g_symap, LV2_ATOM__Int);
     g_urids.atom_Long            = urid_to_id(g_symap, LV2_ATOM__Long);
+    g_urids.atom_Path            = urid_to_id(g_symap, LV2_ATOM__Path);
+    g_urids.atom_String          = urid_to_id(g_symap, LV2_ATOM__String);
+    g_urids.atom_Tuple           = urid_to_id(g_symap, LV2_ATOM__Tuple);
+    g_urids.atom_URI             = urid_to_id(g_symap, LV2_ATOM__URI);
+    g_urids.atom_Vector          = urid_to_id(g_symap, LV2_ATOM__Vector);
     g_urids.atom_eventTransfer   = urid_to_id(g_symap, LV2_ATOM__eventTransfer);
 
     g_urids.bufsz_maxBlockLength     = urid_to_id(g_symap, LV2_BUF_SIZE__maxBlockLength);
@@ -3044,6 +3283,7 @@ int effects_init(void* client)
     g_urids.patch_Get            = urid_to_id(g_symap, LV2_PATCH__Get);
     g_urids.patch_Set            = urid_to_id(g_symap, LV2_PATCH__Set);
     g_urids.patch_property       = urid_to_id(g_symap, LV2_PATCH__property);
+    g_urids.patch_subject        = urid_to_id(g_symap, LV2_PATCH__subject);
     g_urids.patch_value          = urid_to_id(g_symap, LV2_PATCH__value);
 
     g_urids.time_Position        = urid_to_id(g_symap, LV2_TIME__Position);
@@ -3264,10 +3504,12 @@ int effects_add(const char *uri, int instance)
     LilvNode *lilv_minimum, *lilv_mod_minimum;
     LilvNode *lilv_maximum, *lilv_mod_maximum;
     LilvNode *lilv_preferMomentaryOff, *lilv_preferMomentaryOn;
+    LilvNode *lilv_minimumSize;
     LilvNode *lilv_atom_port, *lilv_worker_interface, *lilv_license_interface, *lilv_state_interface;
-    const LilvPort* control_in_port;
+    const LilvPort *control_in_port;
     const LilvPort *lilv_port;
     const LilvNode *symbol_node;
+    uint32_t control_in_size, control_out_size;
 
     if (!uri) return ERR_LV2_INVALID_URI;
     if (!INSTANCE_IS_VALID(instance)) return ERR_INSTANCE_INVALID;
@@ -3309,6 +3551,7 @@ int effects_add(const char *uri, int instance)
     lilv_mod_cvport = NULL;
     lilv_preferMomentaryOff = NULL;
     lilv_preferMomentaryOn = NULL;
+    lilv_minimumSize = NULL;
     lilv_event = NULL;
     lilv_atom_port = NULL;
     lilv_worker_interface = NULL;
@@ -3456,6 +3699,7 @@ int effects_add(const char *uri, int instance)
     lilv_mod_cvport = lilv_new_uri(g_lv2_data, LILV_NS_MOD "CVPort");
     lilv_preferMomentaryOff = lilv_new_uri(g_lv2_data, LILV_NS_MOD "preferMomentaryOffByDefault");
     lilv_preferMomentaryOn = lilv_new_uri(g_lv2_data, LILV_NS_MOD "preferMomentaryOnByDefault");
+    lilv_minimumSize = lilv_new_uri(g_lv2_data, LV2_RESIZE_PORT__minimumSize);
 
     /* Allocate memory to ports */
     audio_ports_count = 0;
@@ -3476,6 +3720,19 @@ int effects_add(const char *uri, int instance)
     effect->monitors = NULL;
     effect->ports_count = ports_count;
     effect->ports = (port_t **) calloc(ports_count, sizeof(port_t *));
+
+    control_in_port = lilv_plugin_get_port_by_designation(plugin, lilv_input, lilv_control_in);
+    if (control_in_port)
+    {
+        control_in_size = g_midi_buffer_size * 16; // 16 taken from jalv source code
+        effect->control_index = lilv_port_get_index(plugin, control_in_port);
+    }
+    else
+    {
+        control_in_size = 0;
+        effect->control_index = -1;
+    }
+    control_out_size = 0;
 
     for (i = 0; i < ports_count; i++)
     {
@@ -3758,6 +4015,30 @@ int effects_add(const char *uri, int instance)
                 effect->hints |= HINT_TRANSPORT;
             }
 
+            if (port->flow == FLOW_OUTPUT && control_out_size == 0)
+                control_out_size = g_midi_buffer_size * 16; // 16 taken from jalv source code
+
+            LilvNodes *lilvminsize = lilv_port_get_value(plugin, lilv_port, lilv_minimumSize);
+            if (lilvminsize != NULL)
+            {
+                const int iminsize = lilv_node_as_int(lilvminsize);
+                if (iminsize > 0)
+                {
+                    const uint minsize = (uint)iminsize;
+                    if (port->flow == FLOW_INPUT)
+                    {
+                        if (minsize > control_in_size)
+                            control_in_size = minsize;
+                    }
+                    else if (port->flow == FLOW_OUTPUT)
+                    {
+                        if (minsize > control_out_size)
+                            control_out_size = minsize;
+                    }
+                }
+                lilv_nodes_free(lilvminsize);
+            }
+
             jack_port = jack_port_register(jack_client, port_name, JACK_DEFAULT_MIDI_TYPE, jack_flags, 0);
             if (jack_port == NULL)
             {
@@ -3771,16 +4052,6 @@ int effects_add(const char *uri, int instance)
             if (lilv_port_is_a(plugin, lilv_port, lilv_input)) input_event_ports_count++;
             else if (lilv_port_is_a(plugin, lilv_port, lilv_output)) output_event_ports_count++;
         }
-    }
-
-    control_in_port = lilv_plugin_get_port_by_designation(plugin, lilv_input, lilv_control_in);
-    if (control_in_port)
-    {
-        effect->control_index = lilv_port_get_index(plugin, control_in_port);
-    }
-    else
-    {
-        effect->control_index = -1;
     }
 
     // special ports
@@ -4051,6 +4322,18 @@ int effects_add(const char *uri, int instance)
         lilv_nodes_free(readable_properties);
     }
 
+    /* create ring buffer for events from socket/commandline */
+    if (control_in_size != 0)
+    {
+        effect->events_in_buffer = jack_ringbuffer_create(control_in_size);
+        jack_ringbuffer_mlock(effect->events_in_buffer);
+    }
+    if (control_out_size != 0)
+    {
+        effect->events_out_buffer = jack_ringbuffer_create(control_out_size);
+        jack_ringbuffer_mlock(effect->events_out_buffer);
+    }
+
     /* Default value of bypass */
     effect->bypass = 0.0f;
     effect->was_bypassed = false;
@@ -4112,6 +4395,7 @@ int effects_add(const char *uri, int instance)
     lilv_node_free(lilv_mod_cvport);
     lilv_node_free(lilv_preferMomentaryOff);
     lilv_node_free(lilv_preferMomentaryOn);
+    lilv_node_free(lilv_minimumSize);
     lilv_node_free(lilv_atom_port);
     lilv_node_free(lilv_worker_interface);
     lilv_node_free(lilv_license_interface);
@@ -4124,13 +4408,6 @@ int effects_add(const char *uri, int instance)
     jack_set_freewheel_callback(jack_client, FreeWheelMode, effect);
 
     lilv_instance_activate(lilv_instance);
-
-    /* create ring buffer for events from socket/commandline */
-    if (control_in_port)
-    {
-        effect->events_buffer = jack_ringbuffer_create(g_midi_buffer_size * 16); // 16 taken from jalv source code
-        jack_ringbuffer_mlock(effect->events_buffer);
-    }
 
     /* Try activate the Jack client */
     if (jack_activate(jack_client) != 0)
@@ -4173,6 +4450,7 @@ int effects_add(const char *uri, int instance)
         lilv_node_free(lilv_mod_cvport);
         lilv_node_free(lilv_preferMomentaryOff);
         lilv_node_free(lilv_preferMomentaryOn);
+        lilv_node_free(lilv_minimumSize);
         lilv_node_free(lilv_atom_port);
         lilv_node_free(lilv_worker_interface);
         lilv_node_free(lilv_license_interface);
@@ -4380,7 +4658,8 @@ int effects_remove(int effect_id)
         {
             effect = &g_effects[j];
 
-            if (jack_deactivate(effect->jack_client) != 0) return ERR_JACK_CLIENT_DEACTIVATION;
+            if (jack_deactivate(effect->jack_client) != 0)
+                return ERR_JACK_CLIENT_DEACTIVATION;
 
             FreeFeatures(effect);
 
@@ -4421,17 +4700,21 @@ int effects_remove(int effect_id)
                 free(effect->properties);
             }
 
-            if (effect->lilv_instance) lilv_instance_deactivate(effect->lilv_instance);
+            if (effect->lilv_instance)
+                lilv_instance_deactivate(effect->lilv_instance);
             lilv_instance_free(effect->lilv_instance);
-            if (effect->jack_client) jack_client_close(effect->jack_client);
+
+            if (effect->jack_client)
+                jack_client_close(effect->jack_client);
 
             free(effect->audio_ports);
             free(effect->input_audio_ports);
             free(effect->output_audio_ports);
             free(effect->control_ports);
-            if (effect->events_buffer) {
-                jack_ringbuffer_free (effect->events_buffer);
-            }
+            if (effect->events_in_buffer)
+                jack_ringbuffer_free(effect->events_in_buffer);
+            if (effect->events_out_buffer)
+                jack_ringbuffer_free(effect->events_out_buffer);
 
             if (effect->presets)
             {
@@ -4513,20 +4796,23 @@ int effects_remove(int effect_id)
 #endif
 
         // reset all events
+        struct list_head queue;
+        INIT_LIST_HEAD(&queue);
+
+        // move rtsafe list to our local queue, and clear it
         pthread_mutex_lock(&g_rtsafe_mutex);
+        list_splice_init(&g_rtsafe_list, &queue);
+        pthread_mutex_unlock(&g_rtsafe_mutex);
 
         // cleanup pending events memory
         struct list_head *it;
         postponed_event_list_data* eventptr;
 
-        list_for_each(it, &g_rtsafe_list)
+        list_for_each(it, &queue)
         {
             eventptr = list_entry(it, postponed_event_list_data, siblings);
             rtsafe_memory_pool_deallocate(g_rtsafe_mem_pool, eventptr);
         }
-
-        INIT_LIST_HEAD(&g_rtsafe_list);
-        pthread_mutex_unlock(&g_rtsafe_mutex);
     }
     else
     {
@@ -4878,7 +5164,7 @@ int effects_set_property(int effect_id, const char *uri, size_t size, const char
     {
         effect_t *effect = &g_effects[effect_id];
 
-        if (!effect->events_buffer) {
+        if (effect->events_in_buffer == NULL) {
             return ERR_INVALID_OPERATION;
         }
 
@@ -4916,7 +5202,9 @@ int effects_set_property(int effect_id, const char *uri, size_t size, const char
             if (lv2_atom_forge_property_set(&forge, urid, value, size, type))
             {
                 const LV2_Atom* atom = (LV2_Atom*)buf;
-                jack_ringbuffer_write(effect->events_buffer, (const char*)atom, lv2_atom_total_size(atom));
+                jack_ringbuffer_write(effect->events_in_buffer,
+                                      (const char*)atom,
+                                      lv2_atom_total_size(atom));
                 free(buf);
                 return SUCCESS;
             }
@@ -4936,7 +5224,7 @@ int effects_get_property(int effect_id, const char *uri)
     {
         effect_t *effect = &g_effects[effect_id];
 
-        if (!effect->events_buffer) {
+        if (!effect->events_in_buffer) {
             return ERR_INVALID_OPERATION;
         }
 
@@ -4962,7 +5250,9 @@ int effects_get_property(int effect_id, const char *uri)
         lv2_atom_forge_pop(&forge, &frame);
 
         const LV2_Atom* atom = (LV2_Atom*)buf;
-        jack_ringbuffer_write(effect->events_buffer, (const char*)atom, lv2_atom_total_size(atom));
+        jack_ringbuffer_write(effect->events_in_buffer,
+                              (const char*)atom,
+                              lv2_atom_total_size(atom));
         return SUCCESS;
     }
 
