@@ -1065,8 +1065,7 @@ static void RunPostPonedEvents(int ignored_effect_id)
                     jack_ringbuffer_read(effect->events_out_buffer, (char*)&key, sizeof(uint32_t));
                     jack_ringbuffer_read(effect->events_out_buffer, (char*)&atom, sizeof(LV2_Atom));
 
-                    char *buf = calloc(1, sizeof(atom) + atom.size);
-                    char *body = buf + sizeof(atom);
+                    char *body = calloc(1, atom.size);
                     jack_ringbuffer_read(effect->events_out_buffer, body, atom.size);
 
                     supported = true;
@@ -1098,43 +1097,63 @@ static void RunPostPonedEvents(int ignored_effect_id)
                     }
                     else if (atom.type == g_urids.atom_Vector)
                     {
-                        LV2_Atom_Vector *vector = (LV2_Atom_Vector*)body;
-                        wrtn += snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "%u\n", vector->body.child_size);
+                        LV2_Atom_Vector_Body *vbody = (LV2_Atom_Vector_Body*)body;
+                        uint32_t n_elems = (atom.size - sizeof(LV2_Atom_Vector_Body)) / vbody->child_size;
 
-                        if (vector->body.child_type == g_urids.atom_Bool)
+                        wrtn += snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "%u\n", n_elems);
+
+                        char* rbuf;
+                        if (n_elems <= 8)
                         {
-                            for (uint32_t v = 0; v < vector->body.child_size; ++v)
-                                wrtn += snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn,
-                                                 "%i\n", ((LV2_Atom_Bool*)body)->body != 0 ? 1 : 0);
+                            rbuf = buf;
                         }
-                        else if (vector->body.child_type == g_urids.atom_Int)
+                        else
                         {
-                            for (uint32_t v = 0; v < vector->body.child_size; ++v)
-                                wrtn += snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn,
-                                                 "%i\n", ((LV2_Atom_Int*)body)->body);
+                            rbuf = malloc(strlen(buf) + (n_elems * 16 + 1));
+                            strcpy(rbuf, buf);
                         }
-                        else if (vector->body.child_type == g_urids.atom_Long)
+
+                        if (vbody->child_type == g_urids.atom_Bool)
                         {
-                            for (uint32_t v = 0; v < vector->body.child_size; ++v)
-                                wrtn += snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn,
-                                                 "%" PRId64 "\n", ((LV2_Atom_Long*)body)->body);
+                            int32_t *vcontent = (int32_t*)(vbody + 1);
+                            for (uint32_t v = 0; v < n_elems; ++v)
+                                wrtn += snprintf(rbuf + wrtn, 16, "%i\n", *(vcontent + v) != 0 ? 1 : 0);
                         }
-                        else if (vector->body.child_type == g_urids.atom_Float)
+                        else if (vbody->child_type == g_urids.atom_Int)
                         {
-                            for (uint32_t v = 0; v < vector->body.child_size; ++v)
-                                wrtn += snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn,
-                                                 "%f\n", ((LV2_Atom_Float*)body)->body);
+                            int32_t *vcontent = (int32_t*)(vbody + 1);
+                            for (uint32_t v = 0; v < n_elems; ++v)
+                                wrtn += snprintf(rbuf + wrtn, 16, "%i\n", *(vcontent + v));
                         }
-                        else if (vector->body.child_type == g_urids.atom_Double)
+                        else if (vbody->child_type == g_urids.atom_Long)
                         {
-                            for (uint32_t v = 0; v < vector->body.child_size; ++v)
-                                wrtn += snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn,
-                                                 "%f\n", ((LV2_Atom_Float*)body)->body);
+                            int64_t *vcontent = (int64_t*)(vbody + 1);
+                            for (uint32_t v = 0; v < n_elems; ++v)
+                                wrtn += snprintf(rbuf + wrtn, 16, "%" PRIi64 "\n", *(vcontent + v));
+                        }
+                        else if (vbody->child_type == g_urids.atom_Float)
+                        {
+                            float *vcontent = (float*)(vbody + 1);
+                            for (uint32_t v = 0; v < n_elems; ++v)
+                                wrtn += snprintf(rbuf + wrtn, 16, "%f\n", *(vcontent + v));
+                        }
+                        else if (vbody->child_type == g_urids.atom_Double)
+                        {
+                            double *vcontent = (double*)(vbody + 1);
+                            for (uint32_t v = 0; v < n_elems; ++v)
+                                wrtn += snprintf(rbuf + wrtn, 16, "%f\n", *(vcontent + v));
                         }
                         // TODO string, path, uri
                         else
                         {
                             supported = false;
+                        }
+
+                        if (rbuf != buf)
+                        {
+                            supported = false;
+                            socket_send_feedback(rbuf);
+                            free(rbuf);
                         }
                     }
 
@@ -1154,7 +1173,7 @@ static void RunPostPonedEvents(int ignored_effect_id)
                     if (supported)
                         socket_send_feedback(buf);
 
-                    free(buf);
+                    free(body);
                 }
             }
 
@@ -1776,10 +1795,10 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
                                                      g_urids.patch_value,    &value,
                                                      0);
 
-                            if (jack_ringbuffer_write_space(effect->events_out_buffer) < sizeof(LV2_Atom) + value->size)
+                            if (jack_ringbuffer_write_space(effect->events_out_buffer) < sizeof(uint32_t) + sizeof(LV2_Atom) + value->size)
                                 continue;
 
-                            jack_ringbuffer_write(effect->events_out_buffer, (const char*)&property->atom.type, sizeof(uint32_t));
+                            jack_ringbuffer_write(effect->events_out_buffer, (const char*)&property->body, sizeof(uint32_t));
                             jack_ringbuffer_write(effect->events_out_buffer, (const char*)value, lv2_atom_total_size(value));
 
                             postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
