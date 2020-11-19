@@ -1036,12 +1036,15 @@ static void RunPostPonedEvents(int ignored_effect_id)
             break;
 
         case POSTPONED_JACK_MIDI_CONNECT:
-            if (g_jack_global_client != NULL && g_midi_in_port != NULL) {
-                const jack_port_t* const port = jack_port_by_id(g_jack_global_client,
-                                                                eventptr->event.jack_midi_connect.port);
+            if (g_jack_global_client != NULL) {
+                const jack_port_id_t port_id = eventptr->event.jack_midi_connect.port;
+                const jack_port_t *const port = jack_port_by_id(g_jack_global_client, port_id);
 
-                if (port != NULL)
-                    jack_connect(g_jack_global_client, jack_port_name(port), jack_port_name(g_midi_in_port));
+                if (port != NULL) {
+                    if (g_midi_in_port != NULL)
+                        jack_connect(g_jack_global_client, jack_port_name(port), jack_port_name(g_midi_in_port));
+                    // TODO list of ports
+                }
             }
             break;
 
@@ -3527,7 +3530,7 @@ int effects_add(const char *uri, int instance)
     LilvNode *lilv_default, *lilv_mod_default;
     LilvNode *lilv_minimum, *lilv_mod_minimum;
     LilvNode *lilv_maximum, *lilv_mod_maximum;
-    LilvNode *lilv_preferMomentaryOff, *lilv_preferMomentaryOn;
+    LilvNode *lilv_preferMomentaryOff, *lilv_preferMomentaryOn, *lilv_rawMIDIClockAcess;
     LilvNode *lilv_minimumSize;
     LilvNode *lilv_atom_port, *lilv_worker_interface, *lilv_license_interface, *lilv_state_interface;
     const LilvPort *control_in_port;
@@ -3575,6 +3578,7 @@ int effects_add(const char *uri, int instance)
     lilv_mod_cvport = NULL;
     lilv_preferMomentaryOff = NULL;
     lilv_preferMomentaryOn = NULL;
+    lilv_rawMIDIClockAcess = NULL;
     lilv_minimumSize = NULL;
     lilv_event = NULL;
     lilv_atom_port = NULL;
@@ -3723,6 +3727,7 @@ int effects_add(const char *uri, int instance)
     lilv_mod_cvport = lilv_new_uri(g_lv2_data, LILV_NS_MOD "CVPort");
     lilv_preferMomentaryOff = lilv_new_uri(g_lv2_data, LILV_NS_MOD "preferMomentaryOffByDefault");
     lilv_preferMomentaryOn = lilv_new_uri(g_lv2_data, LILV_NS_MOD "preferMomentaryOnByDefault");
+    lilv_rawMIDIClockAcess = lilv_new_uri(g_lv2_data, LILV_NS_MOD "rawMIDIClockAcess");
     lilv_minimumSize = lilv_new_uri(g_lv2_data, LV2_RESIZE_PORT__minimumSize);
 
     /* Allocate memory to ports */
@@ -4075,6 +4080,17 @@ int effects_add(const char *uri, int instance)
 
             if (lilv_port_is_a(plugin, lilv_port, lilv_input)) input_event_ports_count++;
             else if (lilv_port_is_a(plugin, lilv_port, lilv_output)) output_event_ports_count++;
+
+            // TODO this likely needs to be after jack_activate
+            if (lilv_port_has_property(plugin, lilv_port, lilv_rawMIDIClockAcess))
+            {
+                if (g_aggregated_midi_enabled)
+                {
+                    const char *portname = jack_port_name(jack_port);
+                    jack_connect(g_jack_global_client, "mod-midi-merger:out", portname);
+                }
+                // TODO add to list
+            }
         }
     }
 
@@ -4419,6 +4435,7 @@ int effects_add(const char *uri, int instance)
     lilv_node_free(lilv_mod_cvport);
     lilv_node_free(lilv_preferMomentaryOff);
     lilv_node_free(lilv_preferMomentaryOn);
+    lilv_node_free(lilv_rawMIDIClockAcess);
     lilv_node_free(lilv_minimumSize);
     lilv_node_free(lilv_atom_port);
     lilv_node_free(lilv_worker_interface);
@@ -4474,6 +4491,7 @@ int effects_add(const char *uri, int instance)
         lilv_node_free(lilv_mod_cvport);
         lilv_node_free(lilv_preferMomentaryOff);
         lilv_node_free(lilv_preferMomentaryOn);
+        lilv_node_free(lilv_rawMIDIClockAcess);
         lilv_node_free(lilv_minimumSize);
         lilv_node_free(lilv_atom_port);
         lilv_node_free(lilv_worker_interface);
