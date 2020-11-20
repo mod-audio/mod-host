@@ -2847,7 +2847,10 @@ static char* GetLicenseFile(MOD_License_Handle handle, const char *license_uri)
     // read file
     fseek(file, 0, SEEK_SET);
     if (fread(filebuffer, 1, filesize, file) != (size_t)filesize)
+    {
+        free(filebuffer);
         filebuffer = NULL;
+    }
 
 end:
     fclose(file);
