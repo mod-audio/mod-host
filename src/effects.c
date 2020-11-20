@@ -535,6 +535,12 @@ typedef struct POSTPONED_CACHED_SYMBOL_EVENTS {
     postponed_cached_symbol_list_data symbols;
 } postponed_cached_symbol_events;
 
+typedef struct RAW_MIDI_PORT_ITEM {
+    int instance;
+    jack_port_t* jack_port;
+    struct list_head siblings;
+} raw_midi_port_item;
+
 
 /*
 ************************************************************************************************************************
@@ -569,6 +575,10 @@ static volatile int  g_postevents_running; // 0: stopped, 1: running, -1: stoppe
 static volatile bool g_postevents_ready;
 static sem_t         g_postevents_semaphore;
 static pthread_t     g_postevents_thread;
+
+/* raw-midi-clock-access ports */
+static struct list_head g_raw_midi_port_list;
+static pthread_mutex_t  g_raw_midi_port_mutex;
 
 /* Jack */
 static jack_client_t *g_jack_global_client;
@@ -1043,7 +1053,18 @@ static void RunPostPonedEvents(int ignored_effect_id)
                 if (port != NULL) {
                     if (g_midi_in_port != NULL)
                         jack_connect(g_jack_global_client, jack_port_name(port), jack_port_name(g_midi_in_port));
-                    // TODO list of ports
+
+                    struct list_head *it3;
+                    pthread_mutex_lock(&g_raw_midi_port_mutex);
+                    list_for_each(it3, &g_raw_midi_port_list)
+                    {
+                        raw_midi_port_item* const portitemptr = list_entry(it3, raw_midi_port_item, siblings);
+
+                        jack_connect(g_jack_global_client,
+                                      jack_port_name(port),
+                                      jack_port_name(portitemptr->jack_port));
+                    }
+                    pthread_mutex_unlock(&g_raw_midi_port_mutex);
                 }
             }
             break;
@@ -2740,6 +2761,19 @@ static void ConnectToAllHardwareMIDIPorts(void)
         for (int i=0; midihwports[i] != NULL; ++i)
             jack_connect(g_jack_global_client, midihwports[i], ourportname);
 
+        struct list_head *it;
+        pthread_mutex_lock(&g_raw_midi_port_mutex);
+        list_for_each(it, &g_raw_midi_port_list)
+        {
+            raw_midi_port_item* const portitemptr = list_entry(it, raw_midi_port_item, siblings);
+
+            for (int i=0; midihwports[i] != NULL; ++i)
+                jack_connect(g_jack_global_client,
+                             midihwports[i],
+                             jack_port_name(portitemptr->jack_port));
+        }
+        pthread_mutex_unlock(&g_raw_midi_port_mutex);
+
         jack_free(midihwports);
     }
 }
@@ -3100,6 +3134,7 @@ int effects_init(void* client)
     memset(g_effects, 0, sizeof(g_effects));
 
     INIT_LIST_HEAD(&g_rtsafe_list);
+    INIT_LIST_HEAD(&g_raw_midi_port_list);
 
     if (!rtsafe_memory_pool_create(&g_rtsafe_mem_pool, "mod-host", sizeof(postponed_event_list_data),
                                    MAX_POSTPONED_EVENTS))
@@ -3117,6 +3152,7 @@ int effects_init(void* client)
 #endif
 
     pthread_mutex_init(&g_rtsafe_mutex, &mutex_atts);
+    pthread_mutex_init(&g_raw_midi_port_mutex, &mutex_atts);
     pthread_mutex_init(&g_midi_learning_mutex, &mutex_atts);
 
     sem_init(&g_postevents_semaphore, 0, 0);
@@ -3474,6 +3510,7 @@ int effects_finish(int close_client)
     rtsafe_memory_pool_destroy(g_rtsafe_mem_pool);
     sem_destroy(&g_postevents_semaphore);
     pthread_mutex_destroy(&g_rtsafe_mutex);
+    pthread_mutex_destroy(&g_raw_midi_port_mutex);
     pthread_mutex_destroy(&g_midi_learning_mutex);
 
     effect_t *effect = &g_effects[GLOBAL_EFFECT_ID];
@@ -3518,6 +3555,7 @@ int effects_add(const char *uri, int instance)
     jack_client_t *jack_client;
     jack_status_t jack_status;
     unsigned long jack_flags = 0;
+    jack_port_t *raw_midi_port = NULL;
 
     /* Lilv */
     const LilvPlugin *plugin;
@@ -3530,7 +3568,7 @@ int effects_add(const char *uri, int instance)
     LilvNode *lilv_default, *lilv_mod_default;
     LilvNode *lilv_minimum, *lilv_mod_minimum;
     LilvNode *lilv_maximum, *lilv_mod_maximum;
-    LilvNode *lilv_preferMomentaryOff, *lilv_preferMomentaryOn, *lilv_rawMIDIClockAcess;
+    LilvNode *lilv_preferMomentaryOff, *lilv_preferMomentaryOn, *lilv_rawMIDIClockAccess;
     LilvNode *lilv_minimumSize;
     LilvNode *lilv_atom_port, *lilv_worker_interface, *lilv_license_interface, *lilv_state_interface;
     const LilvPort *control_in_port;
@@ -3578,7 +3616,7 @@ int effects_add(const char *uri, int instance)
     lilv_mod_cvport = NULL;
     lilv_preferMomentaryOff = NULL;
     lilv_preferMomentaryOn = NULL;
-    lilv_rawMIDIClockAcess = NULL;
+    lilv_rawMIDIClockAccess = NULL;
     lilv_minimumSize = NULL;
     lilv_event = NULL;
     lilv_atom_port = NULL;
@@ -3727,7 +3765,7 @@ int effects_add(const char *uri, int instance)
     lilv_mod_cvport = lilv_new_uri(g_lv2_data, LILV_NS_MOD "CVPort");
     lilv_preferMomentaryOff = lilv_new_uri(g_lv2_data, LILV_NS_MOD "preferMomentaryOffByDefault");
     lilv_preferMomentaryOn = lilv_new_uri(g_lv2_data, LILV_NS_MOD "preferMomentaryOnByDefault");
-    lilv_rawMIDIClockAcess = lilv_new_uri(g_lv2_data, LILV_NS_MOD "rawMIDIClockAcess");
+    lilv_rawMIDIClockAccess = lilv_new_uri(g_lv2_data, LILV_NS_MOD "rawMIDIClockAccess");
     lilv_minimumSize = lilv_new_uri(g_lv2_data, LV2_RESIZE_PORT__minimumSize);
 
     /* Allocate memory to ports */
@@ -4081,15 +4119,20 @@ int effects_add(const char *uri, int instance)
             if (lilv_port_is_a(plugin, lilv_port, lilv_input)) input_event_ports_count++;
             else if (lilv_port_is_a(plugin, lilv_port, lilv_output)) output_event_ports_count++;
 
-            // TODO this likely needs to be after jack_activate
-            if (lilv_port_has_property(plugin, lilv_port, lilv_rawMIDIClockAcess))
+            if (raw_midi_port == NULL && lilv_port_has_property(plugin, lilv_port, lilv_rawMIDIClockAccess))
             {
-                if (g_aggregated_midi_enabled)
+                raw_midi_port_item* const portitemptr = malloc(sizeof(raw_midi_port_item));
+
+                if (portitemptr != NULL)
                 {
-                    const char *portname = jack_port_name(jack_port);
-                    jack_connect(g_jack_global_client, "mod-midi-merger:out", portname);
+                    raw_midi_port = jack_port;
+                    portitemptr->instance = instance;
+                    portitemptr->jack_port = jack_port;
+
+                    pthread_mutex_lock(&g_raw_midi_port_mutex);
+                    list_add_tail(&portitemptr->siblings, &g_raw_midi_port_list);
+                    pthread_mutex_unlock(&g_raw_midi_port_mutex);
                 }
-                // TODO add to list
             }
         }
     }
@@ -4435,7 +4478,7 @@ int effects_add(const char *uri, int instance)
     lilv_node_free(lilv_mod_cvport);
     lilv_node_free(lilv_preferMomentaryOff);
     lilv_node_free(lilv_preferMomentaryOn);
-    lilv_node_free(lilv_rawMIDIClockAcess);
+    lilv_node_free(lilv_rawMIDIClockAccess);
     lilv_node_free(lilv_minimumSize);
     lilv_node_free(lilv_atom_port);
     lilv_node_free(lilv_worker_interface);
@@ -4456,6 +4499,29 @@ int effects_add(const char *uri, int instance)
         fprintf(stderr, "can't activate jack_client\n");
         error = ERR_JACK_CLIENT_ACTIVATION;
         goto error;
+    }
+
+    if (raw_midi_port != NULL)
+    {
+        const char *rawportname = jack_port_name(raw_midi_port);
+
+        if (g_aggregated_midi_enabled)
+        {
+            jack_connect(g_jack_global_client, "mod-midi-merger:out", rawportname);
+        }
+        else
+        {
+            const char** const midihwports = jack_get_ports(g_jack_global_client, "",
+                                                            JACK_DEFAULT_MIDI_TYPE,
+                                                            JackPortIsTerminal|JackPortIsPhysical|JackPortIsOutput);
+            if (midihwports != NULL)
+            {
+                for (int i=0; midihwports[i] != NULL; ++i)
+                    jack_connect(g_jack_global_client, midihwports[i], rawportname);
+
+                jack_free(midihwports);
+            }
+        }
     }
 
     LoadPresets(effect);
@@ -4491,7 +4557,7 @@ int effects_add(const char *uri, int instance)
         lilv_node_free(lilv_mod_cvport);
         lilv_node_free(lilv_preferMomentaryOff);
         lilv_node_free(lilv_preferMomentaryOn);
-        lilv_node_free(lilv_rawMIDIClockAcess);
+        lilv_node_free(lilv_rawMIDIClockAccess);
         lilv_node_free(lilv_minimumSize);
         lilv_node_free(lilv_atom_port);
         lilv_node_free(lilv_worker_interface);
@@ -4838,26 +4904,49 @@ int effects_remove(int effect_id)
 #endif
 
         // reset all events
-        struct list_head queue;
-        INIT_LIST_HEAD(&queue);
+        struct list_head queue, *it, *it2;
 
-        // move rtsafe list to our local queue, and clear it
+        // RT/mempool stuff
+        INIT_LIST_HEAD(&queue);
         pthread_mutex_lock(&g_rtsafe_mutex);
         list_splice_init(&g_rtsafe_list, &queue);
         pthread_mutex_unlock(&g_rtsafe_mutex);
 
-        // cleanup pending events memory
-        struct list_head *it;
-        postponed_event_list_data* eventptr;
-
-        list_for_each(it, &queue)
+        list_for_each_safe(it, it2, &queue)
         {
-            eventptr = list_entry(it, postponed_event_list_data, siblings);
+            postponed_event_list_data *const eventptr = list_entry(it, postponed_event_list_data, siblings);
             rtsafe_memory_pool_deallocate(g_rtsafe_mem_pool, eventptr);
+        }
+
+        // raw midi port list
+        INIT_LIST_HEAD(&queue);
+        pthread_mutex_lock(&g_raw_midi_port_mutex);
+        list_splice_init(&g_raw_midi_port_list, &queue);
+        pthread_mutex_unlock(&g_raw_midi_port_mutex);
+
+        list_for_each_safe(it, it2, &queue)
+        {
+            raw_midi_port_item *const portitemptr = list_entry(it, raw_midi_port_item, siblings);
+            free(portitemptr);
         }
     }
     else
     {
+        struct list_head *it;
+        pthread_mutex_lock(&g_raw_midi_port_mutex);
+        list_for_each(it, &g_raw_midi_port_list)
+        {
+            raw_midi_port_item *const portitemptr = list_entry(it, raw_midi_port_item, siblings);
+
+            if (portitemptr->instance == effect_id)
+            {
+                list_del(it);
+                free(portitemptr);
+                break;
+            }
+        }
+        pthread_mutex_unlock(&g_raw_midi_port_mutex);
+
         pthread_mutex_lock(&g_midi_learning_mutex);
         if (g_midi_learning != NULL && g_midi_learning->effect_id == effect_id)
         {
@@ -6605,6 +6694,18 @@ int effects_aggregated_midi_enable(int enable)
 
         // step 4. Connect to midi-merger */
         jack_connect(g_jack_global_client, "mod-midi-merger:out", ourportname);
+
+        // step 5. Connect all raw-midi ports too */
+        {
+            struct list_head *it;
+            pthread_mutex_lock(&g_raw_midi_port_mutex);
+            list_for_each(it, &g_raw_midi_port_list)
+            {
+                raw_midi_port_item* const portitemptr = list_entry(it, raw_midi_port_item, siblings);
+                jack_connect(g_jack_global_client, "mod-midi-merger:out", jack_port_name(portitemptr->jack_port));
+            }
+            pthread_mutex_unlock(&g_raw_midi_port_mutex);
+        }
 
     } else {
         // step 1. remove aggregated midi clients
