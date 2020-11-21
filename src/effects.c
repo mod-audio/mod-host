@@ -1124,7 +1124,7 @@ static void RunPostPonedEvents(int ignored_effect_id)
                         LV2_Atom_Vector_Body *vbody = (LV2_Atom_Vector_Body*)body;
                         uint32_t n_elems = (atom.size - sizeof(LV2_Atom_Vector_Body)) / vbody->child_size;
 
-                        wrtn += snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "%u\n", n_elems);
+                        wrtn += snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "%u ", n_elems);
 
                         char* rbuf;
                         if (n_elems <= 8)
@@ -1133,45 +1133,56 @@ static void RunPostPonedEvents(int ignored_effect_id)
                         }
                         else
                         {
-                            rbuf = malloc(strlen(buf) + (n_elems * 16 + 1));
+                            rbuf = malloc(strlen(buf) + (n_elems * 16 + 1) + 3);
                             strcpy(rbuf, buf);
                         }
 
                         if (vbody->child_type == g_urids.atom_Bool)
                         {
+                            rbuf[wrtn++] = 'b';
+                            rbuf[wrtn++] = ' ';
                             int32_t *vcontent = (int32_t*)(vbody + 1);
                             for (uint32_t v = 0; v < n_elems; ++v)
-                                wrtn += snprintf(rbuf + wrtn, 16, "%i\n", *(vcontent + v) != 0 ? 1 : 0);
+                                wrtn += snprintf(rbuf + wrtn, 16, "%i:", *(vcontent + v) != 0 ? 1 : 0);
                         }
                         else if (vbody->child_type == g_urids.atom_Int)
                         {
+                            rbuf[wrtn++] = 'i';
+                            rbuf[wrtn++] = ' ';
                             int32_t *vcontent = (int32_t*)(vbody + 1);
                             for (uint32_t v = 0; v < n_elems; ++v)
-                                wrtn += snprintf(rbuf + wrtn, 16, "%i\n", *(vcontent + v));
+                                wrtn += snprintf(rbuf + wrtn, 16, "%i:", *(vcontent + v));
                         }
                         else if (vbody->child_type == g_urids.atom_Long)
                         {
+                            rbuf[wrtn++] = 'l';
+                            rbuf[wrtn++] = ' ';
                             int64_t *vcontent = (int64_t*)(vbody + 1);
                             for (uint32_t v = 0; v < n_elems; ++v)
-                                wrtn += snprintf(rbuf + wrtn, 16, "%" PRIi64 "\n", *(vcontent + v));
+                                wrtn += snprintf(rbuf + wrtn, 16, "%" PRIi64 ":", *(vcontent + v));
                         }
                         else if (vbody->child_type == g_urids.atom_Float)
                         {
+                            rbuf[wrtn++] = 'f';
+                            rbuf[wrtn++] = ' ';
                             float *vcontent = (float*)(vbody + 1);
                             for (uint32_t v = 0; v < n_elems; ++v)
-                                wrtn += snprintf(rbuf + wrtn, 16, "%f\n", *(vcontent + v));
+                                wrtn += snprintf(rbuf + wrtn, 16, "%f:", *(vcontent + v));
                         }
                         else if (vbody->child_type == g_urids.atom_Double)
                         {
+                            rbuf[wrtn++] = 'g';
+                            rbuf[wrtn++] = ' ';
                             double *vcontent = (double*)(vbody + 1);
                             for (uint32_t v = 0; v < n_elems; ++v)
-                                wrtn += snprintf(rbuf + wrtn, 16, "%f\n", *(vcontent + v));
+                                wrtn += snprintf(rbuf + wrtn, 16, "%f:", *(vcontent + v));
                         }
-                        // TODO string, path, uri
                         else
                         {
                             supported = false;
                         }
+
+                        rbuf[wrtn-1] = '\0';
 
                         if (rbuf != buf)
                         {
