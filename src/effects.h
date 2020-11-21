@@ -140,7 +140,7 @@ int effects_connect(const char *portA, const char *portB);
 int effects_disconnect(const char *portA, const char *portB);
 int effects_set_parameter(int effect_id, const char *control_symbol, float value);
 int effects_get_parameter(int effect_id, const char *control_symbol, float *value);
-int effects_set_property(int effect_id, const char *uri, size_t size, const char *value);
+int effects_set_property(int effect_id, const char *uri, const char *value);
 int effects_get_property(int effect_id, const char *uri);
 int effects_monitor_parameter(int effect_id, const char *control_symbol, const char *op, float value);
 int effects_monitor_output_parameter(int effect_id, const char *control_symbol);

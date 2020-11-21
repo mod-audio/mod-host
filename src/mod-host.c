@@ -228,8 +228,7 @@ static void effects_monitor_param_cb(proto_t *proto)
 static void effects_set_property_cb(proto_t *proto)
 {
     int resp;
-    resp = effects_set_property(atoi(proto->list[1]), proto->list[2],
-                                atoi(proto->list[3]), proto->list[4]);
+    resp = effects_set_property(atoi(proto->list[1]), proto->list[2], proto->list[3]);
     protocol_response_int(resp, proto);
 }
 

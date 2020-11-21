@@ -1097,34 +1097,34 @@ static void RunPostPonedEvents(int ignored_effect_id)
                                                                                     id_to_urid(g_symap, key));
                     if (atom.type == g_urids.atom_Bool)
                     {
-                        snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "%i", ((LV2_Atom_Bool*)body)->body != 0 ? 1 : 0);
+                        snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "b %i", ((LV2_Atom_Bool*)body)->body != 0 ? 1 : 0);
                     }
                     else if (atom.type == g_urids.atom_Int)
                     {
-                        snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "%i", ((LV2_Atom_Int*)body)->body);
+                        snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "i %i", ((LV2_Atom_Int*)body)->body);
                     }
                     else if (atom.type == g_urids.atom_Long)
                     {
-                        snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "%" PRId64, ((LV2_Atom_Long*)body)->body);
+                        snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "l %" PRId64, ((LV2_Atom_Long*)body)->body);
                     }
                     else if (atom.type == g_urids.atom_Float)
                     {
-                        snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "%f", ((LV2_Atom_Float*)body)->body);
+                        snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "f %f", ((LV2_Atom_Float*)body)->body);
                     }
                     else if (atom.type == g_urids.atom_Double)
                     {
-                        snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "%f", ((LV2_Atom_Double*)body)->body);
+                        snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "g %f", ((LV2_Atom_Double*)body)->body);
                     }
                     else if (atom.type == g_urids.atom_String || atom.type == g_urids.atom_URI || atom.type == g_urids.atom_Path)
                     {
-                        snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "%s", body);
+                        snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "s %s", body);
                     }
                     else if (atom.type == g_urids.atom_Vector)
                     {
                         LV2_Atom_Vector_Body *vbody = (LV2_Atom_Vector_Body*)body;
                         uint32_t n_elems = (atom.size - sizeof(LV2_Atom_Vector_Body)) / vbody->child_size;
 
-                        wrtn += snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "%u ", n_elems);
+                        wrtn += snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "v %u-", n_elems);
 
                         char* rbuf;
                         if (n_elems <= 8)
@@ -1137,10 +1137,10 @@ static void RunPostPonedEvents(int ignored_effect_id)
                             strcpy(rbuf, buf);
                         }
 
-                        if (vbody->child_type == g_urids.atom_Bool)
+                        /**/ if (vbody->child_type == g_urids.atom_Bool)
                         {
                             rbuf[wrtn++] = 'b';
-                            rbuf[wrtn++] = ' ';
+                            rbuf[wrtn++] = '-';
                             int32_t *vcontent = (int32_t*)(vbody + 1);
                             for (uint32_t v = 0; v < n_elems; ++v)
                                 wrtn += snprintf(rbuf + wrtn, 16, "%i:", *(vcontent + v) != 0 ? 1 : 0);
@@ -1148,7 +1148,7 @@ static void RunPostPonedEvents(int ignored_effect_id)
                         else if (vbody->child_type == g_urids.atom_Int)
                         {
                             rbuf[wrtn++] = 'i';
-                            rbuf[wrtn++] = ' ';
+                            rbuf[wrtn++] = '-';
                             int32_t *vcontent = (int32_t*)(vbody + 1);
                             for (uint32_t v = 0; v < n_elems; ++v)
                                 wrtn += snprintf(rbuf + wrtn, 16, "%i:", *(vcontent + v));
@@ -1156,7 +1156,7 @@ static void RunPostPonedEvents(int ignored_effect_id)
                         else if (vbody->child_type == g_urids.atom_Long)
                         {
                             rbuf[wrtn++] = 'l';
-                            rbuf[wrtn++] = ' ';
+                            rbuf[wrtn++] = '-';
                             int64_t *vcontent = (int64_t*)(vbody + 1);
                             for (uint32_t v = 0; v < n_elems; ++v)
                                 wrtn += snprintf(rbuf + wrtn, 16, "%" PRIi64 ":", *(vcontent + v));
@@ -1164,7 +1164,7 @@ static void RunPostPonedEvents(int ignored_effect_id)
                         else if (vbody->child_type == g_urids.atom_Float)
                         {
                             rbuf[wrtn++] = 'f';
-                            rbuf[wrtn++] = ' ';
+                            rbuf[wrtn++] = '-';
                             float *vcontent = (float*)(vbody + 1);
                             for (uint32_t v = 0; v < n_elems; ++v)
                                 wrtn += snprintf(rbuf + wrtn, 16, "%f:", *(vcontent + v));
@@ -1172,7 +1172,7 @@ static void RunPostPonedEvents(int ignored_effect_id)
                         else if (vbody->child_type == g_urids.atom_Double)
                         {
                             rbuf[wrtn++] = 'g';
-                            rbuf[wrtn++] = ' ';
+                            rbuf[wrtn++] = '-';
                             double *vcontent = (double*)(vbody + 1);
                             for (uint32_t v = 0; v < n_elems; ++v)
                                 wrtn += snprintf(rbuf + wrtn, 16, "%f:", *(vcontent + v));
@@ -5129,7 +5129,7 @@ int effects_get_parameter(int effect_id, const char *control_symbol, float *valu
 }
 
 static inline
-bool lv2_atom_forge_property_set(LV2_Atom_Forge *forge, LV2_URID urid, const char *value, size_t size, LV2_URID type)
+bool lv2_atom_forge_property_set(LV2_Atom_Forge *forge, LV2_URID urid, const char *value, LV2_URID type)
 {
     LV2_Atom_Forge_Frame frame;
     lv2_atom_forge_object(forge, &frame, 0, g_urids.patch_Set);
@@ -5151,75 +5151,135 @@ bool lv2_atom_forge_property_set(LV2_Atom_Forge *forge, LV2_URID urid, const cha
     else if (type == forge->Double)
         lv2_atom_forge_double(forge, atof(value));
     else if (type == forge->String)
-        lv2_atom_forge_string(forge, value, size);
+        lv2_atom_forge_string(forge, value, strlen(value));
     else if (type == forge->URI)
-        lv2_atom_forge_uri(forge, value, size);
+        lv2_atom_forge_uri(forge, value, strlen(value));
     else if (type == forge->Path)
-        lv2_atom_forge_path(forge, value, size);
+        lv2_atom_forge_path(forge, value, strlen(value));
 
     // vector (array of a specific type)
-    // 1st value is type, then the values; separated by zero with a final zero
+    // with string format as: ${num_elems}-${value_type_char}-${data:separated:by:colon}
     else if (type == forge->Vector)
     {
-        const LV2_URID child_type = g_urid_map.map(g_urid_map.handle, value);
+        const char *const first_sep = strchr(value, '-');
 
-        // 1st pass, get size
-        uint32_t elem_size;
-        /**/ if (child_type == forge->Bool)
-            elem_size = sizeof(int32_t);
-        else if (child_type == forge->Int)
-            elem_size = sizeof(int32_t);
-        else if (child_type == forge->Long)
-            elem_size = sizeof(int64_t);
-        else if (child_type == forge->Float)
-            elem_size = sizeof(float);
-        else if (child_type == forge->Double)
-            elem_size = sizeof(double);
-        else
+        if (*first_sep == '\0')
             return false;
+
+        const char *const second_sep = strchr(first_sep+1, '-');
+
+        if (*second_sep == '\0')
+            return false;
+
+        const char value_type = *(first_sep + 1);
+
+        LV2_URID child_type;
+        uint32_t elem_size;
+        switch (value_type)
+        {
+        case 'b':
+            child_type = forge->Bool;
+            elem_size = sizeof(int32_t);
+            break;
+        case 'i':
+            child_type = forge->Int;
+            elem_size = sizeof(int32_t);
+            break;
+        case 'l':
+            child_type = forge->Long;
+            elem_size = sizeof(int64_t);
+            break;
+        case 'f':
+            child_type = forge->Float;
+            elem_size = sizeof(float);
+            break;
+        case 'g':
+            child_type = forge->Double;
+            elem_size = sizeof(double);
+            break;
+        default:
+            return false;
+        }
 
         uint32_t n_elems = 0;
 
-        for (const char *s = value + strlen(value) + 1; *s != '\0'; s += strlen(s) + 1)
+        for (const char *s = second_sep; s != NULL && *s != '\0'; s = strchrnul(s, ':'))
             ++n_elems;
 
         if (n_elems == 0)
             return false;
 
-        uint32_t i = 0;
-        void* elems = malloc(elem_size * n_elems);
+        char localbuf[24];
+        snprintf(localbuf, sizeof(localbuf)-1, "%u-", n_elems);
+        localbuf[15] = '\0';
 
-        // 2nd pass, fill up data
-        /**/ if (child_type == forge->Bool)
+        if (strncmp(value, localbuf, strlen(localbuf)))
+            return false;
+
+        uint32_t i = 0;
+        size_t size;
+        char *end;
+        void *elems = malloc(elem_size * n_elems);
+
+        switch (value_type)
         {
-            for (const char *s = value + strlen(value) + 1; *s != '\0'; s += strlen(s) + 1)
-                ((int32_t*)elems)[i++] = atoi(s) != 0;
-        }
-        else if (child_type == forge->Int)
-        {
-            for (const char *s = value + strlen(value) + 1; *s != '\0'; s += strlen(s) + 1)
-                ((int32_t*)elems)[i++] = atoi(s);
-        }
-        else if (child_type == forge->Long)
-        {
-            for (const char *s = value + strlen(value) + 1; *s != '\0'; s += strlen(s) + 1)
-                ((int64_t*)elems)[i++] = atol(s);
-        }
-        else if (child_type == forge->Float)
-        {
-            for (const char *s = value + strlen(value) + 1; *s != '\0'; s += strlen(s) + 1)
-                ((float*)elems)[i++] = atof(s);
-        }
-        else if (child_type == forge->Double)
-        {
-            for (const char *s = value + strlen(value) + 1; *s != '\0'; s += strlen(s) + 1)
-                ((double*)elems)[i++] = atof(s);
+        case 'b':
+            for (const char *s = second_sep; s != NULL && *s != '\0'; s = strchrnul(s, ':'))
+            {
+                end  = strchrnul(s, ':');
+                size = end - s;
+                memcpy(localbuf, s, size);
+                localbuf[size] = '\0';
+                ((int32_t*)elems)[i++] = atoi(localbuf) != 0;
+            }
+            break;
+        case 'i':
+            for (const char *s = second_sep; s != NULL && *s != '\0'; s = strchrnul(s, ':'))
+            {
+                end  = strchrnul(s, ':');
+                size = end - s;
+                memcpy(localbuf, s, size);
+                localbuf[size] = '\0';
+                ((int32_t*)elems)[i++] = atoi(localbuf);
+            }
+            break;
+        case 'l':
+            for (const char *s = second_sep; s != NULL && *s != '\0'; s = strchrnul(s, ':'))
+            {
+                end  = strchrnul(s, ':');
+                size = end - s;
+                memcpy(localbuf, s, size);
+                localbuf[size] = '\0';
+                ((int64_t*)elems)[i++] = atol(localbuf);
+            }
+            break;
+        case 'f':
+            for (const char *s = second_sep; s != NULL && *s != '\0'; s = strchrnul(s, ':'))
+            {
+                end  = strchrnul(s, ':');
+                size = end - s;
+                memcpy(localbuf, s, size);
+                localbuf[size] = '\0';
+                ((float*)elems)[i++] = atof(localbuf);
+            }
+            break;
+        case 'g':
+            for (const char *s = second_sep; s != NULL && *s != '\0'; s = strchrnul(s, ':'))
+            {
+                end  = strchrnul(s, ':');
+                size = end - s;
+                memcpy(localbuf, s, size);
+                localbuf[size] = '\0';
+                ((double*)elems)[i++] = atof(localbuf);
+            }
+            break;
         }
 
         lv2_atom_forge_vector(forge, elem_size, child_type, n_elems, elems);
         free(elems);
     }
 
+#if 0 /* TODO */
     // tuple (dictonary-like object)
     // pair of type and then value; all separated by zero with a final zero
     else if (type == forge->Tuple)
@@ -5287,6 +5347,7 @@ bool lv2_atom_forge_property_set(LV2_Atom_Forge *forge, LV2_URID urid, const cha
 
         lv2_atom_forge_pop(forge, &tuple_frame);
     }
+#endif
 
     // unsupported type
     else
@@ -5299,12 +5360,8 @@ bool lv2_atom_forge_property_set(LV2_Atom_Forge *forge, LV2_URID urid, const cha
     return true;
 }
 
-int effects_set_property(int effect_id, const char *uri, size_t size, const char *value)
+int effects_set_property(int effect_id, const char *uri, const char *value)
 {
-    if (size > 32*1024) { // 32K
-        return ERR_MEMORY_ALLOCATION;
-    }
-
     if (InstanceExist(effect_id))
     {
         effect_t *effect = &g_effects[effect_id];
@@ -5319,17 +5376,20 @@ int effects_set_property(int effect_id, const char *uri, size_t size, const char
             LV2_Atom_Forge forge = g_lv2_atom_forge;
             const LV2_URID urid = g_urid_map.map(g_urid_map.handle, uri);
             const LV2_URID type = g_urid_map.map(g_urid_map.handle, lilv_node_as_uri(prop->type));
+            size_t size;
 
             if (type == forge.Bool || type == forge.Int || type == forge.Float)
-            {
-                if (size < 4)
-                    size = 4;
-            }
+                size = 4;
             else if (type == forge.Long || type == forge.Double)
-            {
-                if (size < 8)
-                    size = 8;
-            }
+                size = 8;
+#if 0 /* TODO */
+            else if (type == forge.Tuple)
+                size = strlen(value)*8 + sizeof(LV2_Atom) * num_elems;
+#endif
+            else if (type == forge.Vector)
+                size = strlen(value)*8 + sizeof(LV2_Atom_Vector_Body);
+            else
+                size = strlen(value)+1;
 
             // size as used by the forge (can overshoot for string->number conversion)
             size_t bufsize = lv2_atom_pad_size(sizeof(LV2_Atom_Object))
@@ -5344,7 +5404,7 @@ int effects_set_property(int effect_id, const char *uri, size_t size, const char
 
             lv2_atom_forge_set_buffer(&forge, buf, bufsize);
 
-            if (lv2_atom_forge_property_set(&forge, urid, value, size, type))
+            if (lv2_atom_forge_property_set(&forge, urid, value, type))
             {
                 const LV2_Atom* atom = (LV2_Atom*)buf;
                 jack_ringbuffer_write(effect->events_in_buffer,
