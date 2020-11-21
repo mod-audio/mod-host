@@ -31,10 +31,14 @@
 #include <readline/history.h>
 #endif
 
+#include <lv2/lv2plug.in/ns/ext/atom/atom.h>
+
 #include "completer.h"
 #include "effects.h"
 #include "utils.h"
 
+// entire code on this file can be disabled with this macro
+#ifndef SKIP_READLINE
 
 /*
 ************************************************************************************************************************
@@ -61,6 +65,7 @@ static const char *g_commands[] = {
     "param_set",
     "param_get",
     "param_monitor",
+    "patch_set",
     "licensee",
     "set_bpm",
     "set_bpb",
@@ -119,6 +124,18 @@ static const char *g_transport_sync_modes[] = {
     NULL
 };
 
+static const char *g_lv2_types[] = {
+    LV2_ATOM__Bool,
+    LV2_ATOM__Int,
+    LV2_ATOM__Long,
+    LV2_ATOM__Float,
+    LV2_ATOM__Double,
+    LV2_ATOM__String,
+    LV2_ATOM__URI,
+    LV2_ATOM__Path,
+    NULL
+};
+
 
 /*
 ************************************************************************************************************************
@@ -145,6 +162,7 @@ static const char *g_transport_sync_modes[] = {
 static char **g_plugins_list, **g_ports_list, **g_instances_list;
 static const char *const *g_list, **g_scale_points, **g_symbols;
 static float **g_param_range;
+
 
 /*
 ************************************************************************************************************************
@@ -173,7 +191,6 @@ static void update_instances_list(void);
 ************************************************************************************************************************
 */
 
-#ifndef SKIP_READLINE
 static char *dupstr(const char *s)
 {
     char *r;
@@ -329,6 +346,25 @@ static char **completion(const char *text, int start, int end)
                 else if (count == 3)
                 {
                     get_param_info = 1;
+                }
+            }
+            else if (strcmp(cmd[0], "patch_set") == 0)
+            {
+                if (count == 1)
+                {
+                    get_instances = 1;
+                }
+                else if (count == 2)
+                {
+                    get_symbols = 1;
+                }
+                else if (count == 3)
+                {
+                    get_param_info = 1;
+                }
+                else if (count == 5)
+                {
+                    g_list = g_lv2_types;
                 }
             }
             else if (strcmp(cmd[0], "midi_learn") == 0)
@@ -620,7 +656,8 @@ static void update_instances_list(void)
         pclose(fp);
     }
 }
-#endif
+
+#endif // SKIP_READLINE
 
 
 /*

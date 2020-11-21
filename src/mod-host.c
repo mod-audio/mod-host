@@ -195,11 +195,6 @@ static void effects_set_param_cb(proto_t *proto)
 {
     int resp;
     resp = effects_set_parameter(atoi(proto->list[1]), proto->list[2], atof(proto->list[3]));
-    if (resp != SUCCESS)
-    {
-        resp = effects_set_property(atoi(proto->list[1]), proto->list[2], proto->list[3]);
-    }
-
     protocol_response_int(resp, proto);
 }
 
@@ -227,6 +222,20 @@ static void effects_monitor_param_cb(proto_t *proto)
     else
         resp = -1;
 
+    protocol_response_int(resp, proto);
+}
+
+static void effects_set_property_cb(proto_t *proto)
+{
+    int resp;
+    resp = effects_set_property(atoi(proto->list[1]), proto->list[2], proto->list[3]);
+    protocol_response_int(resp, proto);
+}
+
+static void effects_get_property_cb(proto_t *proto)
+{
+    int resp;
+    resp = effects_get_property(atoi(proto->list[1]), proto->list[2]);
     protocol_response_int(resp, proto);
 }
 
@@ -618,6 +627,8 @@ static int mod_host_init(jack_client_t* client, int socket_port, int feedback_po
     protocol_add_command(EFFECT_PARAM_SET, effects_set_param_cb);
     protocol_add_command(EFFECT_PARAM_GET, effects_get_param_cb);
     protocol_add_command(EFFECT_PARAM_MON, effects_monitor_param_cb);
+    protocol_add_command(EFFECT_PATCH_GET, effects_get_property_cb);
+    protocol_add_command(EFFECT_PATCH_SET, effects_set_property_cb);
     protocol_add_command(EFFECT_LICENSEE, effects_licensee_cb);
     protocol_add_command(EFFECT_SET_BPM, effects_set_beats_per_minute_cb);
     protocol_add_command(EFFECT_SET_BPB, effects_set_beats_per_bar_cb);

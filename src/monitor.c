@@ -111,7 +111,10 @@ int monitor_start(char *addr, int port)
 
     g_sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (g_sockfd < 0)
+    {
         perror("ERROR opening socket");
+        return 1;
+    }
 
     server = gethostbyname(addr);
 
