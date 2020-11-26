@@ -156,8 +156,8 @@ int effects_set_beats_per_minute(double bpm);
 int effects_set_beats_per_bar(float bpb);
 
 int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int actuator_id,
-                   const char* label, float value, float minimum, float maximum, int steps, const char *unit,
-                   int scalepoints_count, const scalepoint_t *scalepoints);
+                   const char* label, float value, float minimum, float maximum, int steps, int extraflags,
+                   const char *unit, int scalepoints_count, const scalepoint_t *scalepoints);
 int effects_cc_value_set(int effect_id, const char *control_symbol, float value);
 int effects_cc_unmap(int effect_id, const char *control_symbol);
 

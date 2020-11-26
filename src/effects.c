@@ -69,7 +69,7 @@
 
 #ifdef HAVE_CONTROLCHAIN
 /* Control Chain */
-#include <cc/cc_client.h>
+#include <cc_client.h>
 #endif
 
 #ifdef HAVE_HYLIA
@@ -5943,8 +5943,8 @@ int effects_set_beats_per_bar(float bpb)
 }
 
 int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int actuator_id,
-                   const char *label, float value, float minimum, float maximum, int steps, const char *unit,
-                   int scalepoints_count, const scalepoint_t *scalepoints)
+                   const char *label, float value, float minimum, float maximum, int steps, int extraflags,
+                   const char *unit, int scalepoints_count, const scalepoint_t *scalepoints)
 {
 #ifdef HAVE_CONTROLCHAIN
     InitializeControlChainIfNeeded();
@@ -5953,7 +5953,7 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
         return ERR_INSTANCE_NON_EXISTS;
     if (!g_cc_client)
         return ERR_CONTROL_CHAIN_UNAVAILABLE;
-    if (scalepoints_count == 1)
+    if (scalepoints_count == 1 || extraflags < 0)
         return ERR_ASSIGNMENT_INVALID_OP;
 
     effect_t *effect = &(g_effects[effect_id]);
@@ -5975,18 +5975,24 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
     assignment.unit  = unit;
     assignment.list_count = scalepoints_count;
 
-    if (port->hints & HINT_TOGGLE)
+    if (extraflags & CC_MODE_TAP_TEMPO)
+        assignment.mode = CC_MODE_TAP_TEMPO;
+    else if (port->hints & HINT_TOGGLE)
         assignment.mode = CC_MODE_TOGGLE;
     else if (port->hints & HINT_INTEGER)
         assignment.mode = CC_MODE_INTEGER;
     else
         assignment.mode = CC_MODE_REAL;
 
+    if (port->hints & HINT_LOGARITHMIC)
+        assignment.mode |= CC_MODE_LOGARITHMIC;
     if (port->hints & HINT_TRIGGER)
         assignment.mode |= CC_MODE_TRIGGER;
 
-    // note: logarithmic and tap-tempo missing
-    // CC_MODE_TAP_TEMPO
+    if (extraflags & CC_MODE_COLOURED)
+        assignment.mode = CC_MODE_COLOURED;
+    if (extraflags & CC_MODE_MOMENTARY)
+        assignment.mode = CC_MODE_MOMENTARY;
 
     cc_item_t *item_data;
 
@@ -6073,7 +6079,7 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
 
 int effects_cc_value_set(int effect_id, const char *control_symbol, float value)
 {
-#if 0 // def HAVE_CONTROLCHAIN
+#ifdef HAVE_CONTROLCHAIN
     if (!InstanceExist(effect_id))
         return ERR_INSTANCE_NON_EXISTS;
     if (!g_cc_client)

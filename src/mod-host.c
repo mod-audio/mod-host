@@ -329,10 +329,10 @@ static void midi_unmap_cb(proto_t *proto)
 static void cc_map_cb(proto_t *proto)
 {
     int resp;
-    int scalepoints_count = atoi(proto->list[11]);
+    int scalepoints_count = atoi(proto->list[12]);
     scalepoint_t *scalepoints;
 
-    if (scalepoints_count != 0 && (scalepoints_count == 1 || proto->list_count < (uint32_t)(12+2*scalepoints_count)))
+    if (scalepoints_count != 0 && (scalepoints_count == 1 || proto->list_count < (uint32_t)(13+2*scalepoints_count)))
     {
         protocol_response_int(ERR_ASSIGNMENT_INVALID_OP, proto);
         return;
@@ -346,8 +346,8 @@ static void cc_map_cb(proto_t *proto)
         {
             for (int i = 0; i < scalepoints_count; i++)
             {
-                scalepoints[i].label = proto->list[12+i*2];
-                scalepoints[i].value = atof(proto->list[12+i*2+1]);
+                scalepoints[i].label = proto->list[13+i*2];
+                scalepoints[i].value = atof(proto->list[13+i*2+1]);
             }
         }
         else
@@ -361,16 +361,17 @@ static void cc_map_cb(proto_t *proto)
         scalepoints = NULL;
     }
 
-    resp = effects_cc_map(atoi(proto->list[1]), // effect_id
-                               proto->list[2],  // control_symbol
-                          atoi(proto->list[3]), // device_id
-                          atoi(proto->list[4]), // actuator_id
-                               proto->list[5],  // label
-                          atof(proto->list[6]), // value
-                          atof(proto->list[7]), // minimum
-                          atof(proto->list[8]), // maximum
-                          atoi(proto->list[9]), // steps
-                               proto->list[10], // unit
+    resp = effects_cc_map(atoi(proto->list[1]),  // effect_id
+                               proto->list[2],   // control_symbol
+                          atoi(proto->list[3]),  // device_id
+                          atoi(proto->list[4]),  // actuator_id
+                               proto->list[5],   // label
+                          atof(proto->list[6]),  // value
+                          atof(proto->list[7]),  // minimum
+                          atof(proto->list[8]),  // maximum
+                          atoi(proto->list[9]),  // steps
+                          atoi(proto->list[10]), // extraflags
+                               proto->list[11],  // unit
                           scalepoints_count, scalepoints);
 
     free(scalepoints);
