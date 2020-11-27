@@ -6100,6 +6100,10 @@ int effects_cc_value_set(int effect_id, const char *control_symbol, float value)
                 if (! assignment->supports_set_value)
                     return ERR_INVALID_OPERATION;
 
+                // invert value for bypass
+                if (!strcmp(control_symbol, BYPASS_PORT_SYMBOL))
+                    value = value > 0.5f ? 0.0f : 1.0f;
+
                 cc_set_value_t update;
                 update.device_id = assignment->device_id;
                 update.assignment_id = assignment->assignment_id;
