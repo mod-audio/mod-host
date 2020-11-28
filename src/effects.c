@@ -4401,7 +4401,6 @@ int effects_add(const char *uri, int instance)
             effect->properties[j]->monitored = true; // always true for writable properties
             j++;
         }
-        j = 0;
         LILV_FOREACH(nodes, p, readable_properties)
         {
             const LilvNode* property = lilv_nodes_get(readable_properties, p);
