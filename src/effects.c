@@ -1115,9 +1115,17 @@ static void RunPostPonedEvents(int ignored_effect_id)
                     {
                         snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "g %f", ((LV2_Atom_Double*)body)->body);
                     }
-                    else if (atom.type == g_urids.atom_String || atom.type == g_urids.atom_URI || atom.type == g_urids.atom_Path)
+                    else if (atom.type == g_urids.atom_String)
                     {
                         snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "s %s", body);
+                    }
+                    else if (atom.type == g_urids.atom_Path)
+                    {
+                        snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "p %s", body);
+                    }
+                    else if (atom.type == g_urids.atom_URI)
+                    {
+                        snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "u %s", body);
                     }
                     else if (atom.type == g_urids.atom_Vector)
                     {
@@ -4710,7 +4718,7 @@ int effects_preset_show(const char *uri, char **state_str)
             return ERR_LV2_CANT_LOAD_STATE;
         }
 
-        setenv("LILV_STATE_SKIP_PROPERTIES", "1", 1);
+        setenv("LILV_STATE_SKIP_PROPERTIES", "2", 1);
 
         (*state_str) =
             lilv_state_to_string(g_lv2_data, &g_urid_map, &g_urid_unmap, state, uri, NULL);
