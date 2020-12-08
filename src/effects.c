@@ -1097,23 +1097,23 @@ static void RunPostPonedEvents(int ignored_effect_id)
                                                                                     id_to_urid(g_symap, key));
                     if (atom.type == g_urids.atom_Bool)
                     {
-                        snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "b %i", ((LV2_Atom_Bool*)body)->body != 0 ? 1 : 0);
+                        snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "b %i", *(int32_t*)body != 0 ? 1 : 0);
                     }
                     else if (atom.type == g_urids.atom_Int)
                     {
-                        snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "i %i", ((LV2_Atom_Int*)body)->body);
+                        snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "i %i", *(int32_t*)body);
                     }
                     else if (atom.type == g_urids.atom_Long)
                     {
-                        snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "l %" PRId64, ((LV2_Atom_Long*)body)->body);
+                        snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "l %" PRId64, *(int64_t*)body);
                     }
                     else if (atom.type == g_urids.atom_Float)
                     {
-                        snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "f %f", ((LV2_Atom_Float*)body)->body);
+                        snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "f %f", *(float*)body);
                     }
                     else if (atom.type == g_urids.atom_Double)
                     {
-                        snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "g %f", ((LV2_Atom_Double*)body)->body);
+                        snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "g %f", *(double*)body);
                     }
                     else if (atom.type == g_urids.atom_String)
                     {
