@@ -6078,6 +6078,7 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
     UNUSED_PARAM(minimum);
     UNUSED_PARAM(maximum);
     UNUSED_PARAM(steps);
+    UNUSED_PARAM(extraflags);
     UNUSED_PARAM(unit);
     UNUSED_PARAM(scalepoints_count);
     UNUSED_PARAM(scalepoints);
