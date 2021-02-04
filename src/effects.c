@@ -6545,8 +6545,8 @@ int effects_state_load(const char *dir)
         &g_lv2_log_feature,
         &g_state_freePath_feature,
         &feature_makePath,
-        effect->features[CTRLPORT_REQUEST_FEATURE],
-        effect->features[WORKER_FEATURE],
+        NULL, // ctrlPortReq
+        NULL, // worker
         NULL
     };
 
@@ -6574,6 +6574,7 @@ int effects_state_load(const char *dir)
         }
 
         makePath.handle = effect;
+        features[CTRLPORT_REQUEST_FEATURE] = effect->features[CTRLPORT_REQUEST_FEATURE];
         features[WORKER_FEATURE] = effect->features[WORKER_FEATURE];
 
         if (effect->hints & HINT_STATE_UNSAFE)
@@ -6630,8 +6631,8 @@ int effects_state_save(const char *dir)
         &g_lv2_log_feature,
         &g_state_freePath_feature,
         &feature_makePath,
-        effect->features[CTRLPORT_REQUEST_FEATURE],
-        effect->features[WORKER_FEATURE],
+        NULL, // ctrlPortReq
+        NULL, // worker
         NULL
     };
 
@@ -6653,6 +6654,7 @@ int effects_state_save(const char *dir)
             scratch_dir = GetPluginStateDir(effect->instance, g_lv2_scratch_dir);
 
             makePath.handle = effect;
+            features[CTRLPORT_REQUEST_FEATURE] = effect->features[CTRLPORT_REQUEST_FEATURE];
             features[WORKER_FEATURE] = effect->features[WORKER_FEATURE];
 
             effect->state_dir = dir;
