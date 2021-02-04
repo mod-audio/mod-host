@@ -4673,6 +4673,7 @@ int effects_preset_save(int effect_id, const char *dir, const char *file_name, c
         &g_lv2_log_feature,
         &g_state_freePath_feature,
         &feature_makePath,
+        effect->features[CTRLPORT_REQUEST_FEATURE],
         effect->features[WORKER_FEATURE],
         NULL
     };
@@ -6544,7 +6545,8 @@ int effects_state_load(const char *dir)
         &g_lv2_log_feature,
         &g_state_freePath_feature,
         &feature_makePath,
-        NULL, // worker
+        effect->features[CTRLPORT_REQUEST_FEATURE],
+        effect->features[WORKER_FEATURE],
         NULL
     };
 
@@ -6628,7 +6630,8 @@ int effects_state_save(const char *dir)
         &g_lv2_log_feature,
         &g_state_freePath_feature,
         &feature_makePath,
-        NULL, // worker
+        effect->features[CTRLPORT_REQUEST_FEATURE],
+        effect->features[WORKER_FEATURE],
         NULL
     };
 
