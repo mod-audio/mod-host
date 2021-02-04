@@ -34,17 +34,19 @@ static void* worker_func(void* data)
         sem_wait(&worker->sem);
         if (worker->exit) break;
 
-        uint32_t size = 0;
-        jack_ringbuffer_read(worker->requests, (char*)&size, sizeof(size));
+        while (jack_ringbuffer_read_space(worker->requests) != 0) {
+            uint32_t size = 0;
+            jack_ringbuffer_read(worker->requests, (char*)&size, sizeof(size));
 
-        if (!(buf = realloc(buf, size))) {
-            fprintf(stderr, "worker_func: realloc() failed\n");
-            free(buf);
-            return NULL;
+            if (!(buf = realloc(buf, size))) {
+                fprintf(stderr, "worker_func: realloc() failed\n");
+                free(buf);
+                return NULL;
+            }
+
+            jack_ringbuffer_read(worker->requests, (char*)buf, size);
+            worker->iface->work(worker->instance->lv2_handle, worker_respond, worker, size, buf);
         }
-
-        jack_ringbuffer_read(worker->requests, (char*)buf, size);
-        worker->iface->work(worker->instance->lv2_handle, worker_respond, worker, size, buf);
     }
 
     free(buf);
