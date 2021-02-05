@@ -132,11 +132,12 @@ install: install_man
 	install -m 755 $(PROG) $(DESTDIR)$(BINDIR)
 	install -d $(DESTDIR)$(shell pkg-config --variable=libdir jack)/jack/
 	install -m 755 $(PROG).so $(DESTDIR)$(shell pkg-config --variable=libdir jack)/jack/
+	install -m 755 fake-input.so $(DESTDIR)$(shell pkg-config --variable=libdir jack)/jack/
 	install -m 755 mod-monitor.so $(DESTDIR)$(shell pkg-config --variable=libdir jack)/jack/
 
 # clean rule
 clean:
-	@rm -f $(SRC_DIR)/*.o $(SRC_DIR)/*/*.o $(PROG) $(PROG).so mod-monitor.so src/info.h
+	@rm -f $(SRC_DIR)/*.o $(SRC_DIR)/*/*.o $(PROG) $(PROG).so fake-input.so mod-monitor.so src/info.h
 
 test:
 	py.test tests/test_host.py
