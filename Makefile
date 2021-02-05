@@ -99,7 +99,7 @@ SRC = $(wildcard $(SRC_DIR)/*.$(EXT)) $(SRC_DIR)/sha1/sha1.c $(SRC_DIR)/rtmempoo
 OBJ = $(SRC:.$(EXT)=.o)
 
 # default build
-all: $(PROG) $(PROG).so mod-monitor.so
+all: $(PROG) $(PROG).so fake-input.so mod-monitor.so
 
 # linking rule
 $(PROG): $(OBJ)
@@ -110,6 +110,13 @@ $(PROG).so: $(OBJ)
 
 # meta-rule to generate the object files
 %.o: %.$(EXT) src/info.h
+	$(CC) $(INCS) $(CFLAGS) -o $@ $<
+
+# custom rules for fake-input client
+fake-input.so: src/fake-input.o
+	$(CC) $< $(LDFLAGS) $(LIBS) -shared -o $@
+
+src/fake-input.o: src/fake-input/fake-input.c
 	$(CC) $(INCS) $(CFLAGS) -o $@ $<
 
 # custom rules for monitor client
