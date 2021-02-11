@@ -12,9 +12,13 @@ Currently the host supports the following LV2 features:
 * atom
 * buf-size
 * event
+* log
 * midi
 * options
+* parameters
+* patch
 * presets
+* state
 * time
 * uri-map
 * urid
