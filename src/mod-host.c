@@ -838,10 +838,14 @@ int jack_initialize(jack_client_t* client, const char* load_init);
 
 int jack_initialize(jack_client_t* client, const char* load_init)
 {
+    const char* const mod_log = getenv("MOD_LOG");
     int socket_port = SOCKET_DEFAULT_PORT;
 
     if (load_init != NULL && load_init[0] != '\0')
         socket_port = atoi(load_init);
+
+    if (mod_log != NULL && atoi(mod_log) != 0)
+        protocol_verbose(1);
 
     if (mod_host_init(client, socket_port, socket_port+1) != 0)
         return 1;
