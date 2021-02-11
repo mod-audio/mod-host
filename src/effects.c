@@ -916,8 +916,9 @@ static void RunPostPonedEvents(int ignored_effect_id)
     }
 
     // local buffer
-    char buf[MAX_CHAR_BUF_SIZE+1];
-    buf[MAX_CHAR_BUF_SIZE] = '\0';
+    #define FEEDBACK_BUF_SIZE (MAX_CHAR_BUF_SIZE * 2)
+    char buf[FEEDBACK_BUF_SIZE+1];
+    buf[FEEDBACK_BUF_SIZE] = '\0';
 
     // cached data, to make sure we only handle similar events once
     bool got_midi_program = false;
@@ -967,7 +968,7 @@ static void RunPostPonedEvents(int ignored_effect_id)
             if (ShouldIgnorePostPonedSymbolEvent(&eventptr->event.parameter, &cached_param_set))
                 continue;
 
-            snprintf(buf, MAX_CHAR_BUF_SIZE, "param_set %i %s %f", eventptr->event.parameter.effect_id,
+            snprintf(buf, FEEDBACK_BUF_SIZE, "param_set %i %s %f", eventptr->event.parameter.effect_id,
                                                                    eventptr->event.parameter.symbol,
                                                                    eventptr->event.parameter.value);
             socket_send_feedback(buf);
@@ -983,7 +984,7 @@ static void RunPostPonedEvents(int ignored_effect_id)
             if (ShouldIgnorePostPonedSymbolEvent(&eventptr->event.parameter, &cached_output_mon))
                 continue;
 
-            snprintf(buf, MAX_CHAR_BUF_SIZE, "output_set %i %s %f", eventptr->event.parameter.effect_id,
+            snprintf(buf, FEEDBACK_BUF_SIZE, "output_set %i %s %f", eventptr->event.parameter.effect_id,
                                                                     eventptr->event.parameter.symbol,
                                                                     eventptr->event.parameter.value);
             socket_send_feedback(buf);
@@ -996,7 +997,7 @@ static void RunPostPonedEvents(int ignored_effect_id)
         case POSTPONED_MIDI_MAP:
             if (eventptr->event.midi_map.effect_id == ignored_effect_id)
                 continue;
-            snprintf(buf, MAX_CHAR_BUF_SIZE, "midi_mapped %i %s %i %i %f %f %f", eventptr->event.midi_map.effect_id,
+            snprintf(buf, FEEDBACK_BUF_SIZE, "midi_mapped %i %s %i %i %f %f %f", eventptr->event.midi_map.effect_id,
                                                                                  eventptr->event.midi_map.symbol,
                                                                                  eventptr->event.midi_map.channel,
                                                                                  eventptr->event.midi_map.controller,
@@ -1016,7 +1017,7 @@ static void RunPostPonedEvents(int ignored_effect_id)
                 continue;
             }
 
-            snprintf(buf, MAX_CHAR_BUF_SIZE, "midi_program_change %i %i",
+            snprintf(buf, FEEDBACK_BUF_SIZE, "midi_program_change %i %i",
                      eventptr->event.program_change.program,
                      eventptr->event.program_change.channel);
             socket_send_feedback(buf);
@@ -1036,7 +1037,7 @@ static void RunPostPonedEvents(int ignored_effect_id)
             if (got_transport)
                 continue;
 
-            snprintf(buf, MAX_CHAR_BUF_SIZE, "transport %i %f %f", eventptr->event.transport.rolling ? 1 : 0,
+            snprintf(buf, FEEDBACK_BUF_SIZE, "transport %i %f %f", eventptr->event.transport.rolling ? 1 : 0,
                                                                    eventptr->event.transport.bpb,
                                                                    eventptr->event.transport.bpm);
             socket_send_feedback(buf);
@@ -1093,46 +1094,46 @@ static void RunPostPonedEvents(int ignored_effect_id)
                     jack_ringbuffer_read(effect->events_out_buffer, body, atom.size);
 
                     supported = true;
-                    int wrtn = snprintf(buf, MAX_CHAR_BUF_SIZE, "patch_set %i %s ", effect->instance,
+                    int wrtn = snprintf(buf, FEEDBACK_BUF_SIZE, "patch_set %i %s ", effect->instance,
                                                                                     id_to_urid(g_symap, key));
                     if (atom.type == g_urids.atom_Bool)
                     {
-                        snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "b %i", *(int32_t*)body != 0 ? 1 : 0);
+                        snprintf(buf + wrtn, FEEDBACK_BUF_SIZE - wrtn, "b %i", *(int32_t*)body != 0 ? 1 : 0);
                     }
                     else if (atom.type == g_urids.atom_Int)
                     {
-                        snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "i %i", *(int32_t*)body);
+                        snprintf(buf + wrtn, FEEDBACK_BUF_SIZE - wrtn, "i %i", *(int32_t*)body);
                     }
                     else if (atom.type == g_urids.atom_Long)
                     {
-                        snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "l %" PRId64, *(int64_t*)body);
+                        snprintf(buf + wrtn, FEEDBACK_BUF_SIZE - wrtn, "l %" PRId64, *(int64_t*)body);
                     }
                     else if (atom.type == g_urids.atom_Float)
                     {
-                        snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "f %f", *(float*)body);
+                        snprintf(buf + wrtn, FEEDBACK_BUF_SIZE - wrtn, "f %f", *(float*)body);
                     }
                     else if (atom.type == g_urids.atom_Double)
                     {
-                        snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "g %f", *(double*)body);
+                        snprintf(buf + wrtn, FEEDBACK_BUF_SIZE - wrtn, "g %f", *(double*)body);
                     }
                     else if (atom.type == g_urids.atom_String)
                     {
-                        snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "s %s", body);
+                        snprintf(buf + wrtn, FEEDBACK_BUF_SIZE - wrtn, "s %s", body);
                     }
                     else if (atom.type == g_urids.atom_Path)
                     {
-                        snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "p %s", body);
+                        snprintf(buf + wrtn, FEEDBACK_BUF_SIZE - wrtn, "p %s", body);
                     }
                     else if (atom.type == g_urids.atom_URI)
                     {
-                        snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "u %s", body);
+                        snprintf(buf + wrtn, FEEDBACK_BUF_SIZE - wrtn, "u %s", body);
                     }
                     else if (atom.type == g_urids.atom_Vector)
                     {
                         LV2_Atom_Vector_Body *vbody = (LV2_Atom_Vector_Body*)body;
                         uint32_t n_elems = (atom.size - sizeof(LV2_Atom_Vector_Body)) / vbody->child_size;
 
-                        wrtn += snprintf(buf + wrtn, MAX_CHAR_BUF_SIZE - wrtn, "v %u-", n_elems);
+                        wrtn += snprintf(buf + wrtn, FEEDBACK_BUF_SIZE - wrtn, "v %u-", n_elems);
 
                         char* rbuf;
                         if (n_elems <= 8)
@@ -1264,13 +1265,13 @@ static void RunPostPonedEvents(int ignored_effect_id)
         switch (eventptr->event.type)
         {
         case POSTPONED_LOG_TRACE:
-            snprintf(buf, MAX_CHAR_BUF_SIZE, "log %d %s", LOG_TRACE, eventptr->event.log_trace.msg);
+            snprintf(buf, FEEDBACK_BUF_SIZE, "log %d %s", LOG_TRACE, eventptr->event.log_trace.msg);
             socket_send_feedback(buf);
             break;
 
         case POSTPONED_LOG_MESSAGE: {
             char *msg = eventptr->event.log_message.msg;
-            const int prefix_len = snprintf(buf, MAX_CHAR_BUF_SIZE, "log %d ", eventptr->event.log_message.type);
+            const int prefix_len = snprintf(buf, FEEDBACK_BUF_SIZE, "log %d ", eventptr->event.log_message.type);
             const size_t msg_len = strlen(msg);
 
             if (prefix_len > 0 && prefix_len < 8) {
