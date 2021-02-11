@@ -144,7 +144,12 @@ char** strarr_split(char *str)
             count++;
         }
 #ifdef ENABLE_QUOTATION_MARKS
-        if (*pstr == '"')
+        if (*pstr == '\\' && *(pstr+1) == '"')
+        {
+            // special case for escaped quotes
+            *pstr++ = '"';
+        }
+        else if (*pstr == '"')
         {
             if (quote == 0) quote = 1;
             else
@@ -173,7 +178,12 @@ char** strarr_split(char *str)
             list[++count] = pstr + 1;
         }
 #ifdef ENABLE_QUOTATION_MARKS
-        if (*pstr == '"')
+        if (*pstr == '\\' && *(pstr+1) == '"')
+        {
+            // special case for escaped quotes
+            *pstr++ = '"';
+        }
+        else if (*pstr == '"')
         {
             if (quote == 0) quote = 1;
             else
