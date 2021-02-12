@@ -595,6 +595,7 @@ static volatile enum TransportSyncMode g_transport_sync_mode;
 static double g_transport_tick;
 static bool g_aggregated_midi_enabled;
 static bool g_processing_enabled;
+static bool g_verbose_debug;
 
 // Wall clock time since program startup
 static uint64_t g_monotonic_frame_count = 0;
@@ -673,7 +674,7 @@ static void JackTimebase(jack_transport_state_t state, jack_nframes_t nframes,
                          jack_position_t* pos, int new_pos, void* arg);
 static void JackThreadInit(void *arg);
 static void GetFeatures(effect_t *effect);
-static void TriggerJackTimebase(void);
+static void TriggerJackTimebase(bool reset_to_zero);
 
 static property_t *FindEffectPropertyByURI(effect_t *effect, const char *uri);
 static port_t *FindEffectInputPortBySymbol(effect_t *effect, const char *control_symbol);
@@ -889,12 +890,21 @@ static bool ShouldIgnorePostPonedSymbolEvent(postponed_parameter_event_t* ev,
     return false;
 }
 
+static int socket_send_feedback_debug(const char *buffer)
+{
+    if (g_verbose_debug) {
+        printf("DEBUG: RunPostPonedEvents() Sending '%s'\n", buffer);
+        fflush(stdout);
+    }
+    return socket_send_feedback(buffer);
+}
+
 static void RunPostPonedEvents(int ignored_effect_id)
 {
-#ifdef DEBUG
-    printf("DEBUG: RunPostPonedEvents()\n");
-    fflush(stdout);
-#endif
+    if (g_verbose_debug) {
+        puts("DEBUG: RunPostPonedEvents() START");
+        fflush(stdout);
+    }
 
     // local queue to where we'll save rtsafe list
     struct list_head queue;
@@ -908,10 +918,10 @@ static void RunPostPonedEvents(int ignored_effect_id)
     if (list_empty(&queue))
     {
         // nothing to do
-#ifdef DEBUG
-        printf("DEBUG: Queue is empty\n");
-        fflush(stdout);
-#endif
+        if (g_verbose_debug) {
+            puts("DEBUG: RunPostPonedEvents() Queue is empty");
+            fflush(stdout);
+        }
         return;
     }
 
@@ -940,10 +950,10 @@ static void RunPostPonedEvents(int ignored_effect_id)
     // if all we have are jack_midi_connect requests, do not send feedback to server
     bool got_only_jack_midi_requests = true;
 
-#ifdef DEBUG
-    printf("DEBUG: Before the queue iteration\n");
-    fflush(stdout);
-#endif
+    if (g_verbose_debug) {
+        puts("DEBUG: RunPostPonedEvents() Before the queue iteration");
+        fflush(stdout);
+    }
 
     // itenerate backwards
     struct list_head *it, *it2;
@@ -954,9 +964,12 @@ static void RunPostPonedEvents(int ignored_effect_id)
         eventptr = list_entry(it, postponed_event_list_data, siblings);
 
 #ifdef DEBUG
-        printf("DEBUG: ptr %p\n", eventptr);
-        fflush(stdout);
+        if (g_verbose_debug) {
+            printf("DEBUG: RunPostPonedEvents() ptr %p type %i\n", eventptr, eventptr->event.type);
+            fflush(stdout);
+        }
 #endif
+
         if (got_only_jack_midi_requests && eventptr->event.type != POSTPONED_JACK_MIDI_CONNECT)
             got_only_jack_midi_requests = false;
 
@@ -971,7 +984,7 @@ static void RunPostPonedEvents(int ignored_effect_id)
             snprintf(buf, FEEDBACK_BUF_SIZE, "param_set %i %s %f", eventptr->event.parameter.effect_id,
                                                                    eventptr->event.parameter.symbol,
                                                                    eventptr->event.parameter.value);
-            socket_send_feedback(buf);
+            socket_send_feedback_debug(buf);
 
             // save for fast checkup next time
             cached_param_set.last_effect_id = eventptr->event.parameter.effect_id;
@@ -987,7 +1000,7 @@ static void RunPostPonedEvents(int ignored_effect_id)
             snprintf(buf, FEEDBACK_BUF_SIZE, "output_set %i %s %f", eventptr->event.parameter.effect_id,
                                                                     eventptr->event.parameter.symbol,
                                                                     eventptr->event.parameter.value);
-            socket_send_feedback(buf);
+            socket_send_feedback_debug(buf);
 
             // save for fast checkup next time
             cached_output_mon.last_effect_id = eventptr->event.parameter.effect_id;
@@ -1004,30 +1017,23 @@ static void RunPostPonedEvents(int ignored_effect_id)
                                                                                  eventptr->event.midi_map.value,
                                                                                  eventptr->event.midi_map.minimum,
                                                                                  eventptr->event.midi_map.maximum);
-            socket_send_feedback(buf);
+            socket_send_feedback_debug(buf);
             break;
 
         case POSTPONED_MIDI_PROGRAM_CHANGE:
             if (got_midi_program)
             {
-#ifdef DEBUG
-                printf("DEBUG: I think I sent this before\n");
-                fflush(stdout);
-#endif
+                if (g_verbose_debug) {
+                    puts("DEBUG: RunPostPonedEvents() Ignoring old midi program change event");
+                    fflush(stdout);
+                }
                 continue;
             }
 
             snprintf(buf, FEEDBACK_BUF_SIZE, "midi_program_change %i %i",
                      eventptr->event.program_change.program,
                      eventptr->event.program_change.channel);
-            socket_send_feedback(buf);
-
-#ifdef DEBUG
-            printf("DEBUG: Sent \"midi_program_change %i %i\"\n",
-                   eventptr->event.program_change.program,
-                   eventptr->event.program_change.channel);
-            fflush(stdout);
-#endif
+            socket_send_feedback_debug(buf);
 
             // ignore older midi program changes
             got_midi_program = true;
@@ -1040,7 +1046,7 @@ static void RunPostPonedEvents(int ignored_effect_id)
             snprintf(buf, FEEDBACK_BUF_SIZE, "transport %i %f %f", eventptr->event.transport.rolling ? 1 : 0,
                                                                    eventptr->event.transport.bpb,
                                                                    eventptr->event.transport.bpm);
-            socket_send_feedback(buf);
+            socket_send_feedback_debug(buf);
 
             // ignore older transport changes
             got_transport = true;
@@ -1196,7 +1202,7 @@ static void RunPostPonedEvents(int ignored_effect_id)
                         if (rbuf != buf)
                         {
                             supported = false;
-                            socket_send_feedback(rbuf);
+                            socket_send_feedback_debug(rbuf);
                             free(rbuf);
                         }
                     }
@@ -1215,7 +1221,7 @@ static void RunPostPonedEvents(int ignored_effect_id)
                     }
 
                     if (supported)
-                        socket_send_feedback(buf);
+                        socket_send_feedback_debug(buf);
 
                     free(body);
                 }
@@ -1231,10 +1237,11 @@ static void RunPostPonedEvents(int ignored_effect_id)
             break;
         }
     }
-#ifdef DEBUG
-    printf("DEBUG: After the queue iteration\n");
-    fflush(stdout);
-#endif
+
+    if (g_verbose_debug) {
+        puts("DEBUG: RunPostPonedEvents() After the queue iteration");
+        fflush(stdout);
+    }
 
     // cleanup memory
     postponed_cached_effect_list_data *peffect;
@@ -1266,7 +1273,7 @@ static void RunPostPonedEvents(int ignored_effect_id)
         {
         case POSTPONED_LOG_TRACE:
             snprintf(buf, FEEDBACK_BUF_SIZE, "log %d %s", LOG_TRACE, eventptr->event.log_trace.msg);
-            socket_send_feedback(buf);
+            socket_send_feedback_debug(buf);
             break;
 
         case POSTPONED_LOG_MESSAGE: {
@@ -1279,7 +1286,7 @@ static void RunPostPonedEvents(int ignored_effect_id)
                 if (msg2 != NULL) {
                     memcpy(msg2, buf, prefix_len);
                     memcpy(msg2+prefix_len, msg, msg_len + 1);
-                    socket_send_feedback(msg2);
+                    socket_send_feedback_debug(msg2);
                     free(msg2);
                 }
             }
@@ -1296,14 +1303,14 @@ static void RunPostPonedEvents(int ignored_effect_id)
 
     if (g_postevents_ready && !got_only_jack_midi_requests)
     {
-#ifdef DEBUG
-        printf("DEBUG: Reported data finish to server\n");
-        fflush(stdout);
-#endif
-
         // report data finished to server
         g_postevents_ready = false;
-        socket_send_feedback("data_finish");
+        socket_send_feedback_debug("data_finish");
+    }
+
+    if (g_verbose_debug) {
+        puts("DEBUG: RunPostPonedEvents() END");
+        fflush(stdout);
     }
 }
 
@@ -1317,18 +1324,17 @@ static void* PostPonedEventsThread(void* arg)
         if (g_postevents_running == 1 && g_postevents_ready)
         {
             RunPostPonedEvents(-3); // as all effects are valid we set ignored_effect_id to -3
-#ifdef DEBUG
-            printf("DEBUG: q_postevents_running == %d\n", g_postevents_running);
-            fflush(stdout);
-#endif
+            if (g_verbose_debug) {
+                printf("DEBUG: PostPonedEventsThread() looping (code %d)\n", g_postevents_running);
+                fflush(stdout);
+            }
         }
     }
 
-#ifdef DEBUG
-    printf("DEBUG: q_postevents_running == %d\n", g_postevents_running);
-    printf("DEBUG: Thread stopped\n");
-    fflush(stdout);
-#endif
+    if (g_verbose_debug) {
+        printf("DEBUG: PostPonedEventsThread() stopping (code %d)\n", g_postevents_running);
+        fflush(stdout);
+    }
 
     return NULL;
 
@@ -2246,16 +2252,7 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
                       list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
                       pthread_mutex_unlock(&g_rtsafe_mutex);
 
-#ifdef DEBUG
-                      printf("DEBUG: Pgr ch appended to queue\n");
-#endif
                       needs_post = true;
-                }
-                else
-                {
-#ifdef DEBUG
-                      printf("DEBUG: Problem with mempool\n");
-#endif
                 }
             }
             else
@@ -2595,10 +2592,13 @@ static void GetFeatures(effect_t *effect)
 * If transport is stopped, ensure jack invokes the timebase master by
 * invoking a jack reposition on the current position.
  */
-static void TriggerJackTimebase(void)
+static void TriggerJackTimebase(bool reset_to_zero)
 {
     jack_position_t pos;
     if (jack_transport_query(g_jack_global_client, &pos) == JackTransportStopped) {
+        if (reset_to_zero) {
+            pos.frame = 0;
+        }
         int res = jack_transport_reposition(g_jack_global_client, &pos);
         if (res < 0) {
             fprintf(stderr, "Failed to trigger timebase master.  Call "
@@ -2953,12 +2953,12 @@ static int LogVPrintf(LV2_Log_Handle handle, LV2_URID type, const char* fmt, va_
         posteventptr->event.type = POSTPONED_LOG_TRACE;
         ret = vsnprintf(posteventptr->event.log_trace.msg, sizeof(posteventptr->event.log_trace.msg)-1, fmt, ap);
         posteventptr->event.log_trace.msg[sizeof(posteventptr->event.log_trace.msg)-1] = '\0';
-#ifdef DEBUG
-        fprintf(stdout, "\x1b[30;1m");
-        fputs(posteventptr->event.log_trace.msg, stdout);
-        fprintf(stdout, "\x1b[0m\n");
-        fflush(stdout);
-#endif
+        if (g_verbose_debug) {
+            fprintf(stdout, "\x1b[30;1m");
+            fputs(posteventptr->event.log_trace.msg, stdout);
+            fprintf(stdout, "\x1b[0m\n");
+            fflush(stdout);
+        }
     }
     else
     {
@@ -3196,6 +3196,10 @@ int effects_init(void* client)
     g_transport_bpm = 120.0;
     g_transport_tick = 0.0;
     g_transport_sync_mode = TRANSPORT_SYNC_NONE;
+
+    /* check verbose mode */
+    const char* const mod_log = getenv("MOD_LOG");
+    g_verbose_debug = mod_log != NULL && atoi(mod_log) != 0;
 
     /* this fails to build if GLOBAL_EFFECT_ID >= MAX_INSTANCES */
     char global_effect_id_static_check1[GLOBAL_EFFECT_ID >= MAX_PLUGIN_INSTANCES?1:-1];
@@ -5033,10 +5037,12 @@ int effects_remove(int effect_id)
     // start thread again
     if (g_postevents_running == 0)
     {
-#ifdef DEBUG
-        printf("DEBUG: Had to restart the thread\n");
-        fflush(stdout);
-#endif
+        if (g_verbose_debug)
+        {
+            puts("DEBUG: effects_remove restarted RunPostPonedEvents thread");
+            fflush(stdout);
+        }
+
         g_postevents_running = 1;
         pthread_create(&g_postevents_thread, NULL, PostPonedEventsThread, NULL);
     }
@@ -5915,16 +5921,11 @@ int effects_set_beats_per_minute(double bpm)
 {
   int result = SUCCESS;
   if ((20.0 <= bpm) && (bpm <= 280.0)) {
-    // Change the current global value and fly a flag that it was
-    // changed.
+    // Change the current global value and set a flag that it was changed.
     g_transport_bpm = bpm;
     g_transport_reset = true;
-    TriggerJackTimebase();
-    UpdateGlobalJackPosition(UPDATE_POSITION_FORCED, true);
-#ifdef DEBUG
-    printf("DEBUG: set_beats_per_minute %f\n", g_transport_bpm);
-    fflush(stdout);
-#endif
+    TriggerJackTimebase(false);
+    UpdateGlobalJackPosition(UPDATE_POSITION_FORCED, false);
   } else {
     result = ERR_JACK_VALUE_OUT_OF_RANGE;
   }
@@ -5939,11 +5940,10 @@ int effects_set_beats_per_bar(float bpb)
 {
   int result = SUCCESS;
   if ((1.0 <= bpb) && (bpb <= 16.0)) {
-    // Change the current global value and fly a flag that is was
-    // changed.
+    // Change the current global value and set a flag that it was changed.
     g_transport_bpb = bpb;
     g_transport_reset = true;
-    TriggerJackTimebase();
+    TriggerJackTimebase(false);
     UpdateGlobalJackPosition(UPDATE_POSITION_FORCED, true);
   } else {
     result = ERR_JACK_VALUE_OUT_OF_RANGE;
@@ -6866,28 +6866,46 @@ void effects_transport(int rolling, double beats_per_bar, double beats_per_minut
     {
         // old timebase master no longer active, make ourselves master again
         jack_set_timebase_callback(g_jack_global_client, 1, JackTimebase, NULL);
+
+        if (g_verbose_debug) {
+            puts("DEBUG: effects_transport old timebase master not valid, mod-host is master again");
+        }
     }
 
-    if (g_jack_rolling != (rolling != 0) ||
-        g_jack_rolling != (jack_transport_query(g_jack_global_client, NULL) == JackTransportRolling))
+    const bool rolling_changed = g_jack_rolling != (rolling != 0) ||
+        g_jack_rolling != (jack_transport_query(g_jack_global_client, NULL) == JackTransportRolling);
+
+    if (rolling_changed)
     {
         if (rolling)
         {
             jack_transport_start(g_jack_global_client);
+            if (g_verbose_debug) {
+                puts("DEBUG: effects_transport started rolling");
+            }
         }
         else
         {
             jack_transport_stop(g_jack_global_client);
-            jack_transport_locate(g_jack_global_client, 0);
+            if (g_verbose_debug) {
+                puts("DEBUG: effects_transport stopped rolling and relocated to frame 0");
+            }
         }
         // g_jack_rolling is updated on the next jack callback
         g_transport_reset = true;
     }
-    TriggerJackTimebase();
+    else
+    {
+        if (g_verbose_debug) {
+            puts("DEBUG: effects_transport rolling status ignored");
+        }
+    }
 
-#ifdef DEBUG
-    printf("DEBUG: Transport changed to %d %f, %f.\n", rolling, beats_per_minute, beats_per_bar);
-#endif
+    if (g_verbose_debug) {
+        printf("DEBUG: Transport changed to rolling:%d bpm:%f bpb:%f\n", rolling, beats_per_minute, beats_per_bar);
+    }
+
+    TriggerJackTimebase(rolling_changed);
 }
 
 int effects_transport_sync_mode(const char* mode)
@@ -6936,10 +6954,11 @@ int effects_transport_sync_mode(const char* mode)
 
 void effects_output_data_ready(void)
 {
-#ifdef DEBUG
-        printf("DEBUG: Server is ready to receive more stuff %i\n", g_postevents_ready);
+    if (g_verbose_debug) {
+        printf("DEBUG: effects_output_data_ready() UI is ready to receive more stuff (code %i)\n",
+               g_postevents_ready);
         fflush(stdout);
-#endif
+    }
 
     if (! g_postevents_ready)
     {

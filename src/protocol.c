@@ -126,7 +126,7 @@ void protocol_parse(msg_t *msg)
     int32_t index;
     proto_t proto;
 
-    if (g_verbose) printf("received: %s\n", msg->data);
+    if (g_verbose) printf("PROTOCOL: received '%s'\n", msg->data);
 
     proto.list = strarr_split(msg->data);
     proto.list_count = strarr_length(proto.list);
@@ -211,7 +211,7 @@ void protocol_parse(msg_t *msg)
             if (proto.response)
             {
                 SEND_TO_SENDER(msg->sender_id, proto.response, proto.response_size);
-                if (g_verbose) printf("response: %s\n", proto.response);
+                if (g_verbose) printf("PROTOCOL: response '%s'\n", proto.response);
 
                 FREE(proto.response);
             }
@@ -221,7 +221,7 @@ void protocol_parse(msg_t *msg)
     else
     {
         SEND_TO_SENDER(msg->sender_id, g_error_messages[-index-1], strlen(g_error_messages[-index-1]));
-        if (g_verbose) printf("error: %s\n", g_error_messages[-index-1]);
+        if (g_verbose) printf("PROTOCOL: error '%s'\n", g_error_messages[-index-1]);
     }
 
     FREE(proto.list);
