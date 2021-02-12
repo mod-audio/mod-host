@@ -190,11 +190,12 @@ enum PortHints {
     HINT_CV_RANGES     = 1 << 0, // port info includes ranges
     // events
     HINT_TRANSPORT     = 1 << 0,
-    HINT_OLD_EVENT_API = 1 << 1,
+    HINT_MIDI_EVENT    = 1 << 1,
+    HINT_OLD_EVENT_API = 1 << 2,
 };
 
 enum PluginHints {
-    //HINT_TRANSPORT     = 1 << 0,
+    //HINT_TRANSPORT     = 1 << 0, // must match HINT_TRANSPORT set above
     HINT_TRIGGERS        = 1 << 1,
     HINT_OUTPUT_MONITORS = 1 << 2,
     HINT_HAS_STATE       = 1 << 3,
@@ -1464,14 +1465,15 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
     /* Prepare midi/event ports */
     for (i = 0; i < effect->input_event_ports_count; i++)
     {
-        lv2_evbuf_reset(effect->input_event_ports[i]->evbuf, true);
+        port = effect->input_event_ports[i];
+        lv2_evbuf_reset(port->evbuf, true);
 
         if (effect->bypass > 0.5f && effect->enabled_index < 0)
         {
             // effect is now bypassed, but wasn't before
-            if (!effect->was_bypassed)
+            if (!effect->was_bypassed && (port->hints & HINT_MIDI_EVENT) != 0)
             {
-                LV2_Evbuf_Iterator iter = lv2_evbuf_begin(effect->input_event_ports[i]->evbuf);
+                LV2_Evbuf_Iterator iter = lv2_evbuf_begin(port->evbuf);
 
                 uint8_t bufNotesOff[3] = {
                     0xB0, // CC
@@ -1499,10 +1501,10 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
         else
         {
             // non-bypassed, processing
-            LV2_Evbuf_Iterator iter = lv2_evbuf_begin(effect->input_event_ports[i]->evbuf);
+            LV2_Evbuf_Iterator iter = lv2_evbuf_begin(port->evbuf);
 
             /* Write Jack MIDI input */
-            void* buf = jack_port_get_buffer(effect->input_event_ports[i]->jack_port, nframes);
+            void* buf = jack_port_get_buffer(port->jack_port, nframes);
             uint32_t j;
             for (j = 0; j < jack_midi_get_event_count(buf); ++j)
             {
@@ -1515,7 +1517,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
             }
 
             /* Write time position */
-            if (lv2_pos->size > 0 && (effect->input_event_ports[i]->hints & HINT_TRANSPORT) != 0)
+            if (lv2_pos->size > 0 && (port->hints & HINT_TRANSPORT) != 0)
             {
                 lv2_evbuf_write(&iter, 0, 0, lv2_pos->type, lv2_pos->size, LV2_ATOM_BODY_CONST(lv2_pos));
             }
@@ -3596,7 +3598,7 @@ int effects_add(const char *uri, int instance)
     LilvNode *lilv_minimum, *lilv_mod_minimum;
     LilvNode *lilv_maximum, *lilv_mod_maximum;
     LilvNode *lilv_preferMomentaryOff, *lilv_preferMomentaryOn, *lilv_rawMIDIClockAccess;
-    LilvNode *lilv_minimumSize;
+    LilvNode *lilv_midiEvent, *lilv_minimumSize;
     LilvNode *lilv_atom_port, *lilv_worker_interface, *lilv_license_interface, *lilv_state_interface;
     const LilvPort *control_in_port;
     const LilvPort *lilv_port;
@@ -3644,6 +3646,7 @@ int effects_add(const char *uri, int instance)
     lilv_preferMomentaryOff = NULL;
     lilv_preferMomentaryOn = NULL;
     lilv_rawMIDIClockAccess = NULL;
+    lilv_midiEvent = NULL;
     lilv_minimumSize = NULL;
     lilv_event = NULL;
     lilv_atom_port = NULL;
@@ -3793,6 +3796,7 @@ int effects_add(const char *uri, int instance)
     lilv_preferMomentaryOff = lilv_new_uri(g_lv2_data, LILV_NS_MOD "preferMomentaryOffByDefault");
     lilv_preferMomentaryOn = lilv_new_uri(g_lv2_data, LILV_NS_MOD "preferMomentaryOnByDefault");
     lilv_rawMIDIClockAccess = lilv_new_uri(g_lv2_data, LILV_NS_MOD "rawMIDIClockAccess");
+    lilv_midiEvent = lilv_new_uri(g_lv2_data, LV2_MIDI__MidiEvent);
     lilv_minimumSize = lilv_new_uri(g_lv2_data, LV2_RESIZE_PORT__minimumSize);
 
     /* Allocate memory to ports */
@@ -4102,11 +4106,19 @@ int effects_add(const char *uri, int instance)
             if (lilv_port_is_a(plugin, lilv_port, lilv_event))
             {
                 port->hints |= HINT_OLD_EVENT_API;
+                port->hints |= HINT_MIDI_EVENT;
             }
-            else if (lilv_port_supports_event(plugin, lilv_port, lilv_timePosition))
+            else
             {
-                port->hints |= HINT_TRANSPORT;
-                effect->hints |= HINT_TRANSPORT;
+                if (lilv_port_supports_event(plugin, lilv_port, lilv_midiEvent))
+                {
+                    port->hints |= HINT_MIDI_EVENT;
+                }
+                if (lilv_port_supports_event(plugin, lilv_port, lilv_timePosition))
+                {
+                    port->hints |= HINT_TRANSPORT;
+                    effect->hints |= HINT_TRANSPORT;
+                }
             }
 
             if (port->flow == FLOW_OUTPUT && control_out_size == 0)
@@ -4505,6 +4517,7 @@ int effects_add(const char *uri, int instance)
     lilv_node_free(lilv_preferMomentaryOff);
     lilv_node_free(lilv_preferMomentaryOn);
     lilv_node_free(lilv_rawMIDIClockAccess);
+    lilv_node_free(lilv_midiEvent);
     lilv_node_free(lilv_minimumSize);
     lilv_node_free(lilv_atom_port);
     lilv_node_free(lilv_worker_interface);
@@ -4584,6 +4597,7 @@ int effects_add(const char *uri, int instance)
         lilv_node_free(lilv_preferMomentaryOff);
         lilv_node_free(lilv_preferMomentaryOn);
         lilv_node_free(lilv_rawMIDIClockAccess);
+        lilv_node_free(lilv_midiEvent);
         lilv_node_free(lilv_minimumSize);
         lilv_node_free(lilv_atom_port);
         lilv_node_free(lilv_worker_interface);
