@@ -3038,13 +3038,25 @@ static void CCDataUpdate(void* arg)
         if (!assignment->port)
             continue;
 
+        if (g_verbose_debug) {
+            printf("DEBUG: CCDataUpdate received %f as value of portsymbol %s (with prev value as %f)\n",
+                   data->value, assignment->port->symbol, assignment->port->prev_value);
+            fflush(stdout);
+        }
+
         // invert value if bypass
         if ((is_bypass = !strcmp(assignment->port->symbol, g_bypass_port_symbol)))
             data->value = 1.0f - data->value;
 
         // ignore requests for same value
         if (!floats_differ_enough(assignment->port->prev_value, data->value))
+        {
+            if (g_verbose_debug) {
+                puts("DEBUG: CCDataUpdate ignoring value change (matches previous value)");
+                fflush(stdout);
+            }
             continue;
+        }
 
         if (SetPortValue(assignment->port, data->value, assignment->effect_id, is_bypass))
             needs_post = true;
@@ -5598,7 +5610,7 @@ int effects_bypass(int effect_id, int value)
     }
 
     effect_t *effect = &g_effects[effect_id];
-    effect->bypass = value ? 1.0f : 0.0f;
+    effect->bypass_port.prev_value = effect->bypass = value ? 1.0f : 0.0f;
 
     if (effect->enabled_index >= 0)
     {
@@ -6062,6 +6074,24 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
         port->def_value = port->prev_value = *(port->buffer) = value;
     }
 
+    if (g_verbose_debug) {
+        puts("DEBUG: cc_map sending:");
+        printf("\tdevice_id:   %i\n", assignment.device_id);
+        printf("\tactuator_id: %i\n", assignment.actuator_id);
+        printf("\tmode:        %x\n", assignment.mode);
+        printf("\tlabel:       \"%s\"\n", assignment.label);
+        printf("\tmin:         %f\n", assignment.min);
+        printf("\tmax:         %f\n", assignment.max);
+        printf("\tdef:         %f\n", assignment.def);
+        printf("\tvalue:       %f\n", assignment.value);
+        printf("\tsteps:       %i\n", assignment.steps);
+        printf("\tunit:        \"%s\"\n", assignment.unit);
+        printf("\tlist_count:  %i\n", assignment.list_count);
+        for (int i = 0; i < scalepoints_count; i++)
+            printf("\t #%02i: %f \"%s\"\n", i+1, scalepoints[i].value, scalepoints[i].label);
+        fflush(stdout);
+    }
+
     const int assignment_id = cc_client_assignment(g_cc_client, &assignment);
 
     free(item_data);
@@ -6069,6 +6099,10 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
 
     if (assignment_id < 0)
     {
+        if (g_verbose_debug) {
+            puts("DEBUG: cc_map failed");
+            fflush(stdout);
+        }
         return ERR_ASSIGNMENT_FAILED;
     }
 
@@ -6080,6 +6114,11 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
     item->actuator_id = actuator_id;
     item->assignment_id = assignment_id;
     item->supports_set_value = CheckCCDeviceProtocolVersion(device_id, 0, 6);
+
+    if (g_verbose_debug) {
+        printf("DEBUG: cc_map assignment supports set_value: %s\n", item->supports_set_value ? "true" : "false");
+        fflush(stdout);
+    }
 
     return SUCCESS;
 #else
@@ -6134,10 +6173,24 @@ int effects_cc_value_set(int effect_id, const char *control_symbol, float value)
                 update.actuator_id = assignment->actuator_id;
                 update.value = value;
 
+                if (g_verbose_debug) {
+                    puts("DEBUG: cc_value_set sending:");
+                    printf("\tdevice_id:     %i\n", update.device_id);
+                    printf("\tassignment_id: %i\n", update.assignment_id);
+                    printf("\tactuator_id:   %i\n", update.actuator_id);
+                    printf("\tvalue:         %f\n", update.value);
+                    fflush(stdout);
+                }
+
                 cc_client_value_set(g_cc_client, &update);
                 return SUCCESS;
             }
         }
+    }
+
+    if (g_verbose_debug) {
+        puts("DEBUG: cc_value_set failed");
+        fflush(stdout);
     }
 
     return ERR_ASSIGNMENT_INVALID_OP;
@@ -6177,10 +6230,22 @@ int effects_cc_unmap(int effect_id, const char *control_symbol)
                 memset(assignment, 0, sizeof(assignment_t));
                 assignment->effect_id = ASSIGNMENT_UNUSED;
 
+                if (g_verbose_debug) {
+                    puts("DEBUG: cc_unmap sending:");
+                    printf("\tdevice_id: %i\n", key.device_id);
+                    printf("\tid:        %i\n", key.id);
+                    fflush(stdout);
+                }
+
                 cc_client_unassignment(g_cc_client, &key);
                 return SUCCESS;
             }
         }
+    }
+
+    if (g_verbose_debug) {
+        puts("DEBUG: cc_unmap failed");
+        fflush(stdout);
     }
 
     return ERR_ASSIGNMENT_INVALID_OP;
