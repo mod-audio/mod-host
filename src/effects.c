@@ -552,8 +552,8 @@ typedef struct RAW_MIDI_PORT_ITEM {
 #define UNUSED_PARAM(var)           do { (void)(var); } while (0)
 #define INSTANCE_IS_VALID(id)       ((id >= 0) && (id < MAX_INSTANCES))
 
-/* used to indicate if a parameter changed was initiated from us */
-#define MAGIC_PARAMETER_SEQ_NUMBER 1337
+/* used to indicate if a parameter change was initiated from us */
+#define MAGIC_PARAMETER_SEQ_NUMBER -1337
 
 /*
 ************************************************************************************************************************
