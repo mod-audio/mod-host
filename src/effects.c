@@ -418,7 +418,7 @@ typedef struct URIDS_T {
     LV2_URID patch_Get;
     LV2_URID patch_Set;
     LV2_URID patch_property;
-    LV2_URID patch_subject;
+    LV2_URID patch_sequence;
     LV2_URID patch_value;
     LV2_URID time_Position;
     LV2_URID time_bar;
@@ -552,6 +552,8 @@ typedef struct RAW_MIDI_PORT_ITEM {
 #define UNUSED_PARAM(var)           do { (void)(var); } while (0)
 #define INSTANCE_IS_VALID(id)       ((id >= 0) && (id < MAX_INSTANCES))
 
+/* used to indicate if a parameter changed was initiated from us */
+#define MAGIC_PARAMETER_SEQ_NUMBER 1337
 
 /*
 ************************************************************************************************************************
@@ -1837,15 +1839,18 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
 
                         if (objbody->otype == g_urids.patch_Set)
                         {
-                            const LV2_Atom_URID *subject  = NULL;
+                            const LV2_Atom_Int  *sequence = NULL;
                             const LV2_Atom_URID *property = NULL;
                             const LV2_Atom      *value    = NULL;
 
                             lv2_atom_object_body_get(size, objbody,
-                                                     g_urids.patch_subject,  (const LV2_Atom**)&subject,
+                                                     g_urids.patch_sequence, (const LV2_Atom**)&sequence,
                                                      g_urids.patch_property, (const LV2_Atom**)&property,
                                                      g_urids.patch_value,    &value,
                                                      0);
+
+                            if (sequence != NULL && sequence->body == MAGIC_PARAMETER_SEQ_NUMBER)
+                                continue;
 
                             if (jack_ringbuffer_write_space(effect->events_out_buffer) < sizeof(uint32_t) + sizeof(LV2_Atom) + value->size)
                                 continue;
@@ -3387,7 +3392,7 @@ int effects_init(void* client)
     g_urids.patch_Get            = urid_to_id(g_symap, LV2_PATCH__Get);
     g_urids.patch_Set            = urid_to_id(g_symap, LV2_PATCH__Set);
     g_urids.patch_property       = urid_to_id(g_symap, LV2_PATCH__property);
-    g_urids.patch_subject        = urid_to_id(g_symap, LV2_PATCH__subject);
+    g_urids.patch_sequence       = urid_to_id(g_symap, LV2_PATCH__sequenceNumber);
     g_urids.patch_value          = urid_to_id(g_symap, LV2_PATCH__value);
 
     g_urids.time_Position        = urid_to_id(g_symap, LV2_TIME__Position);
@@ -5174,6 +5179,9 @@ bool lv2_atom_forge_property_set(LV2_Atom_Forge *forge, LV2_URID urid, const cha
 {
     LV2_Atom_Forge_Frame frame;
     lv2_atom_forge_object(forge, &frame, 0, g_urids.patch_Set);
+
+    lv2_atom_forge_key(forge, g_urids.patch_sequence);
+    lv2_atom_forge_int(forge, MAGIC_PARAMETER_SEQ_NUMBER);
 
     lv2_atom_forge_key(forge, g_urids.patch_property);
     lv2_atom_forge_urid(forge, urid);
