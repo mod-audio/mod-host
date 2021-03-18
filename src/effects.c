@@ -5442,8 +5442,9 @@ int effects_set_property(int effect_id, const char *uri, const char *value)
 
             // size as used by the forge (can overshoot for string->number conversion)
             size_t bufsize = lv2_atom_pad_size(sizeof(LV2_Atom_Object))
-                           + 2U * lv2_atom_pad_size(2U * sizeof(uint32_t)) /* keys */
+                           + 3U * lv2_atom_pad_size(2U * sizeof(uint32_t)) /* keys */
                            + lv2_atom_pad_size(sizeof(LV2_Atom_URID))
+                           + lv2_atom_pad_size(sizeof(LV2_Atom_Int))
                            + lv2_atom_pad_size(sizeof(LV2_Atom) + size) + 8U;
             uint8_t *buf = malloc(bufsize);
 
