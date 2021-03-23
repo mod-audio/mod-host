@@ -44,6 +44,7 @@ Dependencies:
     liblilv         >= 0.14.2
     libreadline     >= 6.2
     lilv-utils      (optional)
+    fftw            (optional)
 
 
 Running
