@@ -1,4 +1,6 @@
 
+#pragma once
+
 #define MOD_SEMAPHORE_USE_FUTEX
 
 #ifdef MOD_SEMAPHORE_USE_FUTEX
@@ -20,10 +22,11 @@ typedef struct _sem_t {
 } sem_t;
 
 static inline
-void sem_init(sem_t* sem, int pshared, int value)
+int sem_init(sem_t* sem, int pshared, int value)
 {
     sem->value   = value;
     sem->pshared = pshared;
+    return 0;
 }
 
 static inline

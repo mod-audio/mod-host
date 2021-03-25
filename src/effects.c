@@ -65,6 +65,7 @@
 #include <lv2/lv2plug.in/ns/ext/uri-map/uri-map.h>
 #include <lv2/lv2plug.in/ns/ext/worker/worker.h>
 #include "lv2/control-input-port-change-request.h"
+#include "lv2/lv2-hmi.h"
 #include "lv2/mod-license.h"
 
 #ifdef HAVE_CONTROLCHAIN
@@ -78,6 +79,7 @@
 #endif
 
 #include "mod-host.h"
+#include "sys_host.h"
 
 #ifndef HAVE_NEW_LILV
 #define lilv_free(x) free(x)
@@ -213,6 +215,7 @@ enum {
     URID_MAP_FEATURE,
     URID_UNMAP_FEATURE,
     OPTIONS_FEATURE,
+    HMI_WC_FEATURE,
     LICENSE_FEATURE,
     BUF_SIZE_POWER2_FEATURE,
     BUF_SIZE_FIXED_FEATURE,
@@ -615,6 +618,7 @@ static char *g_lv2_scratch_dir;
 /* Global features */
 static Symap* g_symap;
 static urids_t g_urids;
+static LV2_HMI_WidgetControl g_hmi_wc;
 static MOD_License_Feature g_license;
 static LV2_Atom_Forge g_lv2_atom_forge;
 static LV2_Log_Log g_lv2_log;
@@ -629,6 +633,7 @@ static LV2_Feature g_buf_size_features[3] = {
     { LV2_BUF_SIZE__fixedBlockLength, NULL },
     { LV2_BUF_SIZE__boundedBlockLength, NULL }
 };
+static LV2_Feature g_hmi_wc_feature = { LV2_HMI__WidgetControl, &g_hmi_wc };
 static LV2_Feature g_license_feature = { MOD_LICENSE__feature, &g_license };
 static LV2_Feature g_lv2_log_feature = { LV2_LOG__log, &g_lv2_log };
 static LV2_Feature g_options_feature = { LV2_OPTIONS__options, &g_options };
@@ -647,6 +652,10 @@ static bool g_monitored_midi_programs[16];
 static hylia_t* g_hylia_instance;
 static hylia_time_info_t g_hylia_timeinfo;
 #endif
+
+/* HMI integration */
+static int g_hmi_shmfd;
+static sys_serial_shm_data* g_hmi_data;
 
 static const char* const g_bypass_port_symbol = BYPASS_PORT_SYMBOL;
 static const char* const g_presets_port_symbol = PRESETS_PORT_SYMBOL;
@@ -687,6 +696,9 @@ static int LoadPresets(effect_t *effect);
 static void FreeFeatures(effect_t *effect);
 static void FreePluginString(void* handle, char *str);
 static void ConnectToAllHardwareMIDIPorts(void);
+static void HMISetLedColour(LV2_HMI_WidgetControl_Handle handle,
+                           LV2_HMI_Addressing addressing,
+                           LV2_HMI_Colour led_color);
 static char *GetLicenseFile(MOD_License_Handle handle, const char *license_uri);
 static int LogPrintf(LV2_Log_Handle handle, LV2_URID type, const char *fmt, ...);
 static int LogVPrintf(LV2_Log_Handle handle, LV2_URID type, const char *fmt, va_list ap);
@@ -2581,6 +2593,7 @@ static void GetFeatures(effect_t *effect)
     features[URID_MAP_FEATURE]          = &g_urid_map_feature;
     features[URID_UNMAP_FEATURE]        = &g_urid_unmap_feature;
     features[OPTIONS_FEATURE]           = &g_options_feature;
+    features[HMI_WC_FEATURE]            = &g_hmi_wc_feature;
     features[LICENSE_FEATURE]           = &g_license_feature;
     features[BUF_SIZE_POWER2_FEATURE]   = &g_buf_size_features[0];
     features[BUF_SIZE_FIXED_FEATURE]    = &g_buf_size_features[1];
@@ -2803,6 +2816,23 @@ static void ConnectToAllHardwareMIDIPorts(void)
 
         jack_free(midihwports);
     }
+}
+
+static void HMISetLedColour(LV2_HMI_WidgetControl_Handle handle,
+                            LV2_HMI_Addressing addressing,
+                            LV2_HMI_Colour led_color)
+{
+//     if (g_verbose_debug) {
+        printf("DEBUG: HMISetLedColour %p %i\n", addressing, led_color);
+        fflush(stdout);
+//     }
+
+    // TESTING
+    if (g_hmi_data == NULL)
+        return;
+
+    ++g_hmi_data->buffer[0];
+    sem_post(&g_hmi_data->sem);
 }
 
 static char* GetLicenseFile(MOD_License_Handle handle, const char *license_uri)
@@ -3449,6 +3479,13 @@ int effects_init(void* client)
     g_options[5].type = 0;
     g_options[5].value = NULL;
 
+    // HMI integration setup
+    g_hmi_wc.handle = NULL;
+    g_hmi_wc.set_led_colour = HMISetLedColour;
+
+    if (! sys_serial_open(&g_hmi_shmfd, &g_hmi_data, false))
+        fprintf(stderr, "sys_host HMI setup failed\n");
+
     g_license.handle = NULL;
     g_license.license = GetLicenseFile;
     g_license.free = FreePluginString;
@@ -3538,6 +3575,9 @@ int effects_finish(int close_client)
     pthread_join(g_postevents_thread, NULL);
 
     effects_remove(REMOVE_ALL);
+
+    if (g_hmi_data != NULL)
+        sys_serial_close(g_hmi_shmfd, g_hmi_data, false);
 
 #ifdef HAVE_CONTROLCHAIN
     if (g_cc_client)
@@ -4702,6 +4742,7 @@ int effects_preset_save(int effect_id, const char *dir, const char *file_name, c
         &g_urid_map_feature,
         &g_urid_unmap_feature,
         &g_options_feature,
+        &g_hmi_wc_feature,
         &g_license_feature,
         &g_buf_size_features[0],
         &g_buf_size_features[1],
@@ -6627,6 +6668,7 @@ int effects_state_load(const char *dir)
         &g_urid_map_feature,
         &g_urid_unmap_feature,
         &g_options_feature,
+        &g_hmi_wc_feature,
         &g_license_feature,
         &g_buf_size_features[0],
         &g_buf_size_features[1],
@@ -6713,6 +6755,7 @@ int effects_state_save(const char *dir)
         &g_urid_map_feature,
         &g_urid_unmap_feature,
         &g_options_feature,
+        &g_hmi_wc_feature,
         &g_license_feature,
         &g_buf_size_features[0],
         &g_buf_size_features[1],
