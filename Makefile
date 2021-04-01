@@ -95,8 +95,11 @@ INCS += $(shell pkg-config --cflags hylia) -DHAVE_HYLIA
 endif
 
 # source and object files
-SRC = $(wildcard $(SRC_DIR)/*.$(EXT)) $(SRC_DIR)/sha1/sha1.c $(SRC_DIR)/rtmempool/rtmempool.c
-OBJ = $(SRC:.$(EXT)=.o)
+SRC  = $(wildcard $(SRC_DIR)/*.$(EXT))
+SRC += $(SRC_DIR)/monitor/monitor-client.c
+SRC += $(SRC_DIR)/sha1/sha1.c
+SRC += $(SRC_DIR)/rtmempool/rtmempool.c
+OBJ  = $(SRC:.$(EXT)=.o)
 
 # default build
 all: $(PROG) $(PROG).so fake-input.so mod-monitor.so
@@ -124,7 +127,7 @@ mod-monitor.so: src/mod-monitor.o
 	$(CC) $< $(LDFLAGS) $(LIBS) -shared -o $@
 
 src/mod-monitor.o: src/monitor/monitor-client.c
-	$(CC) $(INCS) $(CFLAGS) -o $@ $<
+	$(CC) $(INCS) $(CFLAGS) -DSTANDALONE_MONITOR_CLIENT -o $@ $<
 
 # install rule
 install: install_man

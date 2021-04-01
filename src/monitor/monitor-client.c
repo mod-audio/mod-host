@@ -30,6 +30,8 @@
 
 #include <jack/jack.h>
 
+#include "monitor-client.h"
+
 /*
 ************************************************************************************************************************
 *           LOCAL DEFINES
@@ -80,6 +82,7 @@ typedef struct MONITOR_CLIENT_T {
 */
 
 static bool g_active = false;
+static monitor_client_t* g_monitor_handle = NULL;
 
 /*
 ************************************************************************************************************************
@@ -192,9 +195,12 @@ static void PortConnectMonitor(jack_port_id_t a, jack_port_id_t b, int connect, 
     (void)connect;
 }
 
+#ifdef STANDALONE_MONITOR_CLIENT
 __attribute__ ((visibility("default")))
 int jack_initialize(jack_client_t* client, const char* load_init);
-
+#else
+static
+#endif
 int jack_initialize(jack_client_t* client, const char* load_init)
 {
     /* can only be run once */
@@ -248,6 +254,7 @@ int jack_initialize(jack_client_t* client, const char* load_init)
     }
 
     g_active = true;
+    g_monitor_handle = mon;
 
     /* Connect output ports */
     char ourportname[MAX_CHAR_BUF_SIZE+1];
@@ -270,19 +277,51 @@ int jack_initialize(jack_client_t* client, const char* load_init)
     return 0;
 }
 
+#ifdef STANDALONE_MONITOR_CLIENT
 __attribute__ ((visibility("default")))
 void jack_finish(void* arg);
-
+#else
+static
+#endif
 void jack_finish(void* arg)
 {
     monitor_client_t *const mon = arg;
 
     jack_deactivate(mon->client);
 
+    g_monitor_handle = NULL;
     g_active = false;
 
     for (int i=0; i<PORT_COUNT; ++i)
         jack_port_unregister(mon->client, mon->ports[i]);
 
     free(mon);
+}
+
+bool monitor_client_init(void)
+{
+    jack_client_t *const client = jack_client_open("mod-monitor", JackNoStartServer|JackUseExactName, NULL);
+
+    if (!client)
+    {
+        fprintf(stderr, "failed to open mod-monitor client\n");
+        return false;
+    }
+
+    if (jack_initialize(client, NULL) != 0)
+    {
+        jack_client_close(client);
+        return false;
+    }
+
+    return true;
+}
+
+void monitor_client_stop(void)
+{
+    monitor_client_t *const mon = g_monitor_handle;
+    jack_client_t *const client = mon->client;
+
+    jack_finish(mon);
+    jack_client_close(client);
 }
