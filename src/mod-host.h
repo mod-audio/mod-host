@@ -93,6 +93,11 @@
 #define HELP                 "help"
 #define QUIT                 "quit"
 
+// TESTING might be removed later
+#define SYS_COMPRESSOR_DISABLE "sys_compressor_off"
+#define SYS_COMPRESSOR_SETUP   "sys_compressor %f %f %f %f %f %f"
+#define SYS_VOLUME             "sys_volume %f"
+
 
 /*
 ************************************************************************************************************************
