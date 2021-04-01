@@ -127,6 +127,7 @@ typedef struct {
 #include "worker.h"
 #include "state-paths.h"
 #include "symap.h"
+#include "monitor/monitor-client.h"
 #include "sha1/sha1.h"
 #include "rtmempool/list.h"
 #include "rtmempool/rtmempool.h"
@@ -3173,6 +3174,22 @@ int effects_init(void* client)
         return ERR_JACK_CLIENT_CREATION;
     }
 
+    /* Register jack ports */
+    g_midi_in_port = jack_port_register(g_jack_global_client, "midi_in", JACK_DEFAULT_MIDI_TYPE, JackPortIsInput, 0);
+
+    if (! g_midi_in_port)
+    {
+        fprintf(stderr, "can't register global jack midi-in port\n");
+        if (client == NULL)
+            jack_client_close(g_jack_global_client);
+        return ERR_JACK_PORT_REGISTER;
+    }
+
+    if (! monitor_client_init())
+    {
+        return ERR_JACK_CLIENT_CREATION;
+    }
+
     memset(g_effects, 0, sizeof(g_effects));
 
     INIT_LIST_HEAD(&g_rtsafe_list);
@@ -3331,17 +3348,6 @@ int effects_init(void* client)
         hylia_set_output_latency(g_hylia_instance, GetHyliaOutputLatency());
     }
 #endif
-
-    /* Register jack ports */
-    g_midi_in_port = jack_port_register(g_jack_global_client, "midi_in", JACK_DEFAULT_MIDI_TYPE, JackPortIsInput, 0);
-
-    if (! g_midi_in_port)
-    {
-        fprintf(stderr, "can't register global jack midi-in port\n");
-        if (client == NULL)
-            jack_client_close(g_jack_global_client);
-        return ERR_JACK_PORT_REGISTER;
-    }
 
     /* Load all LV2 data */
     g_lv2_data = lilv_world_new();
@@ -3536,6 +3542,8 @@ int effects_finish(int close_client)
     g_postevents_running = -1;
     sem_post(&g_postevents_semaphore);
     pthread_join(g_postevents_thread, NULL);
+
+    monitor_client_stop();
 
     effects_remove(REMOVE_ALL);
 
