@@ -31,6 +31,8 @@
 #include <jack/jack.h>
 
 #include "monitor-client.h"
+#include "../utils.h"
+#include "../dsp/compressor_core.h"
 
 /*
 ************************************************************************************************************************
@@ -67,6 +69,10 @@ typedef struct MONITOR_CLIENT_T {
     bool mono_copy;
     bool in1_connected;
     bool in2_connected;
+    bool apply_compressor;
+    bool apply_volume;
+    sf_compressor_state_st compressor;
+    float volume;
 } monitor_client_t;
 
 /*
@@ -111,69 +117,89 @@ static monitor_client_t* g_monitor_handle = NULL;
 static int ProcessMonitor(jack_nframes_t nframes, void *arg)
 {
     monitor_client_t *const mon = arg;
+    float *const bufIn1  = jack_port_get_buffer(mon->ports[PORT_IN1], nframes);
+    float *const bufIn2  = jack_port_get_buffer(mon->ports[PORT_IN2], nframes);
+    float *const bufOut1 = jack_port_get_buffer(mon->ports[PORT_OUT1], nframes);
+    float *const bufOut2 = jack_port_get_buffer(mon->ports[PORT_OUT2], nframes);
+    const float volume = mon->volume;
+    const bool apply_compressor = mon->apply_compressor;
+    const bool apply_volume = mon->apply_volume;
 
-    if (mon->in1_connected)
+    if (mon->in1_connected && mon->in2_connected)
     {
-        if (mon->in2_connected)
+        // input1 and input2 have connections
+        if (apply_compressor)
         {
-            // input1 and input2 have connections
-            memcpy(jack_port_get_buffer(mon->ports[PORT_OUT1], nframes),
-                   jack_port_get_buffer(mon->ports[PORT_IN1], nframes),
-                   sizeof(float)*nframes);
+            compressor_process(&mon->compressor, nframes, bufIn1, bufIn2, bufOut1, bufOut2);
 
-            memcpy(jack_port_get_buffer(mon->ports[PORT_OUT2], nframes),
-                   jack_port_get_buffer(mon->ports[PORT_IN2], nframes),
-                   sizeof(float)*nframes);
+            if (apply_volume)
+            {
+                for (jack_nframes_t i=0; i<nframes; ++i)
+                {
+                    bufOut1[i] *= volume;
+                    bufOut2[i] *= volume;
+                }
+            }
         }
         else
         {
-            // only input1 has connections
-            memcpy(jack_port_get_buffer(mon->ports[PORT_OUT1], nframes),
-                   jack_port_get_buffer(mon->ports[PORT_IN1], nframes),
-                   sizeof(float)*nframes);
-
-            if (mon->mono_copy)
+            if (apply_volume)
             {
-                memcpy(jack_port_get_buffer(mon->ports[PORT_OUT2], nframes),
-                       jack_port_get_buffer(mon->ports[PORT_IN1], nframes),
-                       sizeof(float)*nframes);
+                for (jack_nframes_t i=0; i<nframes; ++i)
+                {
+                    bufOut1[i] = bufIn1[i] * volume;
+                    bufOut2[i] = bufIn2[i] * volume;
+                }
             }
             else
             {
-                memset(jack_port_get_buffer(mon->ports[PORT_OUT2], nframes),
-                       0, sizeof(float)*nframes);
+                memcpy(bufOut1, bufIn1, sizeof(float)*nframes);
+                memcpy(bufOut2, bufIn2, sizeof(float)*nframes);
             }
         }
+        return 0;
     }
-    else if (jack_port_connected(mon->ports[PORT_IN2]) > 0)
-    {
-        // only input2 has connections
-        memcpy(jack_port_get_buffer(mon->ports[PORT_OUT2], nframes),
-               jack_port_get_buffer(mon->ports[PORT_IN2], nframes),
-               sizeof(float)*nframes);
 
-        if (mon->mono_copy)
+    if (mon->in1_connected || mon->in2_connected)
+    {
+        // only one input has connections
+        float *const bufInR  = mon->in1_connected ? bufIn1 : bufIn2;
+        float *const bufOutR = mon->in1_connected ? bufOut1 : bufOut2;
+        float *const bufOutC = mon->in1_connected ? bufOut2 : bufOut1;
+
+        if (apply_compressor)
         {
-            memcpy(jack_port_get_buffer(mon->ports[PORT_OUT1], nframes),
-                   jack_port_get_buffer(mon->ports[PORT_IN2], nframes),
-                   sizeof(float)*nframes);
+            compressor_process_mono(&mon->compressor, nframes, bufInR, bufOutR);
+
+            if (apply_volume)
+            {
+                for (jack_nframes_t i=0; i<nframes; ++i)
+                    bufOutR[i] *= volume;
+            }
         }
         else
         {
-            memset(jack_port_get_buffer(mon->ports[PORT_OUT1], nframes),
-                   0, sizeof(float)*nframes);
+            if (apply_volume)
+            {
+                for (jack_nframes_t i=0; i<nframes; ++i)
+                    bufOutR[i] = bufInR[i] * volume;
+            }
+            else
+            {
+                memcpy(bufOutR, bufInR, sizeof(float)*nframes);
+            }
         }
-    }
-    else
-    {
-        // nothing connected in input1 or input2
-        memset(jack_port_get_buffer(mon->ports[PORT_OUT1], nframes),
-               0, sizeof(float)*nframes);
 
-        memset(jack_port_get_buffer(mon->ports[PORT_OUT2], nframes),
-               0, sizeof(float)*nframes);
+        if (mon->mono_copy)
+            memcpy(bufOutC, bufInR, sizeof(float)*nframes);
+        else
+            memset(bufOutC, 0, sizeof(float)*nframes);
+        return 0;
     }
 
+    // nothing connected in input1 or input2
+    memset(bufOut1, 0, sizeof(float)*nframes);
+    memset(bufOut2, 0, sizeof(float)*nframes);
     return 0;
 }
 
@@ -211,7 +237,7 @@ int jack_initialize(jack_client_t* client, const char* load_init)
     }
 
     /* allocate monitor client */
-    monitor_client_t *const mon = malloc(sizeof(monitor_client_t));
+    monitor_client_t *const mon = calloc(sizeof(monitor_client_t), 1);
 
     if (!mon)
     {
@@ -222,8 +248,13 @@ int jack_initialize(jack_client_t* client, const char* load_init)
     mon->client = client;
     mon->in1_connected = false;
     mon->in2_connected = false;
-
     mon->mono_copy = (load_init && !strcmp(load_init, "1")) || access("/data/jack-mono-copy", F_OK) != -1;
+
+    mon->apply_compressor = false;
+    mon->apply_volume = false;
+    mon->volume = 1.0f;
+
+    compressor_init(&mon->compressor, jack_get_sample_rate(client));
 
     /* Register jack ports */
     mon->ports[PORT_IN1 ] = jack_port_register(client, "in_1", JACK_DEFAULT_AUDIO_TYPE, JackPortIsInput, 0);
@@ -314,6 +345,54 @@ bool monitor_client_init(void)
         return false;
     }
 
+    return true;
+}
+
+bool monitor_client_disable_compressor(void)
+{
+    monitor_client_t *const mon = g_monitor_handle;
+
+    if (!mon)
+    {
+        fprintf(stderr, "asked to disable compressor while monitor client is not active\n");
+        return false;
+    }
+
+    mon->apply_compressor = false;
+    return true;
+}
+
+bool monitor_client_setup_compressor(float threshold, float knee, float ratio, float attack, float release, float makeup)
+{
+    monitor_client_t *const mon = g_monitor_handle;
+
+    if (!mon)
+    {
+        fprintf(stderr, "asked to setup compressor while monitor client is not active\n");
+        return false;
+    }
+
+    compressor_set_params(&mon->compressor, threshold, knee, ratio, attack / 1000, release / 1000, makeup);
+    mon->apply_compressor = true;
+    return true;
+}
+
+bool monitor_client_setup_volume(float volume)
+{
+    monitor_client_t *const mon = g_monitor_handle;
+
+    if (!mon)
+    {
+        fprintf(stderr, "asked to setup volume while monitor client is not active\n");
+        return false;
+    }
+
+    // local variables for calculations before changing the real struct values
+    const float final_volume = cmop_db2lin(volume);
+    const bool apply_volume = floats_differ_enough(final_volume, 1.0f);
+
+    mon->volume = final_volume;
+    mon->apply_volume = apply_volume;
     return true;
 }
 
