@@ -580,6 +580,31 @@ static void quit_cb(proto_t *proto)
     exit(EXIT_SUCCESS);
 }
 
+// TESTING
+#include "monitor/monitor-client.h"
+static void sys_compressor_disable(proto_t *proto)
+{
+    const bool resp = monitor_client_disable_compressor();
+    protocol_response_int(resp ? SUCCESS : ERR_INVALID_OPERATION, proto);
+}
+
+static void sys_compressor_setup(proto_t *proto)
+{
+    const bool resp = monitor_client_setup_compressor(atof(proto->list[1]),
+                                                     atof(proto->list[2]),
+                                                     atof(proto->list[3]),
+                                                     atof(proto->list[4]),
+                                                     atof(proto->list[5]),
+                                                     atof(proto->list[6]));
+    protocol_response_int(resp ? SUCCESS : ERR_INVALID_OPERATION, proto);
+}
+
+static void sys_volume(proto_t *proto)
+{
+    const bool resp = monitor_client_setup_volume(atof(proto->list[1]));
+    protocol_response_int(resp ? SUCCESS : ERR_INVALID_OPERATION, proto);
+}
+
 #ifndef SKIP_READLINE
 static void interactive_mode(void)
 {
@@ -682,6 +707,11 @@ static int mod_host_init(jack_client_t* client, int socket_port, int feedback_po
     protocol_add_command(TRANSPORT, transport);
     protocol_add_command(TRANSPORT_SYNC, transport_sync);
     protocol_add_command(OUTPUT_DATA_READY, output_data_ready);
+
+    // TESTING
+    protocol_add_command(SYS_COMPRESSOR_DISABLE, sys_compressor_disable);
+    protocol_add_command(SYS_COMPRESSOR_SETUP, sys_compressor_setup);
+    protocol_add_command(SYS_VOLUME, sys_volume);
 
     /* skip help and quit for internal client */
     if (client == NULL)
