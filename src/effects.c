@@ -2822,16 +2822,20 @@ static void HMISetLedColour(LV2_HMI_WidgetControl_Handle handle,
                             LV2_HMI_Addressing addressing,
                             LV2_HMI_Colour led_color)
 {
-//     if (g_verbose_debug) {
+    if (g_verbose_debug) {
         printf("DEBUG: HMISetLedColour %p %i\n", addressing, led_color);
         fflush(stdout);
-//     }
+    }
 
     // TESTING
     if (g_hmi_data == NULL)
         return;
 
-    sys_serial_write(g_hmi_data, sys_serial_event_type_led, "red");
+    // TESTING
+    static bool green = false;
+    green = !green;
+    // TODO protect with global mutex
+    sys_serial_write(g_hmi_data, sys_serial_event_type_led, green ? "green" : "red");
 }
 
 static char* GetLicenseFile(MOD_License_Handle handle, const char *license_uri)
