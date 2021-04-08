@@ -2831,8 +2831,7 @@ static void HMISetLedColour(LV2_HMI_WidgetControl_Handle handle,
     if (g_hmi_data == NULL)
         return;
 
-    ++g_hmi_data->buffer[0];
-    sem_post(&g_hmi_data->sem);
+    sys_serial_write(g_hmi_data, sys_serial_event_type_led, "red");
 }
 
 static char* GetLicenseFile(MOD_License_Handle handle, const char *license_uri)
@@ -3483,7 +3482,7 @@ int effects_init(void* client)
     g_hmi_wc.handle = NULL;
     g_hmi_wc.set_led_colour = HMISetLedColour;
 
-    if (! sys_serial_open(&g_hmi_shmfd, &g_hmi_data, false))
+    if (! sys_serial_open(&g_hmi_shmfd, &g_hmi_data))
         fprintf(stderr, "sys_host HMI setup failed\n");
 
     g_license.handle = NULL;
@@ -3577,7 +3576,7 @@ int effects_finish(int close_client)
     effects_remove(REMOVE_ALL);
 
     if (g_hmi_data != NULL)
-        sys_serial_close(g_hmi_shmfd, g_hmi_data, false);
+        sys_serial_close(g_hmi_shmfd, g_hmi_data);
 
 #ifdef HAVE_CONTROLCHAIN
     if (g_cc_client)
