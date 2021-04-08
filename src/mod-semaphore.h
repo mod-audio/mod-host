@@ -56,8 +56,11 @@ int sem_wait(sem_t* sem)
         if (__sync_bool_compare_and_swap(&sem->value, 1, 0))
             return 0;
 
-        if (syscall(__NR_futex, &sem->value, sem->pshared ? FUTEX_WAIT : FUTEX_WAIT_PRIVATE, 0, NULL, NULL, 0) != 0 && errno != EWOULDBLOCK)
-            return 1;
+        if (syscall(__NR_futex, &sem->value, sem->pshared ? FUTEX_WAIT : FUTEX_WAIT_PRIVATE, 0, NULL, NULL, 0) != 0)
+        {
+            if (errno != EAGAIN && errno != EINTR)
+                return 1;
+        }
     }
 }
 
@@ -72,8 +75,11 @@ int sem_timedwait_secs(sem_t* sem, int secs)
         if (__sync_bool_compare_and_swap(&sem->value, 1, 0))
             return 0;
 
-        if (syscall(__NR_futex, &sem->value, sem->pshared ? FUTEX_WAIT : FUTEX_WAIT_PRIVATE, 0, &timeout, NULL, 0) != 0 && errno != EWOULDBLOCK)
-            return 1;
+        if (syscall(__NR_futex, &sem->value, sem->pshared ? FUTEX_WAIT : FUTEX_WAIT_PRIVATE, 0, &timeout, NULL, 0) != 0)
+        {
+            if (errno != EAGAIN && errno != EINTR)
+                return 1;
+        }
     }
 }
 #else
