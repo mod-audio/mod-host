@@ -56,17 +56,17 @@ typedef enum {
     LV2_HMI_AddressingCapability_Label = 1 << 1,
     LV2_HMI_AddressingCapability_Value = 1 << 2,
     LV2_HMI_AddressingCapability_Unit  = 1 << 3
-} LV2_HMI_AddressingCapability;
+} LV2_HMI_AddressingCapabilities;
 
 /**
  *  ...
  */
 typedef enum {
-    LV2_HMI_AddressingFlag_Coloured     = 1 << 0,
-    LV2_HMI_AddressingFlag_MomentaryOn  = 1 << 1,
-    LV2_HMI_AddressingFlag_MomentaryOff = 1 << 2,
-    LV2_HMI_AddressingFlag_TapTempo     = 1 << 3
-} LV2_HMI_AddressingFlag;
+    LV2_HMI_AddressingFlag_Coloured  = 1 << 0,
+    LV2_HMI_AddressingFlag_Momentary = 1 << 1,
+    LV2_HMI_AddressingFlag_Reverse   = 1 << 2,
+    LV2_HMI_AddressingFlag_TapTempo  = 1 << 3
+} LV2_HMI_AddressingFlags;
 
 /**
  *  ...
@@ -86,8 +86,8 @@ typedef enum {
  *  ...
  */
 typedef struct {
-    LV2_HMI_AddressingCapability caps;
-    LV2_HMI_AddressingFlag flags;
+    LV2_HMI_AddressingCapabilities caps;
+    LV2_HMI_AddressingFlags flags;
     const char* label;
     float min, max;
     int steps;

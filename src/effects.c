@@ -658,7 +658,6 @@ static volatile uint64_t g_previous_midi_event_time = 0;
 /* LV2 and Lilv */
 static LilvWorld *g_lv2_data;
 static const LilvPlugins *g_plugins;
-static LilvNode *g_sample_rate_node;
 static char *g_lv2_scratch_dir;
 
 /* Global features */
@@ -4182,7 +4181,7 @@ int effects_add(const char *uri, int instance)
                 max_value = min_value + 0.1f;
 
             /* multiply ranges by sample rate if requested */
-            if (lilv_port_has_property(plugin, lilv_port, g_sample_rate_node))
+            if (lilv_port_has_property(plugin, lilv_port, g_lilv_nodes.sample_rate))
             {
                 min_value *= g_sample_rate;
                 max_value *= g_sample_rate;
@@ -6697,8 +6696,8 @@ int effects_hmi_map(int effect_id, const char *control_symbol, int hw_id,
     LV2_Handle handle = lilv_instance_get_handle(effect->lilv_instance);
     int64_t addressing = (0x8000 + hw_id);
     LV2_HMI_AddressingInfo info = {
-        .caps = (LV2_HMI_AddressingCapability)caps,
-        .flags = (LV2_HMI_AddressingFlag)flags,
+        .caps = (LV2_HMI_AddressingCapabilities)caps,
+        .flags = (LV2_HMI_AddressingFlags)flags,
         .label = label,
         .min = minimum,
         .max = maximum,
