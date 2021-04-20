@@ -78,6 +78,8 @@
 #define CC_UNMAP             "cc_unmap %i %s"
 #define CV_MAP               "cv_map %i %s %s %f %f %s"
 #define CV_UNMAP             "cv_unmap %i %s"
+#define HMI_MAP              "hmi_map %i %s %i %i %i %s %f %f %i"
+#define HMI_UNMAP            "hmi_unmap %i %s"
 #define CPU_LOAD             "cpu_load"
 #define LOAD_COMMANDS        "load %s"
 #define SAVE_COMMANDS        "save %s"

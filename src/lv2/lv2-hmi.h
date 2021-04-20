@@ -52,10 +52,11 @@ typedef void* LV2_HMI_WidgetControl_Handle;
  *  ...
  */
 typedef enum {
-    LV2_HMI_AddressingType_ButtonOrFootswitch,
-    LV2_HMI_AddressingType_EndlessKnob,
-    LV2_HMI_AddressingType_PotentiometerKnob,
-} LV2_HMI_AddressingType;
+    LV2_HMI_AddressingCapability_LED   = 1 << 0,
+    LV2_HMI_AddressingCapability_Label = 1 << 1,
+    LV2_HMI_AddressingCapability_Value = 1 << 2,
+    LV2_HMI_AddressingCapability_Unit  = 1 << 3
+} LV2_HMI_AddressingCapability;
 
 /**
  *  ...
@@ -64,30 +65,33 @@ typedef enum {
     LV2_HMI_AddressingFlag_Coloured     = 1 << 0,
     LV2_HMI_AddressingFlag_MomentaryOn  = 1 << 1,
     LV2_HMI_AddressingFlag_MomentaryOff = 1 << 2,
-    LV2_HMI_AddressingFlag_TapTempo     = 1 << 3,
+    LV2_HMI_AddressingFlag_TapTempo     = 1 << 3
 } LV2_HMI_AddressingFlag;
 
 /**
  *  ...
  */
-typedef struct {
-    LV2_HMI_AddressingType type;
-    LV2_HMI_AddressingType flags;
-    const char* label;
-    float min, max;
-    int steps;
-} LV2_HMI_AddressingInfo;
+typedef enum {
+    LV2_HMI_LED_Colour_Off,
+    LV2_HMI_LED_Colour_Red,
+    LV2_HMI_LED_Colour_Green,
+    LV2_HMI_LED_Colour_Blue,
+    LV2_HMI_LED_Colour_Cyan,
+    LV2_HMI_LED_Colour_Magenta,
+    LV2_HMI_LED_Colour_Yellow,
+    LV2_HMI_LED_Colour_White
+} LV2_HMI_LED_Colour;
 
 /**
  *  ...
  */
-typedef enum {
-    LV2_HMI_Colour_Off,
-    LV2_HMI_Colour_Red,
-    LV2_HMI_Colour_Green,
-    LV2_HMI_Colour_Blue,
-    LV2_HMI_Colour_White,
-} LV2_HMI_Colour;
+typedef struct {
+    LV2_HMI_AddressingCapability caps;
+    LV2_HMI_AddressingFlag flags;
+    const char* label;
+    float min, max;
+    int steps;
+} LV2_HMI_AddressingInfo;
 
 /**
  * ... for plugin extension-data
@@ -101,7 +105,7 @@ typedef struct {
  * On instantiation, host must supply LV2_HMI__WidgetControl feature.
  * LV2_Feature::data must be pointer to LV2_HMI_WidgetControl.
  */
-typedef struct _LV2_HMI_WidgetControl {
+typedef struct {
     /**
      *  Opaque host data.
      */
@@ -110,9 +114,37 @@ typedef struct _LV2_HMI_WidgetControl {
     /**
      * ...
      */
-    void (*set_led_colour)(LV2_HMI_WidgetControl_Handle handle,
-                           LV2_HMI_Addressing addressing,
-                           LV2_HMI_Colour led_color);
+    size_t size;
+
+    /**
+     * ...
+     */
+    void (*set_led)(LV2_HMI_WidgetControl_Handle handle,
+                    LV2_HMI_Addressing addressing,
+                    LV2_HMI_LED_Colour color,
+                    int on_blink_time,
+                    int off_blink_time);
+
+    /**
+     * ...
+     */
+    void (*set_label)(LV2_HMI_WidgetControl_Handle handle,
+                      LV2_HMI_Addressing addressing,
+                      const char* label);
+
+    /**
+     * ...
+     */
+    void (*set_value)(LV2_HMI_WidgetControl_Handle handle,
+                      LV2_HMI_Addressing addressing,
+                      const char* value);
+
+    /**
+     * ...
+     */
+    void (*set_unit)(LV2_HMI_WidgetControl_Handle handle,
+                      LV2_HMI_Addressing addressing,
+                      const char* unit);
 
 } LV2_HMI_WidgetControl;
 
