@@ -2937,11 +2937,11 @@ static void HMIWidgetsSetLabel(LV2_HMI_WidgetControl_Handle handle,
     }
 
     char msg[24];
-    snprintf(msg, sizeof(msg)-1, "%x %i %s", sys_serial_event_type_led, assignment_id, label);
+    snprintf(msg, sizeof(msg)-1, "%x %i %s", sys_serial_event_type_name, assignment_id, label);
     msg[23] = '\0';
 
     pthread_mutex_lock(&g_hmi_mutex);
-    sys_serial_write(g_hmi_data, sys_serial_event_type_led, msg);
+    sys_serial_write(g_hmi_data, sys_serial_event_type_name, msg);
     pthread_mutex_unlock(&g_hmi_mutex);
 }
 
@@ -2967,11 +2967,11 @@ static void HMIWidgetsSetValue(LV2_HMI_WidgetControl_Handle handle,
     }
 
     char msg[24];
-    snprintf(msg, sizeof(msg)-1, "%x %i %s", sys_serial_event_type_led, assignment_id, value);
+    snprintf(msg, sizeof(msg)-1, "%x %i %s", sys_serial_event_type_value, assignment_id, value);
     msg[23] = '\0';
 
     pthread_mutex_lock(&g_hmi_mutex);
-    sys_serial_write(g_hmi_data, sys_serial_event_type_led, msg);
+    sys_serial_write(g_hmi_data, sys_serial_event_type_value, msg);
     pthread_mutex_unlock(&g_hmi_mutex);
 }
 
@@ -2997,11 +2997,11 @@ static void HMIWidgetsSetUnit(LV2_HMI_WidgetControl_Handle handle,
     }
 
     char msg[24];
-    snprintf(msg, sizeof(msg)-1, "%x %i %s", sys_serial_event_type_led, assignment_id, unit);
+    snprintf(msg, sizeof(msg)-1, "%x %i %s", sys_serial_event_type_unit, assignment_id, unit);
     msg[23] = '\0';
 
     pthread_mutex_lock(&g_hmi_mutex);
-    sys_serial_write(g_hmi_data, sys_serial_event_type_led, msg);
+    sys_serial_write(g_hmi_data, sys_serial_event_type_unit, msg);
     pthread_mutex_unlock(&g_hmi_mutex);
 }
 
