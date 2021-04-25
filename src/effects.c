@@ -198,8 +198,9 @@ enum PluginHints {
     //HINT_TRANSPORT     = 1 << 0, // must match HINT_TRANSPORT set above
     HINT_TRIGGERS        = 1 << 1,
     HINT_OUTPUT_MONITORS = 1 << 2,
-    HINT_HAS_STATE       = 1 << 3,
-    HINT_STATE_UNSAFE    = 1 << 4, // state restore needs mutex protection
+    HINT_HAS_MIDI_INPUT  = 1 << 3,
+    HINT_HAS_STATE       = 1 << 4,
+    HINT_STATE_UNSAFE    = 1 << 5, // state restore needs mutex protection
 };
 
 enum TransportSyncMode {
@@ -366,6 +367,7 @@ typedef struct EFFECT_T {
 
     jack_ringbuffer_t *events_in_buffer;
     jack_ringbuffer_t *events_out_buffer;
+    jack_ringbuffer_t *midi_in_buffer;
 
     // previous transport state
     bool transport_rolling;
@@ -1382,9 +1384,9 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
     float value;
 
     /* transport */
-    uint8_t pos_buf[256];
-    memset(pos_buf, 0, sizeof(pos_buf));
-    LV2_Atom* lv2_pos = (LV2_Atom*)pos_buf;
+    uint8_t stack_buf[MAX_CHAR_BUF_SIZE+1];
+    memset(stack_buf, 0, sizeof(stack_buf));
+    LV2_Atom* lv2_pos = (LV2_Atom*)stack_buf;
 
     if (effect->hints & HINT_TRANSPORT)
     {
@@ -1409,7 +1411,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
             effect->transport_bpm = pos.beats_per_minute;
 
             LV2_Atom_Forge forge = g_lv2_atom_forge;
-            lv2_atom_forge_set_buffer(&forge, pos_buf, sizeof(pos_buf));
+            lv2_atom_forge_set_buffer(&forge, stack_buf, sizeof(stack_buf));
 
             LV2_Atom_Forge_Frame frame;
             lv2_atom_forge_object(&forge, &frame, 0, g_urids.time_Position);
@@ -1472,6 +1474,16 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
 
         if (effect->bypass > 0.5f && effect->enabled_index < 0)
         {
+            /* Ignore external midi input */
+            size_t toread, space = jack_ringbuffer_read_space(effect->midi_in_buffer);
+            while (space != 0) {
+                toread = space < sizeof(stack_buf) ? space : sizeof(stack_buf);
+                toread = jack_ringbuffer_read(effect->midi_in_buffer, (char*)stack_buf, toread);
+                if (toread == 0)
+                    break;
+                space -= toread;
+            }
+
             // effect is now bypassed, but wasn't before
             if (!effect->was_bypassed && (port->hints & HINT_MIDI_EVENT) != 0)
             {
@@ -1505,6 +1517,59 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
             // non-bypassed, processing
             LV2_Evbuf_Iterator iter = lv2_evbuf_begin(port->evbuf);
 
+            /* Write time position */
+            if (lv2_pos->size > 0 && (port->hints & HINT_TRANSPORT) != 0)
+            {
+                lv2_evbuf_write(&iter, 0, 0, lv2_pos->type, lv2_pos->size, LV2_ATOM_BODY_CONST(lv2_pos));
+            }
+
+            /* Write external midi input */
+            if (effect->midi_in_buffer)
+            {
+                LV2_Atom* atom = (LV2_Atom*)stack_buf;
+                size_t toread, size, space = jack_ringbuffer_read_space(effect->midi_in_buffer);
+                while (space != 0) {
+                    toread = jack_ringbuffer_read(effect->midi_in_buffer, (char*)stack_buf, sizeof(LV2_Atom));
+
+                    if (toread == 0)
+                        break;
+
+                    if (toread == sizeof(LV2_Atom))
+                    {
+                        space -= sizeof(LV2_Atom);
+
+                        if (atom->size < MAX_CHAR_BUF_SIZE && atom->type == g_urids.midi_MidiEvent)
+                        {
+                            size = atom->size;
+                            toread = jack_ringbuffer_read(effect->midi_in_buffer, (char*)stack_buf, size);
+
+                            if (toread == 0)
+                                break;
+
+                            if (toread == size)
+                            {
+                                if (!lv2_evbuf_write(&iter, 0, 0, g_urids.midi_MidiEvent, size, stack_buf))
+                                    break;
+
+                                space -= toread;
+                                continue;
+                            }
+                        }
+                    }
+
+                    // something went wrong, flush all events
+                    space -= toread;
+                    while (space != 0) {
+                        toread = space < sizeof(stack_buf) ? space : sizeof(stack_buf);
+                        toread = jack_ringbuffer_read(effect->midi_in_buffer, (char*)stack_buf, toread);
+                        if (toread == 0)
+                            break;
+                        space -= toread;
+                    }
+                    break;
+                }
+            }
+
             /* Write Jack MIDI input */
             void* buf = jack_port_get_buffer(port->jack_port, nframes);
             uint32_t j;
@@ -1516,12 +1581,6 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
                 {
                     fprintf(stderr, "lv2 evbuf write failed\n");
                 }
-            }
-
-            /* Write time position */
-            if (lv2_pos->size > 0 && (port->hints & HINT_TRANSPORT) != 0)
-            {
-                lv2_evbuf_write(&iter, 0, 0, lv2_pos->type, lv2_pos->size, LV2_ATOM_BODY_CONST(lv2_pos));
             }
         }
     }
@@ -4124,12 +4183,14 @@ int effects_add(const char *uri, int instance)
             {
                 port->hints |= HINT_OLD_EVENT_API;
                 port->hints |= HINT_MIDI_EVENT;
+                effect->hints |= HINT_HAS_MIDI_INPUT;
             }
             else
             {
                 if (lilv_port_supports_event(plugin, lilv_port, lilv_midiEvent))
                 {
                     port->hints |= HINT_MIDI_EVENT;
+                    effect->hints |= HINT_HAS_MIDI_INPUT;
                 }
                 if (lilv_port_supports_event(plugin, lilv_port, lilv_timePosition))
                 {
@@ -4470,6 +4531,11 @@ int effects_add(const char *uri, int instance)
     {
         effect->events_out_buffer = jack_ringbuffer_create(control_out_size);
         jack_ringbuffer_mlock(effect->events_out_buffer);
+    }
+    if (effect->hints & HINT_HAS_MIDI_INPUT)
+    {
+        effect->midi_in_buffer = jack_ringbuffer_create(4 * 256);
+        jack_ringbuffer_mlock(effect->midi_in_buffer);
     }
 
     /* Default value of bypass */
@@ -4881,6 +4947,8 @@ int effects_remove(int effect_id)
                 jack_ringbuffer_free(effect->events_in_buffer);
             if (effect->events_out_buffer)
                 jack_ringbuffer_free(effect->events_out_buffer);
+            if (effect->midi_in_buffer)
+                jack_ringbuffer_free(effect->midi_in_buffer);
 
             if (effect->presets)
             {
@@ -5730,6 +5798,37 @@ int effects_get_parameter_info(int effect_id, const char *control_symbol, float 
     }
 
     return ERR_LV2_INVALID_PARAM_SYMBOL;
+}
+
+int effects_midi_event(float timestamp, size_t datasize, uint8_t *data)
+{
+    effect_t *effect;
+    int ret = SUCCESS;
+    size_t needed_size = sizeof(LV2_Atom) + datasize;
+    LV2_Atom atom = { datasize, g_urids.midi_MidiEvent };
+
+    for (int i = 0; i < MAX_PLUGIN_INSTANCES; ++i)
+    {
+        effect = &g_effects[i];
+        if (effect->jack_client == NULL)
+            continue;
+        if (effect->midi_in_buffer == NULL)
+            continue;
+        if ((effect->hints & HINT_HAS_MIDI_INPUT) == 0x0)
+            continue;
+
+        if (jack_ringbuffer_write_space(effect->midi_in_buffer) >= needed_size) {
+            jack_ringbuffer_write(effect->midi_in_buffer, (char*)&atom, sizeof(atom));
+            jack_ringbuffer_write(effect->midi_in_buffer, (char*)data, datasize);
+        } else {
+            // FIXME wrong error
+            ret = ERR_ASSIGNMENT_LIST_FULL;
+        }
+    }
+
+    return ret;
+
+    UNUSED_PARAM(timestamp);
 }
 
 int effects_midi_learn(int effect_id, const char *control_symbol, float minimum, float maximum)

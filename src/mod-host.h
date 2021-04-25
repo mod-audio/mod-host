@@ -70,6 +70,7 @@
 #define MONITOR_ADDR_SET     "monitor %s %i %i"
 #define MONITOR_OUTPUT       "monitor_output %i %s"
 #define MONITOR_MIDI_PROGRAM "monitor_midi_program %i %i"
+#define MIDI_EVENT           "midi_event %f %i %i ..."
 #define MIDI_LEARN           "midi_learn %i %s %f %f"
 #define MIDI_MAP             "midi_map %i %s %i %i %f %f"
 #define MIDI_UNMAP           "midi_unmap %i %s"

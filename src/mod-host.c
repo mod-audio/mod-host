@@ -303,6 +303,47 @@ static void monitor_midi_program_cb(proto_t *proto)
     protocol_response_int(resp, proto);
 }
 
+static void midi_event_cb(proto_t *proto)
+{
+    int resp;
+    uint8_t* data;
+    uint8_t stack[4];
+    int size = atoi(proto->list[2]);
+
+    if (size <= 0 || size > MAX_CHAR_BUF_SIZE)
+    {
+        protocol_response_int(ERR_ASSIGNMENT_INVALID_OP, proto);
+        return;
+    }
+
+    if (size <= 4)
+    {
+        data = stack;
+    }
+    else
+    {
+        data = malloc(sizeof(uint8_t)*size);
+        if (!data)
+        {
+            protocol_response_int(ERR_MEMORY_ALLOCATION, proto);
+            return;
+        }
+    }
+
+    for (int i = 0; i < size; i++)
+        data[i] = strtol(proto->list[3+i], NULL, 16);
+
+    // LV2 does not allow zero-velocity note-ons
+    if (size >= 3 && (data[0] & 0x90) && data[2] == 0)
+        data[0] = 0x80 | (data[0] & 0x0F);
+
+    resp = !effects_midi_event(atof(proto->list[1]), size, data);
+    protocol_response_int(resp, proto);
+
+    if (data != stack)
+        free(data);
+}
+
 static void midi_learn_cb(proto_t *proto)
 {
     int resp;
@@ -636,6 +677,7 @@ static int mod_host_init(jack_client_t* client, int socket_port, int feedback_po
     protocol_add_command(MONITOR_ADDR_SET, monitor_addr_set_cb);
     protocol_add_command(MONITOR_OUTPUT, monitor_output_cb);
     protocol_add_command(MONITOR_MIDI_PROGRAM, monitor_midi_program_cb);
+    protocol_add_command(MIDI_EVENT, midi_event_cb);
     protocol_add_command(MIDI_LEARN, midi_learn_cb);
     protocol_add_command(MIDI_MAP, midi_map_cb);
     protocol_add_command(MIDI_UNMAP, midi_unmap_cb);

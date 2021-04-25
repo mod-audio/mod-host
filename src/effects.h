@@ -148,6 +148,7 @@ int effects_bypass(int effect_id, int value);
 int effects_get_parameter_symbols(int effect_id, int output_ports, const char** symbols);
 int effects_get_presets_uris(int effect_id, const char **uris);
 int effects_get_parameter_info(int effect_id, const char *control_symbol, float **range, const char **scale_points);
+int effects_midi_event(float timestamp, size_t datasize, uint8_t *data);
 int effects_midi_learn(int effect_id, const char *control_symbol, float minimum, float maximum);
 int effects_midi_map(int effect_id, const char *control_symbol, int channel, int controller, float minimum, float maximum);
 int effects_midi_unmap(int effect_id, const char *control_symbol);
