@@ -200,8 +200,9 @@ enum PluginHints {
     //HINT_TRANSPORT     = 1 << 0, // must match HINT_TRANSPORT set above
     HINT_TRIGGERS        = 1 << 1,
     HINT_OUTPUT_MONITORS = 1 << 2,
-    HINT_HAS_STATE       = 1 << 3,
-    HINT_STATE_UNSAFE    = 1 << 4, // state restore needs mutex protection
+    HINT_HAS_MIDI_INPUT  = 1 << 3,
+    HINT_HAS_STATE       = 1 << 4,
+    HINT_STATE_UNSAFE    = 1 << 5, // state restore needs mutex protection
 };
 
 enum TransportSyncMode {
@@ -1452,9 +1453,9 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
     float value;
 
     /* transport */
-    uint8_t pos_buf[256];
-    memset(pos_buf, 0, sizeof(pos_buf));
-    LV2_Atom* lv2_pos = (LV2_Atom*)pos_buf;
+    uint8_t stack_buf[MAX_CHAR_BUF_SIZE+1];
+    memset(stack_buf, 0, sizeof(stack_buf));
+    LV2_Atom* lv2_pos = (LV2_Atom*)stack_buf;
 
     if (effect->hints & HINT_TRANSPORT)
     {
@@ -1479,7 +1480,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
             effect->transport_bpm = pos.beats_per_minute;
 
             LV2_Atom_Forge forge = g_lv2_atom_forge;
-            lv2_atom_forge_set_buffer(&forge, pos_buf, sizeof(pos_buf));
+            lv2_atom_forge_set_buffer(&forge, stack_buf, sizeof(stack_buf));
 
             LV2_Atom_Forge_Frame frame;
             lv2_atom_forge_object(&forge, &frame, 0, g_urids.time_Position);
@@ -1575,6 +1576,12 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
             // non-bypassed, processing
             LV2_Evbuf_Iterator iter = lv2_evbuf_begin(port->evbuf);
 
+            /* Write time position */
+            if (lv2_pos->size > 0 && (port->hints & HINT_TRANSPORT) != 0)
+            {
+                lv2_evbuf_write(&iter, 0, 0, lv2_pos->type, lv2_pos->size, LV2_ATOM_BODY_CONST(lv2_pos));
+            }
+
             /* Write Jack MIDI input */
             void* buf = jack_port_get_buffer(port->jack_port, nframes);
             uint32_t j;
@@ -1586,12 +1593,6 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
                 {
                     fprintf(stderr, "lv2 evbuf write failed\n");
                 }
-            }
-
-            /* Write time position */
-            if (lv2_pos->size > 0 && (port->hints & HINT_TRANSPORT) != 0)
-            {
-                lv2_evbuf_write(&iter, 0, 0, lv2_pos->type, lv2_pos->size, LV2_ATOM_BODY_CONST(lv2_pos));
             }
         }
     }
@@ -4349,12 +4350,14 @@ int effects_add(const char *uri, int instance)
             {
                 port->hints |= HINT_OLD_EVENT_API;
                 port->hints |= HINT_MIDI_EVENT;
+                effect->hints |= HINT_HAS_MIDI_INPUT;
             }
             else
             {
                 if (lilv_port_supports_event(plugin, lilv_port, g_lilv_nodes.midiEvent))
                 {
                     port->hints |= HINT_MIDI_EVENT;
+                    effect->hints |= HINT_HAS_MIDI_INPUT;
                 }
                 if (lilv_port_supports_event(plugin, lilv_port, g_lilv_nodes.timePosition))
                 {
