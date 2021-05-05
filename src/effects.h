@@ -164,6 +164,10 @@ int effects_cc_unmap(int effect_id, const char *control_symbol);
 int effects_cv_map(int effect_id, const char *control_symbol, const char *source_port_name, float minimum, float maximum, const char* mode);
 int effects_cv_unmap(int effect_id, const char *control_symbol);
 
+int effects_hmi_map(int effect_id, const char *control_symbol, int hw_id,
+                    int caps, int flags, const char *label, float minimum, float maximum, int steps);
+int effects_hmi_unmap(int effect_id, const char *control_symbol);
+
 float effects_jack_cpu_load(void);
 void effects_bundle_add(const char *bundlepath);
 void effects_bundle_remove(const char *bundlepath);

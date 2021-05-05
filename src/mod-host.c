@@ -412,6 +412,28 @@ static void cv_unmap_cb(proto_t *proto)
     protocol_response_int(resp, proto);
 }
 
+static void hmi_map_cb(proto_t *proto)
+{
+    int resp;
+    resp = effects_hmi_map(atoi(proto->list[1]),  // effect_id
+                                proto->list[2],   // control_symbol
+                           atoi(proto->list[3]),  // hw_id
+                           atoi(proto->list[4]),  // caps
+                           atof(proto->list[5]),  // flags
+                                proto->list[6],   // label
+                           atof(proto->list[7]),  // min
+                           atof(proto->list[8]),  // max
+                           atoi(proto->list[9])); // steps
+    protocol_response_int(resp, proto);
+}
+
+static void hmi_unmap_cb(proto_t *proto)
+{
+    int resp;
+    resp = effects_hmi_unmap(atoi(proto->list[1]), proto->list[2]);
+    protocol_response_int(resp, proto);
+}
+
 static void cpu_load_cb(proto_t *proto)
 {
     float value = effects_jack_cpu_load();
@@ -669,6 +691,8 @@ static int mod_host_init(jack_client_t* client, int socket_port, int feedback_po
     protocol_add_command(CC_UNMAP, cc_unmap_cb);
     protocol_add_command(CV_MAP, cv_map_cb);
     protocol_add_command(CV_UNMAP, cv_unmap_cb);
+    protocol_add_command(HMI_MAP, hmi_map_cb);
+    protocol_add_command(HMI_UNMAP, hmi_unmap_cb);
     protocol_add_command(CPU_LOAD, cpu_load_cb);
 #ifndef SKIP_READLINE
     protocol_add_command(LOAD_COMMANDS, load_cb);

@@ -65,6 +65,7 @@
 #include <lv2/lv2plug.in/ns/ext/uri-map/uri-map.h>
 #include <lv2/lv2plug.in/ns/ext/worker/worker.h>
 #include "lv2/control-input-port-change-request.h"
+#include "lv2/lv2-hmi.h"
 #include "lv2/mod-license.h"
 
 #ifdef HAVE_CONTROLCHAIN
@@ -78,6 +79,7 @@
 #endif
 
 #include "mod-host.h"
+#include "sys_host.h"
 
 #ifndef HAVE_NEW_LILV
 #define lilv_free(x) free(x)
@@ -214,6 +216,7 @@ enum {
     URID_MAP_FEATURE,
     URID_UNMAP_FEATURE,
     OPTIONS_FEATURE,
+    HMI_WC_FEATURE,
     LICENSE_FEATURE,
     BUF_SIZE_POWER2_FEATURE,
     BUF_SIZE_FIXED_FEATURE,
@@ -364,6 +367,7 @@ typedef struct EFFECT_T {
     worker_t worker;
     const MOD_License_Interface *license_iface;
     const LV2_State_Interface *state_iface;
+    const LV2_HMI_PluginNotification *hmi_notif;
 
     jack_ringbuffer_t *events_in_buffer;
     jack_ringbuffer_t *events_out_buffer;
@@ -392,6 +396,51 @@ typedef struct EFFECT_T {
     // state save/restore custom directory
     const char* state_dir;
 } effect_t;
+
+typedef struct LILV_NODES_T {
+    LilvNode *atom_port;
+    LilvNode *audio;
+    LilvNode *control;
+    LilvNode *control_in;
+    LilvNode *cv;
+    LilvNode *default_;
+    LilvNode *enabled;
+    LilvNode *enumeration;
+    LilvNode *event;
+    LilvNode *freeWheeling;
+    LilvNode *hmi_interface;
+    LilvNode *input;
+    LilvNode *integer;
+    LilvNode *license_interface;
+    LilvNode *logarithmic;
+    LilvNode *maximum;
+    LilvNode *midiEvent;
+    LilvNode *minimum;
+    LilvNode *minimumSize;
+    LilvNode *mod_cvport;
+    LilvNode *mod_default;
+    LilvNode *mod_maximum;
+    LilvNode *mod_minimum;
+    LilvNode *output;
+    LilvNode *patch_readable;
+    LilvNode *patch_writable;
+    LilvNode *preferMomentaryOff;
+    LilvNode *preferMomentaryOn;
+    LilvNode *preset;
+    LilvNode *rawMIDIClockAccess;
+    LilvNode *rdfs_range;
+    LilvNode *sample_rate;
+    LilvNode *state_interface;
+    LilvNode *state_load_default_state;
+    LilvNode *state_thread_safe_restore;
+    LilvNode *timeBeatsPerBar;
+    LilvNode *timeBeatsPerMinute;
+    LilvNode *timePosition;
+    LilvNode *timeSpeed;
+    LilvNode *toggled;
+    LilvNode *trigger;
+    LilvNode *worker_interface;
+} lilv_nodes_t;
 
 typedef struct URIDS_T {
     LV2_URID atom_Bool;
@@ -610,12 +659,13 @@ static volatile uint64_t g_previous_midi_event_time = 0;
 /* LV2 and Lilv */
 static LilvWorld *g_lv2_data;
 static const LilvPlugins *g_plugins;
-static LilvNode *g_sample_rate_node;
 static char *g_lv2_scratch_dir;
 
 /* Global features */
 static Symap* g_symap;
+static lilv_nodes_t g_lilv_nodes;
 static urids_t g_urids;
+static LV2_HMI_WidgetControl g_hmi_wc;
 static MOD_License_Feature g_license;
 static LV2_Atom_Forge g_lv2_atom_forge;
 static LV2_Log_Log g_lv2_log;
@@ -630,6 +680,7 @@ static LV2_Feature g_buf_size_features[3] = {
     { LV2_BUF_SIZE__fixedBlockLength, NULL },
     { LV2_BUF_SIZE__boundedBlockLength, NULL }
 };
+static LV2_Feature g_hmi_wc_feature = { LV2_HMI__WidgetControl, &g_hmi_wc };
 static LV2_Feature g_license_feature = { MOD_LICENSE__feature, &g_license };
 static LV2_Feature g_lv2_log_feature = { LV2_LOG__log, &g_lv2_log };
 static LV2_Feature g_options_feature = { LV2_OPTIONS__options, &g_options };
@@ -648,6 +699,11 @@ static bool g_monitored_midi_programs[16];
 static hylia_t* g_hylia_instance;
 static hylia_time_info_t g_hylia_timeinfo;
 #endif
+
+/* HMI integration */
+static int g_hmi_shmfd;
+static sys_serial_shm_data* g_hmi_data;
+static pthread_mutex_t g_hmi_mutex;
 
 static const char* const g_bypass_port_symbol = BYPASS_PORT_SYMBOL;
 static const char* const g_presets_port_symbol = PRESETS_PORT_SYMBOL;
@@ -688,6 +744,20 @@ static int LoadPresets(effect_t *effect);
 static void FreeFeatures(effect_t *effect);
 static void FreePluginString(void* handle, char *str);
 static void ConnectToAllHardwareMIDIPorts(void);
+static void HMIWidgetsSetLed(LV2_HMI_WidgetControl_Handle handle,
+                             LV2_HMI_Addressing addressing,
+                             LV2_HMI_LED_Colour led_color,
+                             int on_blink_time,
+                             int off_blink_time);
+static void HMIWidgetsSetLabel(LV2_HMI_WidgetControl_Handle handle,
+                               LV2_HMI_Addressing addressing,
+                               const char* label);
+static void HMIWidgetsSetValue(LV2_HMI_WidgetControl_Handle handle,
+                               LV2_HMI_Addressing addressing,
+                               const char* value);
+static void HMIWidgetsSetUnit(LV2_HMI_WidgetControl_Handle handle,
+                              LV2_HMI_Addressing addressing,
+                              const char* unit);
 static char *GetLicenseFile(MOD_License_Handle handle, const char *license_uri);
 static int LogPrintf(LV2_Log_Handle handle, LV2_URID type, const char *fmt, ...);
 static int LogVPrintf(LV2_Log_Handle handle, LV2_URID type, const char *fmt, va_list ap);
@@ -1842,22 +1912,22 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
                         {
                             const LV2_Atom_Int  *sequence = NULL;
                             const LV2_Atom_URID *property = NULL;
-                            const LV2_Atom      *value    = NULL;
+                            const LV2_Atom      *lv2value = NULL;
 
                             lv2_atom_object_body_get(size, objbody,
                                                      g_urids.patch_sequence, (const LV2_Atom**)&sequence,
                                                      g_urids.patch_property, (const LV2_Atom**)&property,
-                                                     g_urids.patch_value,    &value,
+                                                     g_urids.patch_value,    &lv2value,
                                                      0);
 
                             if (sequence != NULL && sequence->body == MAGIC_PARAMETER_SEQ_NUMBER)
                                 continue;
 
-                            if (jack_ringbuffer_write_space(effect->events_out_buffer) < sizeof(uint32_t) + sizeof(LV2_Atom) + value->size)
+                            if (jack_ringbuffer_write_space(effect->events_out_buffer) < sizeof(uint32_t) + sizeof(LV2_Atom) + lv2value->size)
                                 continue;
 
                             jack_ringbuffer_write(effect->events_out_buffer, (const char*)&property->body, sizeof(uint32_t));
-                            jack_ringbuffer_write(effect->events_out_buffer, (const char*)value, lv2_atom_total_size(value));
+                            jack_ringbuffer_write(effect->events_out_buffer, (const char*)lv2value, lv2_atom_total_size(lv2value));
 
                             postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
 
@@ -2562,8 +2632,7 @@ static void GetFeatures(effect_t *effect)
     /* Worker Feature, must be last as it can be null */
     LV2_Feature *work_schedule_feature = NULL;
 
-    LilvNode *lilv_worker_interface = lilv_new_uri(g_lv2_data, LV2_WORKER__interface);
-    if (lilv_plugin_has_extension_data(effect->lilv_plugin, lilv_worker_interface))
+    if (lilv_plugin_has_extension_data(effect->lilv_plugin, g_lilv_nodes.worker_interface))
     {
         LV2_Worker_Schedule *schedule = (LV2_Worker_Schedule*) malloc(sizeof(LV2_Worker_Schedule));
         schedule->handle = &effect->worker;
@@ -2573,7 +2642,6 @@ static void GetFeatures(effect_t *effect)
         work_schedule_feature->URI = LV2_WORKER__schedule;
         work_schedule_feature->data = schedule;
     }
-    lilv_node_free(lilv_worker_interface);
 
     /* Buf-size Feature is the same for all instances (global declaration) */
 
@@ -2582,6 +2650,7 @@ static void GetFeatures(effect_t *effect)
     features[URID_MAP_FEATURE]          = &g_urid_map_feature;
     features[URID_UNMAP_FEATURE]        = &g_urid_unmap_feature;
     features[OPTIONS_FEATURE]           = &g_options_feature;
+    features[HMI_WC_FEATURE]            = &g_hmi_wc_feature;
     features[LICENSE_FEATURE]           = &g_license_feature;
     features[BUF_SIZE_POWER2_FEATURE]   = &g_buf_size_features[0];
     features[BUF_SIZE_FIXED_FEATURE]    = &g_buf_size_features[1];
@@ -2706,8 +2775,7 @@ static const void* GetPortValueForState(const char* symbol, void* user_data, uin
 
 static int LoadPresets(effect_t *effect)
 {
-    LilvNode *preset_uri = lilv_new_uri(g_lv2_data, LV2_PRESETS__Preset);
-    LilvNodes* presets = lilv_plugin_get_related(effect->lilv_plugin, preset_uri);
+    LilvNodes* presets = lilv_plugin_get_related(effect->lilv_plugin, g_lilv_nodes.preset);
     uint32_t presets_count = lilv_nodes_size(presets);
     effect->presets_count = presets_count;
     // allocate for presets
@@ -2723,7 +2791,6 @@ static int LoadPresets(effect_t *effect)
         j++;
     }
     lilv_nodes_free(presets);
-    lilv_node_free(preset_uri);
 
     return 0;
 }
@@ -2804,6 +2871,139 @@ static void ConnectToAllHardwareMIDIPorts(void)
 
         jack_free(midihwports);
     }
+}
+
+static void HMIWidgetsSetLed(LV2_HMI_WidgetControl_Handle handle,
+                             LV2_HMI_Addressing addressing,
+                             LV2_HMI_LED_Colour led_color,
+                             int on_blink_time,
+                             int off_blink_time)
+{
+    if (handle == NULL || addressing == NULL || g_hmi_data == NULL) {
+        return;
+    }
+
+    const int64_t addressing_check = (int64_t)addressing;
+
+    if (addressing_check < 0x8000 || addressing_check > 0x9000) {
+        return;
+    }
+
+    const int assignment_id = addressing_check - 0x8000;
+
+    if (g_verbose_debug) {
+        printf("DEBUG: HMISetLedColour %i: %i %i %i\n",
+               assignment_id, led_color, on_blink_time, off_blink_time);
+        fflush(stdout);
+    }
+
+    if (on_blink_time < 0)
+        on_blink_time = 0;
+    else if (on_blink_time > 5000)
+        on_blink_time = 5000;
+
+    if (off_blink_time < 0)
+        off_blink_time = 0;
+    else if (off_blink_time > 5000)
+        off_blink_time = 5000;
+
+    char msg[32];
+    snprintf(msg, sizeof(msg), "%x %i %i %i %i",
+             sys_serial_event_type_led, assignment_id, led_color, on_blink_time, off_blink_time);
+
+    pthread_mutex_lock(&g_hmi_mutex);
+    sys_serial_write(g_hmi_data, sys_serial_event_type_led, msg);
+    pthread_mutex_unlock(&g_hmi_mutex);
+}
+
+static void HMIWidgetsSetLabel(LV2_HMI_WidgetControl_Handle handle,
+                               LV2_HMI_Addressing addressing,
+                               const char* label)
+{
+    if (handle == NULL || addressing == NULL || g_hmi_data == NULL) {
+        return;
+    }
+
+    const int64_t addressing_check = (int64_t)addressing;
+
+    if (addressing_check < 0x8000 || addressing_check > 0x9000) {
+        return;
+    }
+
+    const int assignment_id = addressing_check - 0x8000;
+
+    if (g_verbose_debug) {
+        printf("DEBUG: HMISetLedColour %i: '%s'\n", assignment_id, label);
+        fflush(stdout);
+    }
+
+    char msg[24];
+    snprintf(msg, sizeof(msg)-1, "%x %i %s", sys_serial_event_type_name, assignment_id, label);
+    msg[23] = '\0';
+
+    pthread_mutex_lock(&g_hmi_mutex);
+    sys_serial_write(g_hmi_data, sys_serial_event_type_name, msg);
+    pthread_mutex_unlock(&g_hmi_mutex);
+}
+
+static void HMIWidgetsSetValue(LV2_HMI_WidgetControl_Handle handle,
+                               LV2_HMI_Addressing addressing,
+                               const char* value)
+{
+    if (handle == NULL || addressing == NULL || g_hmi_data == NULL) {
+        return;
+    }
+
+    const int64_t addressing_check = (int64_t)addressing;
+
+    if (addressing_check < 0x8000 || addressing_check > 0x9000) {
+        return;
+    }
+
+    const int assignment_id = addressing_check - 0x8000;
+
+    if (g_verbose_debug) {
+        printf("DEBUG: HMISetLedColour %i: '%s'\n", assignment_id, value);
+        fflush(stdout);
+    }
+
+    char msg[24];
+    snprintf(msg, sizeof(msg)-1, "%x %i %s", sys_serial_event_type_value, assignment_id, value);
+    msg[23] = '\0';
+
+    pthread_mutex_lock(&g_hmi_mutex);
+    sys_serial_write(g_hmi_data, sys_serial_event_type_value, msg);
+    pthread_mutex_unlock(&g_hmi_mutex);
+}
+
+static void HMIWidgetsSetUnit(LV2_HMI_WidgetControl_Handle handle,
+                              LV2_HMI_Addressing addressing,
+                              const char* unit)
+{
+    if (handle == NULL || addressing == NULL || g_hmi_data == NULL) {
+        return;
+    }
+
+    const int64_t addressing_check = (int64_t)addressing;
+
+    if (addressing_check < 0x8000 || addressing_check > 0x9000) {
+        return;
+    }
+
+    const int assignment_id = addressing_check - 0x8000;
+
+    if (g_verbose_debug) {
+        printf("DEBUG: HMISetLedColour %i: '%s'\n", assignment_id, unit);
+        fflush(stdout);
+    }
+
+    char msg[24];
+    snprintf(msg, sizeof(msg)-1, "%x %i %s", sys_serial_event_type_unit, assignment_id, unit);
+    msg[23] = '\0';
+
+    pthread_mutex_lock(&g_hmi_mutex);
+    sys_serial_write(g_hmi_data, sys_serial_event_type_unit, msg);
+    pthread_mutex_unlock(&g_hmi_mutex);
 }
 
 static char* GetLicenseFile(MOD_License_Handle handle, const char *license_uri)
@@ -3213,6 +3413,7 @@ int effects_init(void* client)
     pthread_mutex_init(&g_rtsafe_mutex, &mutex_atts);
     pthread_mutex_init(&g_raw_midi_port_mutex, &mutex_atts);
     pthread_mutex_init(&g_midi_learning_mutex, &mutex_atts);
+    pthread_mutex_init(&g_hmi_mutex, &mutex_atts);
 
     sem_init(&g_postevents_semaphore, 0, 0);
 
@@ -3354,8 +3555,49 @@ int effects_init(void* client)
     lilv_world_load_all(g_lv2_data);
     g_plugins = lilv_world_get_all_plugins(g_lv2_data);
 
-    /* Get sample rate */
-    g_sample_rate_node = lilv_new_uri(g_lv2_data, LV2_CORE__sampleRate);
+    /* Lilv Nodes initialization */
+    g_lilv_nodes.atom_port = lilv_new_uri(g_lv2_data, LV2_ATOM__AtomPort);
+    g_lilv_nodes.audio = lilv_new_uri(g_lv2_data, LILV_URI_AUDIO_PORT);
+    g_lilv_nodes.control = lilv_new_uri(g_lv2_data, LILV_URI_CONTROL_PORT);
+    g_lilv_nodes.control_in = lilv_new_uri(g_lv2_data, LV2_CORE__control);
+    g_lilv_nodes.cv = lilv_new_uri(g_lv2_data, LILV_URI_CV_PORT);
+    g_lilv_nodes.default_ = lilv_new_uri(g_lv2_data, LV2_CORE__default);
+    g_lilv_nodes.enabled = lilv_new_uri(g_lv2_data, LV2_CORE__enabled);
+    g_lilv_nodes.enumeration = lilv_new_uri(g_lv2_data, LV2_CORE__enumeration);
+    g_lilv_nodes.event = lilv_new_uri(g_lv2_data, LILV_URI_EVENT_PORT);
+    g_lilv_nodes.freeWheeling = lilv_new_uri(g_lv2_data, LV2_CORE__freeWheeling);
+    g_lilv_nodes.hmi_interface = lilv_new_uri(g_lv2_data, LV2_HMI__PluginNotification);
+    g_lilv_nodes.input = lilv_new_uri(g_lv2_data, LILV_URI_INPUT_PORT);
+    g_lilv_nodes.integer = lilv_new_uri(g_lv2_data, LV2_CORE__integer);
+    g_lilv_nodes.license_interface = lilv_new_uri(g_lv2_data, MOD_LICENSE__interface);
+    g_lilv_nodes.logarithmic = lilv_new_uri(g_lv2_data, LV2_PORT_PROPS__logarithmic);
+    g_lilv_nodes.maximum = lilv_new_uri(g_lv2_data, LV2_CORE__maximum);
+    g_lilv_nodes.midiEvent = lilv_new_uri(g_lv2_data, LV2_MIDI__MidiEvent);
+    g_lilv_nodes.minimum = lilv_new_uri(g_lv2_data, LV2_CORE__minimum);
+    g_lilv_nodes.minimumSize = lilv_new_uri(g_lv2_data, LV2_RESIZE_PORT__minimumSize);
+    g_lilv_nodes.mod_cvport = lilv_new_uri(g_lv2_data, LILV_NS_MOD "CVPort");
+    g_lilv_nodes.mod_default = lilv_new_uri(g_lv2_data, LILV_NS_MOD "default");
+    g_lilv_nodes.mod_maximum = lilv_new_uri(g_lv2_data, LILV_NS_MOD "maximum");
+    g_lilv_nodes.mod_minimum = lilv_new_uri(g_lv2_data, LILV_NS_MOD "minimum");
+    g_lilv_nodes.output = lilv_new_uri(g_lv2_data, LILV_URI_OUTPUT_PORT);
+    g_lilv_nodes.patch_writable = lilv_new_uri(g_lv2_data, LV2_PATCH__writable);
+    g_lilv_nodes.patch_readable = lilv_new_uri(g_lv2_data, LV2_PATCH__readable);
+    g_lilv_nodes.preferMomentaryOff = lilv_new_uri(g_lv2_data, LILV_NS_MOD "preferMomentaryOffByDefault");
+    g_lilv_nodes.preferMomentaryOn = lilv_new_uri(g_lv2_data, LILV_NS_MOD "preferMomentaryOnByDefault");
+    g_lilv_nodes.preset = lilv_new_uri(g_lv2_data, LV2_PRESETS__Preset);
+    g_lilv_nodes.rawMIDIClockAccess = lilv_new_uri(g_lv2_data, LILV_NS_MOD "rawMIDIClockAccess");
+    g_lilv_nodes.rdfs_range = lilv_new_uri(g_lv2_data, LILV_NS_RDFS "range");
+    g_lilv_nodes.sample_rate = lilv_new_uri(g_lv2_data, LV2_CORE__sampleRate);
+    g_lilv_nodes.state_interface = lilv_new_uri(g_lv2_data, LV2_STATE__interface);
+    g_lilv_nodes.state_load_default_state = lilv_new_uri(g_lv2_data, LV2_STATE__loadDefaultState);
+    g_lilv_nodes.state_thread_safe_restore = lilv_new_uri(g_lv2_data, LV2_STATE__threadSafeRestore);
+    g_lilv_nodes.timeBeatsPerBar = lilv_new_uri(g_lv2_data, LV2_TIME__beatsPerBar);
+    g_lilv_nodes.timeBeatsPerMinute = lilv_new_uri(g_lv2_data, LV2_TIME__beatsPerMinute);
+    g_lilv_nodes.timePosition = lilv_new_uri(g_lv2_data, LV2_TIME__Position);
+    g_lilv_nodes.timeSpeed = lilv_new_uri(g_lv2_data, LV2_TIME__speed);
+    g_lilv_nodes.toggled = lilv_new_uri(g_lv2_data, LV2_CORE__toggled);
+    g_lilv_nodes.trigger = lilv_new_uri(g_lv2_data, LV2_PORT_PROPS__trigger);
+    g_lilv_nodes.worker_interface = lilv_new_uri(g_lv2_data, LV2_WORKER__interface);
 
     /* URI and URID Feature initialization */
     urid_sem_init();
@@ -3455,6 +3697,23 @@ int effects_init(void* client)
     g_options[5].type = 0;
     g_options[5].value = NULL;
 
+    g_hmi_wc.size      = sizeof(g_hmi_wc);
+    g_hmi_wc.set_led   = HMIWidgetsSetLed;
+    g_hmi_wc.set_label = HMIWidgetsSetLabel;
+    g_hmi_wc.set_value = HMIWidgetsSetValue;
+    g_hmi_wc.set_unit  = HMIWidgetsSetUnit;
+
+    // HMI integration setup
+    if (sys_serial_open(&g_hmi_shmfd, &g_hmi_data))
+    {
+        g_hmi_wc.handle = g_hmi_data;
+    }
+    else
+    {
+        g_hmi_wc.handle = NULL;
+        fprintf(stderr, "sys_host HMI setup failed\n");
+    }
+
     g_license.handle = NULL;
     g_license.license = GetLicenseFile;
     g_license.free = FreePluginString;
@@ -3547,6 +3806,9 @@ int effects_finish(int close_client)
 
     effects_remove(REMOVE_ALL);
 
+    if (g_hmi_data != NULL)
+        sys_serial_close(g_hmi_shmfd, g_hmi_data);
+
 #ifdef HAVE_CONTROLCHAIN
     if (g_cc_client)
     {
@@ -3559,13 +3821,55 @@ int effects_finish(int close_client)
     if (g_playback_ports) jack_free(g_playback_ports);
     if (close_client) jack_client_close(g_jack_global_client);
     symap_free(g_symap);
-    lilv_node_free(g_sample_rate_node);
+    lilv_node_free(g_lilv_nodes.atom_port);
+    lilv_node_free(g_lilv_nodes.audio);
+    lilv_node_free(g_lilv_nodes.control);
+    lilv_node_free(g_lilv_nodes.control_in);
+    lilv_node_free(g_lilv_nodes.cv);
+    lilv_node_free(g_lilv_nodes.default_);
+    lilv_node_free(g_lilv_nodes.enabled);
+    lilv_node_free(g_lilv_nodes.enumeration);
+    lilv_node_free(g_lilv_nodes.event);
+    lilv_node_free(g_lilv_nodes.freeWheeling);
+    lilv_node_free(g_lilv_nodes.hmi_interface);
+    lilv_node_free(g_lilv_nodes.input);
+    lilv_node_free(g_lilv_nodes.integer);
+    lilv_node_free(g_lilv_nodes.license_interface);
+    lilv_node_free(g_lilv_nodes.logarithmic);
+    lilv_node_free(g_lilv_nodes.maximum);
+    lilv_node_free(g_lilv_nodes.midiEvent);
+    lilv_node_free(g_lilv_nodes.minimum);
+    lilv_node_free(g_lilv_nodes.minimumSize);
+    lilv_node_free(g_lilv_nodes.mod_cvport);
+    lilv_node_free(g_lilv_nodes.mod_default);
+    lilv_node_free(g_lilv_nodes.mod_maximum);
+    lilv_node_free(g_lilv_nodes.mod_minimum);
+    lilv_node_free(g_lilv_nodes.output);
+    lilv_node_free(g_lilv_nodes.patch_readable);
+    lilv_node_free(g_lilv_nodes.patch_writable);
+    lilv_node_free(g_lilv_nodes.preferMomentaryOff);
+    lilv_node_free(g_lilv_nodes.preferMomentaryOn);
+    lilv_node_free(g_lilv_nodes.preset);
+    lilv_node_free(g_lilv_nodes.rawMIDIClockAccess);
+    lilv_node_free(g_lilv_nodes.rdfs_range);
+    lilv_node_free(g_lilv_nodes.sample_rate);
+    lilv_node_free(g_lilv_nodes.state_interface);
+    lilv_node_free(g_lilv_nodes.state_load_default_state);
+    lilv_node_free(g_lilv_nodes.state_thread_safe_restore);
+    lilv_node_free(g_lilv_nodes.timeBeatsPerBar);
+    lilv_node_free(g_lilv_nodes.timeBeatsPerMinute);
+    lilv_node_free(g_lilv_nodes.timePosition);
+    lilv_node_free(g_lilv_nodes.timeSpeed);
+    lilv_node_free(g_lilv_nodes.toggled);
+    lilv_node_free(g_lilv_nodes.trigger);
+    lilv_node_free(g_lilv_nodes.worker_interface);
     lilv_world_free(g_lv2_data);
     rtsafe_memory_pool_destroy(g_rtsafe_mem_pool);
     sem_destroy(&g_postevents_semaphore);
     pthread_mutex_destroy(&g_rtsafe_mutex);
     pthread_mutex_destroy(&g_raw_midi_port_mutex);
     pthread_mutex_destroy(&g_midi_learning_mutex);
+    pthread_mutex_destroy(&g_hmi_mutex);
 
     effect_t *effect = &g_effects[GLOBAL_EFFECT_ID];
     if (effect->ports)
@@ -3590,7 +3894,7 @@ int effects_finish(int close_client)
 
 int effects_add(const char *uri, int instance)
 {
-    unsigned int i, ports_count;
+    unsigned int ports_count;
     char effect_name[32], port_name[MAX_CHAR_BUF_SIZE+1];
     float *audio_buffer, *cv_buffer, *control_buffer;
     jack_port_t *jack_port;
@@ -3615,16 +3919,6 @@ int effects_add(const char *uri, int instance)
     const LilvPlugin *plugin;
     LilvInstance *lilv_instance;
     LilvNode *plugin_uri;
-    LilvNode *lilv_input, *lilv_control_in, *lilv_enabled, *lilv_freeWheeling, *lilv_output;
-    LilvNode *lilv_timePosition, *lilv_timeBeatsPerBar, *lilv_timeBeatsPerMinute, *lilv_timeSpeed;
-    LilvNode *lilv_enumeration, *lilv_integer, *lilv_toggled, *lilv_trigger, *lilv_logarithmic;
-    LilvNode *lilv_control, *lilv_audio, *lilv_cv, *lilv_event, *lilv_midi, *lilv_mod_cvport;
-    LilvNode *lilv_default, *lilv_mod_default;
-    LilvNode *lilv_minimum, *lilv_mod_minimum;
-    LilvNode *lilv_maximum, *lilv_mod_maximum;
-    LilvNode *lilv_preferMomentaryOff, *lilv_preferMomentaryOn, *lilv_rawMIDIClockAccess;
-    LilvNode *lilv_midiEvent, *lilv_minimumSize;
-    LilvNode *lilv_atom_port, *lilv_worker_interface, *lilv_license_interface, *lilv_state_interface;
     const LilvPort *control_in_port;
     const LilvPort *lilv_port;
     const LilvNode *symbol_node;
@@ -3643,41 +3937,6 @@ int effects_add(const char *uri, int instance)
     /* Init the pointers */
     plugin_uri = NULL;
     lilv_instance = NULL;
-    lilv_input = NULL;
-    lilv_control_in = NULL;
-    lilv_enabled = NULL;
-    lilv_enumeration = NULL;
-    lilv_freeWheeling = NULL;
-    lilv_timePosition = NULL;
-    lilv_timeBeatsPerBar = NULL;
-    lilv_timeBeatsPerMinute = NULL;
-    lilv_timeSpeed = NULL;
-    lilv_integer = NULL;
-    lilv_toggled = NULL;
-    lilv_trigger = NULL;
-    lilv_logarithmic = NULL;
-    lilv_output = NULL;
-    lilv_control = NULL;
-    lilv_audio = NULL;
-    lilv_cv = NULL;
-    lilv_midi = NULL;
-    lilv_default = NULL;
-    lilv_minimum = NULL;
-    lilv_maximum = NULL;
-    lilv_mod_default = NULL;
-    lilv_mod_minimum = NULL;
-    lilv_mod_maximum = NULL;
-    lilv_mod_cvport = NULL;
-    lilv_preferMomentaryOff = NULL;
-    lilv_preferMomentaryOn = NULL;
-    lilv_rawMIDIClockAccess = NULL;
-    lilv_midiEvent = NULL;
-    lilv_minimumSize = NULL;
-    lilv_event = NULL;
-    lilv_atom_port = NULL;
-    lilv_worker_interface = NULL;
-    lilv_license_interface = NULL;
-    lilv_state_interface = NULL;
 
     /* Create a client to Jack */
     snprintf(effect_name, 31, "effect_%i", instance);
@@ -3739,8 +3998,7 @@ int effects_add(const char *uri, int instance)
     effect->lilv_instance = lilv_instance;
 
     /* Worker */
-    lilv_worker_interface = lilv_new_uri(g_lv2_data, LV2_WORKER__interface);
-    if (lilv_plugin_has_extension_data(effect->lilv_plugin, lilv_worker_interface))
+    if (lilv_plugin_has_extension_data(effect->lilv_plugin, g_lilv_nodes.worker_interface))
     {
         const LV2_Worker_Interface *worker_interface =
             (const LV2_Worker_Interface*) lilv_instance_get_extension_data(effect->lilv_instance,
@@ -3749,32 +4007,27 @@ int effects_add(const char *uri, int instance)
         worker_init(&effect->worker, lilv_instance, worker_interface);
     }
 
-    lilv_license_interface = lilv_new_uri(g_lv2_data, MOD_LICENSE__interface);
-    if (lilv_plugin_has_extension_data(effect->lilv_plugin, lilv_license_interface))
+    if (lilv_plugin_has_extension_data(effect->lilv_plugin, g_lilv_nodes.license_interface))
     {
         effect->license_iface =
             (const MOD_License_Interface*) lilv_instance_get_extension_data(effect->lilv_instance,
                                                                             MOD_LICENSE__interface);
     }
 
-    lilv_state_interface = lilv_new_uri(g_lv2_data, LV2_STATE__interface);
-    if (lilv_plugin_has_extension_data(effect->lilv_plugin, lilv_state_interface))
+    if (lilv_plugin_has_extension_data(effect->lilv_plugin, g_lilv_nodes.state_interface))
     {
         effect->state_iface =
             (const LV2_State_Interface*) lilv_instance_get_extension_data(effect->lilv_instance,
                                                                           LV2_STATE__interface);
         effect->hints |= HINT_HAS_STATE;
 
-        LilvNode *lilv_state_thread_safe_restore = lilv_new_uri(g_lv2_data, LV2_STATE__threadSafeRestore);
-        LilvNode *lilv_state_load_default_state = lilv_new_uri(g_lv2_data, LV2_STATE__loadDefaultState);
-
-        if (! lilv_plugin_has_feature(effect->lilv_plugin, lilv_state_thread_safe_restore))
+        if (! lilv_plugin_has_feature(effect->lilv_plugin, g_lilv_nodes.state_thread_safe_restore))
         {
             effect->hints |= HINT_STATE_UNSAFE;
             pthread_mutex_init(&effect->state_restore_mutex, &mutex_atts);
         }
 
-        if (lilv_plugin_has_feature(effect->lilv_plugin, lilv_state_load_default_state))
+        if (lilv_plugin_has_feature(effect->lilv_plugin, g_lilv_nodes.state_load_default_state))
         {
             LilvState *state = lilv_state_new_from_world(g_lv2_data, &g_urid_map, plugin_uri);
 
@@ -3784,45 +4037,17 @@ int effects_add(const char *uri, int instance)
                 lilv_state_free(state);
             }
         }
+    }
 
-        lilv_node_free(lilv_state_load_default_state);
-        lilv_node_free(lilv_state_thread_safe_restore);
+    if (lilv_plugin_has_extension_data(effect->lilv_plugin, g_lilv_nodes.hmi_interface))
+    {
+        effect->hmi_notif =
+            (const LV2_HMI_PluginNotification*) lilv_instance_get_extension_data(effect->lilv_instance,
+                                                                                 LV2_HMI__PluginNotification);
     }
 
     /* Create the URI for identify the ports */
     ports_count = lilv_plugin_get_num_ports(plugin);
-    lilv_audio = lilv_new_uri(g_lv2_data, LILV_URI_AUDIO_PORT);
-    lilv_control = lilv_new_uri(g_lv2_data, LILV_URI_CONTROL_PORT);
-    lilv_cv = lilv_new_uri(g_lv2_data, LILV_URI_CV_PORT);
-    lilv_input = lilv_new_uri(g_lv2_data, LILV_URI_INPUT_PORT);
-    lilv_control_in = lilv_new_uri(g_lv2_data, LV2_CORE__control);
-    lilv_enabled = lilv_new_uri(g_lv2_data, LV2_CORE__enabled);
-    lilv_enumeration = lilv_new_uri(g_lv2_data, LV2_CORE__enumeration);
-    lilv_freeWheeling = lilv_new_uri(g_lv2_data, LV2_CORE__freeWheeling);
-    lilv_timePosition = lilv_new_uri(g_lv2_data, LV2_TIME__Position);
-    lilv_timeBeatsPerBar = lilv_new_uri(g_lv2_data, LV2_TIME__beatsPerBar);
-    lilv_timeBeatsPerMinute = lilv_new_uri(g_lv2_data, LV2_TIME__beatsPerMinute);
-    lilv_timeSpeed = lilv_new_uri(g_lv2_data, LV2_TIME__speed);
-    lilv_integer = lilv_new_uri(g_lv2_data, LV2_CORE__integer);
-    lilv_toggled = lilv_new_uri(g_lv2_data, LV2_CORE__toggled);
-    lilv_trigger = lilv_new_uri(g_lv2_data, LV2_PORT_PROPS__trigger);
-    lilv_logarithmic = lilv_new_uri(g_lv2_data, LV2_PORT_PROPS__logarithmic);
-    lilv_output = lilv_new_uri(g_lv2_data, LILV_URI_OUTPUT_PORT);
-    lilv_event = lilv_new_uri(g_lv2_data, LILV_URI_EVENT_PORT);
-    lilv_atom_port = lilv_new_uri(g_lv2_data, LV2_ATOM__AtomPort);
-    lilv_midi = lilv_new_uri(g_lv2_data, LILV_URI_MIDI_EVENT);
-    lilv_default = lilv_new_uri(g_lv2_data, LV2_CORE__default);
-    lilv_minimum = lilv_new_uri(g_lv2_data, LV2_CORE__minimum);
-    lilv_maximum = lilv_new_uri(g_lv2_data, LV2_CORE__maximum);
-    lilv_mod_default = lilv_new_uri(g_lv2_data, LILV_NS_MOD "default");
-    lilv_mod_minimum = lilv_new_uri(g_lv2_data, LILV_NS_MOD "minimum");
-    lilv_mod_maximum = lilv_new_uri(g_lv2_data, LILV_NS_MOD "maximum");
-    lilv_mod_cvport = lilv_new_uri(g_lv2_data, LILV_NS_MOD "CVPort");
-    lilv_preferMomentaryOff = lilv_new_uri(g_lv2_data, LILV_NS_MOD "preferMomentaryOffByDefault");
-    lilv_preferMomentaryOn = lilv_new_uri(g_lv2_data, LILV_NS_MOD "preferMomentaryOnByDefault");
-    lilv_rawMIDIClockAccess = lilv_new_uri(g_lv2_data, LILV_NS_MOD "rawMIDIClockAccess");
-    lilv_midiEvent = lilv_new_uri(g_lv2_data, LV2_MIDI__MidiEvent);
-    lilv_minimumSize = lilv_new_uri(g_lv2_data, LV2_RESIZE_PORT__minimumSize);
 
     /* Allocate memory to ports */
     audio_ports_count = 0;
@@ -3844,7 +4069,7 @@ int effects_add(const char *uri, int instance)
     effect->ports_count = ports_count;
     effect->ports = (port_t **) calloc(ports_count, sizeof(port_t *));
 
-    control_in_port = lilv_plugin_get_port_by_designation(plugin, lilv_input, lilv_control_in);
+    control_in_port = lilv_plugin_get_port_by_designation(plugin, g_lilv_nodes.input, g_lilv_nodes.control_in);
     if (control_in_port)
     {
         control_in_size = g_midi_buffer_size * 16; // 16 taken from jalv source code
@@ -3857,7 +4082,7 @@ int effects_add(const char *uri, int instance)
     }
     control_out_size = 0;
 
-    for (i = 0; i < ports_count; i++)
+    for (unsigned int i = 0; i < ports_count; i++)
     {
         /* Allocate memory to current port */
         effect->ports[i] = port = (port_t *) calloc(1, sizeof(port_t));
@@ -3874,12 +4099,12 @@ int effects_add(const char *uri, int instance)
 
         /* Port flow */
         port->flow = FLOW_UNKNOWN;
-        if (lilv_port_is_a(plugin, lilv_port, lilv_input))
+        if (lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.input))
         {
             jack_flags = JackPortIsInput;
             port->flow = FLOW_INPUT;
         }
-        else if (lilv_port_is_a(plugin, lilv_port, lilv_output))
+        else if (lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.output))
         {
             jack_flags = JackPortIsOutput;
             port->flow = FLOW_OUTPUT;
@@ -3888,7 +4113,7 @@ int effects_add(const char *uri, int instance)
         port->type = TYPE_UNKNOWN;
         port->hints = 0x0;
 
-        if (lilv_port_is_a(plugin, lilv_port, lilv_audio))
+        if (lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.audio))
         {
             port->type = TYPE_AUDIO;
 
@@ -3916,10 +4141,10 @@ int effects_add(const char *uri, int instance)
             port->jack_port = jack_port;
 
             audio_ports_count++;
-            if (lilv_port_is_a(plugin, lilv_port, lilv_input)) input_audio_ports_count++;
-            else if (lilv_port_is_a(plugin, lilv_port, lilv_output)) output_audio_ports_count++;
+            if (lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.input)) input_audio_ports_count++;
+            else if (lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.output)) output_audio_ports_count++;
         }
-        else if (lilv_port_is_a(plugin, lilv_port, lilv_control))
+        else if (lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.control))
         {
             port->type = TYPE_CONTROL;
 
@@ -3939,9 +4164,9 @@ int effects_add(const char *uri, int instance)
 
             /* Set the minimum value of control */
             float min_value;
-            LilvNodes* lilvvalue_minimum = lilv_port_get_value(plugin, lilv_port, lilv_mod_minimum);
+            LilvNodes* lilvvalue_minimum = lilv_port_get_value(plugin, lilv_port, g_lilv_nodes.mod_minimum);
             if (lilvvalue_minimum == NULL)
-                lilvvalue_minimum = lilv_port_get_value(plugin, lilv_port, lilv_minimum);
+                lilvvalue_minimum = lilv_port_get_value(plugin, lilv_port, g_lilv_nodes.minimum);
 
             if (lilvvalue_minimum != NULL)
                 min_value = lilv_node_as_float(lilv_nodes_get_first(lilvvalue_minimum));
@@ -3950,9 +4175,9 @@ int effects_add(const char *uri, int instance)
 
             /* Set the maximum value of control */
             float max_value;
-            LilvNodes* lilvvalue_maximum = lilv_port_get_value(plugin, lilv_port, lilv_mod_maximum);
+            LilvNodes* lilvvalue_maximum = lilv_port_get_value(plugin, lilv_port, g_lilv_nodes.mod_maximum);
             if (lilvvalue_maximum == NULL)
-                lilvvalue_maximum = lilv_port_get_value(plugin, lilv_port, lilv_maximum);
+                lilvvalue_maximum = lilv_port_get_value(plugin, lilv_port, g_lilv_nodes.maximum);
 
             if (lilvvalue_maximum != NULL)
                 max_value = lilv_node_as_float(lilv_nodes_get_first(lilvvalue_maximum));
@@ -3964,7 +4189,7 @@ int effects_add(const char *uri, int instance)
                 max_value = min_value + 0.1f;
 
             /* multiply ranges by sample rate if requested */
-            if (lilv_port_has_property(plugin, lilv_port, g_sample_rate_node))
+            if (lilv_port_has_property(plugin, lilv_port, g_lilv_nodes.sample_rate))
             {
                 min_value *= g_sample_rate;
                 max_value *= g_sample_rate;
@@ -3974,19 +4199,19 @@ int effects_add(const char *uri, int instance)
             float def_value;
 
 
-            if (lilv_port_has_property(plugin, lilv_port, lilv_preferMomentaryOff))
+            if (lilv_port_has_property(plugin, lilv_port, g_lilv_nodes.preferMomentaryOff))
             {
                 def_value = max_value;
             }
-            else if (lilv_port_has_property(plugin, lilv_port, lilv_preferMomentaryOn))
+            else if (lilv_port_has_property(plugin, lilv_port, g_lilv_nodes.preferMomentaryOn))
             {
                 def_value = min_value;
             }
             else
             {
-                LilvNodes* lilvvalue_default = lilv_port_get_value(plugin, lilv_port, lilv_mod_default);
+                LilvNodes* lilvvalue_default = lilv_port_get_value(plugin, lilv_port, g_lilv_nodes.mod_default);
                 if (lilvvalue_default == NULL)
-                    lilvvalue_default = lilv_port_get_value(plugin, lilv_port, lilv_default);
+                    lilvvalue_default = lilv_port_get_value(plugin, lilv_port, g_lilv_nodes.default_);
 
                 if (lilvvalue_default != NULL)
                     def_value = lilv_node_as_float(lilv_nodes_get_first(lilvvalue_default));
@@ -3998,7 +4223,7 @@ int effects_add(const char *uri, int instance)
 
             (*control_buffer) = def_value;
 
-            if (lilv_port_has_property(plugin, lilv_port, lilv_enumeration))
+            if (lilv_port_has_property(plugin, lilv_port, g_lilv_nodes.enumeration))
             {
                 port->hints |= HINT_ENUMERATION;
 
@@ -4006,20 +4231,20 @@ int effects_add(const char *uri, int instance)
                 if (lilv_scale_points_size(port->scale_points) == 2)
                     port->hints |= HINT_TOGGLE;
             }
-            if (lilv_port_has_property(plugin, lilv_port, lilv_integer))
+            if (lilv_port_has_property(plugin, lilv_port, g_lilv_nodes.integer))
             {
                 port->hints |= HINT_INTEGER;
             }
-            if (lilv_port_has_property(plugin, lilv_port, lilv_toggled))
+            if (lilv_port_has_property(plugin, lilv_port, g_lilv_nodes.toggled))
             {
                 port->hints |= HINT_TOGGLE;
             }
-            if (lilv_port_has_property(plugin, lilv_port, lilv_trigger))
+            if (lilv_port_has_property(plugin, lilv_port, g_lilv_nodes.trigger))
             {
                 port->hints |= HINT_TRIGGER;
                 effect->hints |= HINT_TRIGGERS;
             }
-            if (lilv_port_has_property(plugin, lilv_port, lilv_logarithmic))
+            if (lilv_port_has_property(plugin, lilv_port, g_lilv_nodes.logarithmic))
             {
                 port->hints |= HINT_LOGARITHMIC;
             }
@@ -4031,13 +4256,13 @@ int effects_add(const char *uri, int instance)
             port->prev_value = def_value;
 
             control_ports_count++;
-            if (lilv_port_is_a(plugin, lilv_port, lilv_input)) input_control_ports_count++;
-            else if (lilv_port_is_a(plugin, lilv_port, lilv_output)) output_control_ports_count++;
+            if (lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.input)) input_control_ports_count++;
+            else if (lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.output)) output_control_ports_count++;
 
             lilv_nodes_free(lilvvalue_maximum);
             lilv_nodes_free(lilvvalue_minimum);
         }
-        else if (lilv_port_is_a(plugin, lilv_port, lilv_cv) || lilv_port_is_a(plugin, lilv_port, lilv_mod_cvport))
+        else if (lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.cv) || lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.mod_cvport))
         {
             port->type = TYPE_CV;
 
@@ -4050,7 +4275,7 @@ int effects_add(const char *uri, int instance)
                 goto error;
             }
 
-            if (lilv_port_is_a(plugin, lilv_port, lilv_mod_cvport))
+            if (lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.mod_cvport))
                 port->hints |= HINT_CV_MOD;
 
             port->buffer = cv_buffer;
@@ -4069,9 +4294,9 @@ int effects_add(const char *uri, int instance)
 
             /* Set the minimum value of control */
             float min_value;
-            LilvNodes* lilvvalue_minimum = lilv_port_get_value(plugin, lilv_port, lilv_mod_minimum);
+            LilvNodes* lilvvalue_minimum = lilv_port_get_value(plugin, lilv_port, g_lilv_nodes.mod_minimum);
             if (lilvvalue_minimum == NULL)
-                lilvvalue_minimum = lilv_port_get_value(plugin, lilv_port, lilv_minimum);
+                lilvvalue_minimum = lilv_port_get_value(plugin, lilv_port, g_lilv_nodes.minimum);
 
             if (lilvvalue_minimum != NULL)
                 min_value = lilv_node_as_float(lilv_nodes_get_first(lilvvalue_minimum));
@@ -4080,9 +4305,9 @@ int effects_add(const char *uri, int instance)
 
             /* Set the maximum value of control */
             float max_value;
-            LilvNodes* lilvvalue_maximum = lilv_port_get_value(plugin, lilv_port, lilv_mod_maximum);
+            LilvNodes* lilvvalue_maximum = lilv_port_get_value(plugin, lilv_port, g_lilv_nodes.mod_maximum);
             if (lilvvalue_maximum == NULL)
-                lilvvalue_maximum = lilv_port_get_value(plugin, lilv_port, lilv_maximum);
+                lilvvalue_maximum = lilv_port_get_value(plugin, lilv_port, g_lilv_nodes.maximum);
 
             if (lilvvalue_maximum != NULL)
                 max_value = lilv_node_as_float(lilv_nodes_get_first(lilvvalue_maximum));
@@ -4118,28 +4343,28 @@ int effects_add(const char *uri, int instance)
             port->jack_port = jack_port;
 
             cv_ports_count++;
-            if (lilv_port_is_a(plugin, lilv_port, lilv_input)) input_cv_ports_count++;
-            else if (lilv_port_is_a(plugin, lilv_port, lilv_output)) output_cv_ports_count++;
+            if (lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.input)) input_cv_ports_count++;
+            else if (lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.output)) output_cv_ports_count++;
 
             lilv_nodes_free(lilvvalue_maximum);
             lilv_nodes_free(lilvvalue_minimum);
         }
-        else if (lilv_port_is_a(plugin, lilv_port, lilv_event) ||
-                    lilv_port_is_a(plugin, lilv_port, lilv_atom_port))
+        else if (lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.event) ||
+                    lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.atom_port))
         {
             port->type = TYPE_EVENT;
-            if (lilv_port_is_a(plugin, lilv_port, lilv_event))
+            if (lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.event))
             {
                 port->hints |= HINT_OLD_EVENT_API;
                 port->hints |= HINT_MIDI_EVENT;
             }
             else
             {
-                if (lilv_port_supports_event(plugin, lilv_port, lilv_midiEvent))
+                if (lilv_port_supports_event(plugin, lilv_port, g_lilv_nodes.midiEvent))
                 {
                     port->hints |= HINT_MIDI_EVENT;
                 }
-                if (lilv_port_supports_event(plugin, lilv_port, lilv_timePosition))
+                if (lilv_port_supports_event(plugin, lilv_port, g_lilv_nodes.timePosition))
                 {
                     port->hints |= HINT_TRANSPORT;
                     effect->hints |= HINT_TRANSPORT;
@@ -4149,7 +4374,7 @@ int effects_add(const char *uri, int instance)
             if (port->flow == FLOW_OUTPUT && control_out_size == 0)
                 control_out_size = g_midi_buffer_size * 16; // 16 taken from jalv source code
 
-            LilvNodes *lilvminsize = lilv_port_get_value(plugin, lilv_port, lilv_minimumSize);
+            LilvNodes *lilvminsize = lilv_port_get_value(plugin, lilv_port, g_lilv_nodes.minimumSize);
             if (lilvminsize != NULL)
             {
                 const int iminsize = lilv_node_as_int(lilvminsize);
@@ -4180,10 +4405,10 @@ int effects_add(const char *uri, int instance)
             port->jack_port = jack_port;
             event_ports_count++;
 
-            if (lilv_port_is_a(plugin, lilv_port, lilv_input)) input_event_ports_count++;
-            else if (lilv_port_is_a(plugin, lilv_port, lilv_output)) output_event_ports_count++;
+            if (lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.input)) input_event_ports_count++;
+            else if (lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.output)) output_event_ports_count++;
 
-            if (raw_midi_port == NULL && lilv_port_has_property(plugin, lilv_port, lilv_rawMIDIClockAccess))
+            if (raw_midi_port == NULL && lilv_port_has_property(plugin, lilv_port, g_lilv_nodes.rawMIDIClockAccess))
             {
                 raw_midi_port_item* const portitemptr = malloc(sizeof(raw_midi_port_item));
 
@@ -4203,7 +4428,7 @@ int effects_add(const char *uri, int instance)
 
     // special ports
     {
-        const LilvPort* enabled_port = lilv_plugin_get_port_by_designation(plugin, lilv_input, lilv_enabled);
+        const LilvPort* enabled_port = lilv_plugin_get_port_by_designation(plugin, g_lilv_nodes.input, g_lilv_nodes.enabled);
         if (enabled_port)
         {
             effect->enabled_index = lilv_port_get_index(plugin, enabled_port);
@@ -4214,7 +4439,7 @@ int effects_add(const char *uri, int instance)
             effect->enabled_index = -1;
         }
 
-        const LilvPort* freewheel_port = lilv_plugin_get_port_by_designation(plugin, lilv_input, lilv_freeWheeling);
+        const LilvPort* freewheel_port = lilv_plugin_get_port_by_designation(plugin, g_lilv_nodes.input, g_lilv_nodes.freeWheeling);
         if (freewheel_port)
         {
             effect->freewheel_index = lilv_port_get_index(plugin, freewheel_port);
@@ -4225,7 +4450,7 @@ int effects_add(const char *uri, int instance)
             effect->freewheel_index = -1;
         }
 
-        const LilvPort* bpb_port = lilv_plugin_get_port_by_designation(plugin, lilv_input, lilv_timeBeatsPerBar);
+        const LilvPort* bpb_port = lilv_plugin_get_port_by_designation(plugin, g_lilv_nodes.input, g_lilv_nodes.timeBeatsPerBar);
         if (bpb_port)
         {
             effect->bpb_index = lilv_port_get_index(plugin, bpb_port);
@@ -4236,7 +4461,7 @@ int effects_add(const char *uri, int instance)
             effect->bpb_index = -1;
         }
 
-        const LilvPort* bpm_port = lilv_plugin_get_port_by_designation(plugin, lilv_input, lilv_timeBeatsPerMinute);
+        const LilvPort* bpm_port = lilv_plugin_get_port_by_designation(plugin, g_lilv_nodes.input, g_lilv_nodes.timeBeatsPerMinute);
         if (bpm_port)
         {
             effect->bpm_index = lilv_port_get_index(plugin, bpm_port);
@@ -4247,7 +4472,7 @@ int effects_add(const char *uri, int instance)
             effect->bpm_index = -1;
         }
 
-        const LilvPort* speed_port = lilv_plugin_get_port_by_designation(plugin, lilv_input, lilv_timeSpeed);
+        const LilvPort* speed_port = lilv_plugin_get_port_by_designation(plugin, g_lilv_nodes.input, g_lilv_nodes.timeSpeed);
         if (speed_port)
         {
             effect->speed_index = lilv_port_get_index(plugin, speed_port);
@@ -4346,73 +4571,73 @@ int effects_add(const char *uri, int instance)
     input_event_ports_count = 0;
     output_event_ports_count = 0;
 
-    for (i = 0; i < ports_count; i++)
+    for (unsigned int i = 0; i < ports_count; i++)
     {
         /* Audio ports */
         lilv_port = lilv_plugin_get_port_by_index(plugin, i);
-        if (lilv_port_is_a(plugin, lilv_port, lilv_audio))
+        if (lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.audio))
         {
             effect->audio_ports[audio_ports_count] = effect->ports[i];
             audio_ports_count++;
 
-            if (lilv_port_is_a(plugin, lilv_port, lilv_input))
+            if (lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.input))
             {
                 effect->input_audio_ports[input_audio_ports_count] = effect->ports[i];
                 input_audio_ports_count++;
             }
-            else if (lilv_port_is_a(plugin, lilv_port, lilv_output))
+            else if (lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.output))
             {
                 effect->output_audio_ports[output_audio_ports_count] = effect->ports[i];
                 output_audio_ports_count++;
             }
         }
         /* Control ports */
-        else if (lilv_port_is_a(plugin, lilv_port, lilv_control))
+        else if (lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.control))
         {
             effect->control_ports[control_ports_count] = effect->ports[i];
             control_ports_count++;
 
-            if (lilv_port_is_a(plugin, lilv_port, lilv_input))
+            if (lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.input))
             {
                 effect->input_control_ports[input_control_ports_count] = effect->ports[i];
                 input_control_ports_count++;
             }
-            else if (lilv_port_is_a(plugin, lilv_port, lilv_output))
+            else if (lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.output))
             {
                 effect->output_control_ports[output_control_ports_count] = effect->ports[i];
                 output_control_ports_count++;
             }
         }
         /* CV ports */
-        else if (lilv_port_is_a(plugin, lilv_port, lilv_cv) || lilv_port_is_a(plugin, lilv_port, lilv_mod_cvport))
+        else if (lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.cv) || lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.mod_cvport))
         {
             effect->cv_ports[cv_ports_count] = effect->ports[i];
             cv_ports_count++;
 
-            if (lilv_port_is_a(plugin, lilv_port, lilv_input))
+            if (lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.input))
             {
                 effect->input_cv_ports[input_cv_ports_count] = effect->ports[i];
                 input_cv_ports_count++;
             }
-            else if (lilv_port_is_a(plugin, lilv_port, lilv_output))
+            else if (lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.output))
             {
                 effect->output_cv_ports[output_cv_ports_count] = effect->ports[i];
                 output_cv_ports_count++;
             }
         }
         /* Event ports */
-        else if (lilv_port_is_a(plugin, lilv_port, lilv_event) ||
-                 lilv_port_is_a(plugin, lilv_port, lilv_atom_port))
+        else if (lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.event) ||
+                 lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.atom_port))
         {
             effect->event_ports[event_ports_count] = effect->ports[i];
             event_ports_count++;
 
-            if (lilv_port_is_a(plugin, lilv_port, lilv_input))
+            if (lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.input))
             {
                 effect->input_event_ports[input_event_ports_count] = effect->ports[i];
                 input_event_ports_count++;
             }
-            else if (lilv_port_is_a(plugin, lilv_port, lilv_output))
+            else if (lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.output))
             {
                 effect->output_event_ports[output_event_ports_count] = effect->ports[i];
                 output_event_ports_count++;
@@ -4424,18 +4649,15 @@ int effects_add(const char *uri, int instance)
 
     {
         // Index readable and writable properties
-        LilvNode *rdfs_range = lilv_new_uri(g_lv2_data, LILV_NS_RDFS "range");
-        LilvNode *patch_writable = lilv_new_uri(g_lv2_data, LV2_PATCH__writable);
-        LilvNode *patch_readable = lilv_new_uri(g_lv2_data, LV2_PATCH__readable);
         LilvNodes *writable_properties = lilv_world_find_nodes(
             g_lv2_data,
             lilv_plugin_get_uri(effect->lilv_plugin),
-            patch_writable,
+            g_lilv_nodes.patch_writable,
             NULL);
         LilvNodes *readable_properties = lilv_world_find_nodes(
             g_lv2_data,
             lilv_plugin_get_uri(effect->lilv_plugin),
-            patch_readable,
+            g_lilv_nodes.patch_readable,
             NULL);
         effect->properties_count = lilv_nodes_size(writable_properties) + lilv_nodes_size(readable_properties);
         effect->properties = (property_t **) calloc(effect->properties_count, sizeof(property_t *));
@@ -4447,7 +4669,7 @@ int effects_add(const char *uri, int instance)
             const LilvNode* property = lilv_nodes_get(writable_properties, p);
             effect->properties[j] = (property_t *) malloc(sizeof(property_t));
             effect->properties[j]->uri = lilv_node_duplicate(property);
-            effect->properties[j]->type = lilv_world_get(g_lv2_data, property, rdfs_range, NULL);
+            effect->properties[j]->type = lilv_world_get(g_lv2_data, property, g_lilv_nodes.rdfs_range, NULL);
             effect->properties[j]->monitored = true; // always true for writable properties
             j++;
         }
@@ -4456,14 +4678,11 @@ int effects_add(const char *uri, int instance)
             const LilvNode* property = lilv_nodes_get(readable_properties, p);
             effect->properties[j] = (property_t *) malloc(sizeof(property_t));
             effect->properties[j]->uri = lilv_node_duplicate(property);
-            effect->properties[j]->type = lilv_world_get(g_lv2_data, property, rdfs_range, NULL);
+            effect->properties[j]->type = lilv_world_get(g_lv2_data, property, g_lilv_nodes.rdfs_range, NULL);
             effect->properties[j]->monitored = false; // optional
             j++;
         }
 
-        lilv_node_free(rdfs_range);
-        lilv_node_free(patch_writable);
-        lilv_node_free(patch_readable);
         lilv_nodes_free(writable_properties);
         lilv_nodes_free(readable_properties);
     }
@@ -4513,41 +4732,6 @@ int effects_add(const char *uri, int instance)
     pthread_mutexattr_destroy(&mutex_atts);
 
     lilv_node_free(plugin_uri);
-    lilv_node_free(lilv_audio);
-    lilv_node_free(lilv_control);
-    lilv_node_free(lilv_cv);
-    lilv_node_free(lilv_input);
-    lilv_node_free(lilv_control_in);
-    lilv_node_free(lilv_enabled);
-    lilv_node_free(lilv_enumeration);
-    lilv_node_free(lilv_freeWheeling);
-    lilv_node_free(lilv_timePosition);
-    lilv_node_free(lilv_timeBeatsPerBar);
-    lilv_node_free(lilv_timeBeatsPerMinute);
-    lilv_node_free(lilv_timeSpeed);
-    lilv_node_free(lilv_integer);
-    lilv_node_free(lilv_toggled);
-    lilv_node_free(lilv_trigger);
-    lilv_node_free(lilv_logarithmic);
-    lilv_node_free(lilv_output);
-    lilv_node_free(lilv_event);
-    lilv_node_free(lilv_midi);
-    lilv_node_free(lilv_default);
-    lilv_node_free(lilv_minimum);
-    lilv_node_free(lilv_maximum);
-    lilv_node_free(lilv_mod_default);
-    lilv_node_free(lilv_mod_minimum);
-    lilv_node_free(lilv_mod_maximum);
-    lilv_node_free(lilv_mod_cvport);
-    lilv_node_free(lilv_preferMomentaryOff);
-    lilv_node_free(lilv_preferMomentaryOn);
-    lilv_node_free(lilv_rawMIDIClockAccess);
-    lilv_node_free(lilv_midiEvent);
-    lilv_node_free(lilv_minimumSize);
-    lilv_node_free(lilv_atom_port);
-    lilv_node_free(lilv_worker_interface);
-    lilv_node_free(lilv_license_interface);
-    lilv_node_free(lilv_state_interface);
 
     /* Jack callbacks */
     jack_set_thread_init_callback(jack_client, JackThreadInit, effect);
@@ -4591,46 +4775,9 @@ int effects_add(const char *uri, int instance)
     LoadPresets(effect);
     return instance;
 
-    error:
-        lilv_node_free(plugin_uri);
-        lilv_node_free(lilv_audio);
-        lilv_node_free(lilv_control);
-        lilv_node_free(lilv_cv);
-        lilv_node_free(lilv_input);
-        lilv_node_free(lilv_control_in);
-        lilv_node_free(lilv_enabled);
-        lilv_node_free(lilv_enumeration);
-        lilv_node_free(lilv_freeWheeling);
-        lilv_node_free(lilv_timePosition);
-        lilv_node_free(lilv_timeBeatsPerBar);
-        lilv_node_free(lilv_timeBeatsPerMinute);
-        lilv_node_free(lilv_timeSpeed);
-        lilv_node_free(lilv_integer);
-        lilv_node_free(lilv_toggled);
-        lilv_node_free(lilv_trigger);
-        lilv_node_free(lilv_logarithmic);
-        lilv_node_free(lilv_output);
-        lilv_node_free(lilv_event);
-        lilv_node_free(lilv_midi);
-        lilv_node_free(lilv_default);
-        lilv_node_free(lilv_minimum);
-        lilv_node_free(lilv_maximum);
-        lilv_node_free(lilv_mod_default);
-        lilv_node_free(lilv_mod_minimum);
-        lilv_node_free(lilv_mod_maximum);
-        lilv_node_free(lilv_mod_cvport);
-        lilv_node_free(lilv_preferMomentaryOff);
-        lilv_node_free(lilv_preferMomentaryOn);
-        lilv_node_free(lilv_rawMIDIClockAccess);
-        lilv_node_free(lilv_midiEvent);
-        lilv_node_free(lilv_minimumSize);
-        lilv_node_free(lilv_atom_port);
-        lilv_node_free(lilv_worker_interface);
-        lilv_node_free(lilv_license_interface);
-        lilv_node_free(lilv_state_interface);
-
-        effects_remove(instance);
-
+error:
+    lilv_node_free(plugin_uri);
+    effects_remove(instance);
     return error;
 }
 
@@ -4710,6 +4857,7 @@ int effects_preset_save(int effect_id, const char *dir, const char *file_name, c
         &g_urid_map_feature,
         &g_urid_unmap_feature,
         &g_options_feature,
+        &g_hmi_wc_feature,
         &g_license_feature,
         &g_buf_size_features[0],
         &g_buf_size_features[1],
@@ -6538,6 +6686,56 @@ int effects_cv_unmap(int effect_id, const char *control_symbol)
     return SUCCESS;
 }
 
+int effects_hmi_map(int effect_id, const char *control_symbol, int hw_id,
+                    int caps, int flags, const char *label, float minimum, float maximum, int steps)
+{
+    if (!InstanceExist(effect_id))
+        return ERR_INSTANCE_NON_EXISTS;
+
+    effect_t *effect = &(g_effects[effect_id]);
+    port_t *port = FindEffectInputPortBySymbol(effect, control_symbol);
+
+    if (port == NULL)
+        return ERR_LV2_INVALID_PARAM_SYMBOL;
+
+    if (effect->hmi_notif == NULL)
+        return ERR_INVALID_OPERATION;
+
+    LV2_Handle handle = lilv_instance_get_handle(effect->lilv_instance);
+    int64_t addressing = (0x8000 + hw_id);
+    LV2_HMI_AddressingInfo info = {
+        .caps = (LV2_HMI_AddressingCapabilities)caps,
+        .flags = (LV2_HMI_AddressingFlags)flags,
+        .label = label,
+        .min = minimum,
+        .max = maximum,
+        .steps = steps,
+    };
+    effect->hmi_notif->addressed(handle, port->index, (LV2_HMI_Addressing)addressing, &info);
+
+    return SUCCESS;
+}
+
+int effects_hmi_unmap(int effect_id, const char *control_symbol)
+{
+    if (!InstanceExist(effect_id))
+        return ERR_INSTANCE_NON_EXISTS;
+
+    effect_t *effect = &(g_effects[effect_id]);
+    port_t *port = FindEffectInputPortBySymbol(effect, control_symbol);
+
+    if (port == NULL)
+        return ERR_LV2_INVALID_PARAM_SYMBOL;
+
+    if (effect->hmi_notif == NULL)
+        return ERR_INVALID_OPERATION;
+
+    LV2_Handle handle = lilv_instance_get_handle(effect->lilv_instance);
+    effect->hmi_notif->unaddressed(handle, port->index);
+
+    return SUCCESS;
+}
+
 float effects_jack_cpu_load(void)
 {
     return jack_cpu_load(g_jack_global_client);
@@ -6635,6 +6833,7 @@ int effects_state_load(const char *dir)
         &g_urid_map_feature,
         &g_urid_unmap_feature,
         &g_options_feature,
+        &g_hmi_wc_feature,
         &g_license_feature,
         &g_buf_size_features[0],
         &g_buf_size_features[1],
@@ -6721,6 +6920,7 @@ int effects_state_save(const char *dir)
         &g_urid_map_feature,
         &g_urid_unmap_feature,
         &g_options_feature,
+        &g_hmi_wc_feature,
         &g_license_feature,
         &g_buf_size_features[0],
         &g_buf_size_features[1],
