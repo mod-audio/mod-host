@@ -499,6 +499,8 @@ typedef struct ASSIGNMENT_T {
     int device_id;
     int assignment_id;
     int actuator_id;
+    int actuator_pair_id;
+    int assignment_pair_id;
     bool supports_set_value;
 } assignment_t;
 
@@ -3754,6 +3756,7 @@ int effects_init(void* client)
         for (int j = 0; j < CC_MAX_ASSIGNMENTS; j++)
         {
             g_assignments_list[i][j].effect_id = ASSIGNMENT_NULL;
+            g_assignments_list[i][j].assignment_pair_id = -1;
         }
     }
 #endif
@@ -5104,6 +5107,7 @@ int effects_remove(int effect_id)
                     cc_assignment_key_t key;
                     key.device_id = assignment->device_id;
                     key.id = assignment->assignment_id;
+                    key.pair_id = assignment->assignment_pair_id;
                     cc_client_unassignment(g_cc_client, &key);
                 }
             }
@@ -5116,6 +5120,7 @@ int effects_remove(int effect_id)
             for (int j = 0; j < CC_MAX_ASSIGNMENTS; j++)
             {
                 g_assignments_list[i][j].effect_id = ASSIGNMENT_NULL;
+                g_assignments_list[i][j].assignment_pair_id = -1;
             }
         }
 #endif
@@ -5211,11 +5216,13 @@ int effects_remove(int effect_id)
                     cc_assignment_key_t key;
                     key.device_id = assignment->device_id;
                     key.id = assignment->assignment_id;
+                    key.pair_id = assignment->assignment_pair_id;
                     cc_client_unassignment(g_cc_client, &key);
                 }
 
                 memset(assignment, 0, sizeof(assignment_t));
                 assignment->effect_id = ASSIGNMENT_UNUSED;
+                assignment->assignment_pair_id = -1;
             }
         }
 #endif
@@ -6166,9 +6173,9 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
         return ERR_LV2_INVALID_PARAM_SYMBOL;
 
     cc_assignment_t assignment;
+    memset(&assignment, 0, sizeof(assignment));
     assignment.device_id = device_id;
     assignment.actuator_id = actuator_id;
-    assignment.mode  = 0x0;
     assignment.label = label;
     assignment.value = value;
     assignment.min   = minimum;
@@ -6177,6 +6184,8 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
     assignment.steps = steps;
     assignment.unit  = unit;
     assignment.list_count = scalepoints_count;
+    assignment.actuator_pair_id = -1;
+    assignment.assignment_pair_id = -1;
 
     if (extraflags & CC_MODE_TAP_TEMPO)
         assignment.mode = CC_MODE_TAP_TEMPO;
@@ -6281,10 +6290,27 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
     item->device_id = device_id;
     item->actuator_id = actuator_id;
     item->assignment_id = assignment_id;
+    item->actuator_pair_id = assignment.actuator_pair_id;
+    item->assignment_pair_id = assignment.assignment_pair_id;
     item->supports_set_value = CheckCCDeviceProtocolVersion(device_id, 0, 6);
 
+    if (assignment.assignment_pair_id != -1)
+    {
+        assignment_t *item2 = &g_assignments_list[assignment.device_id][assignment.assignment_pair_id];
+
+        item2->effect_id = effect_id;
+        item2->port = port;
+        item2->device_id = device_id;
+        item2->actuator_id = assignment.actuator_pair_id;
+        item2->assignment_id = assignment.assignment_pair_id;
+        item2->actuator_pair_id = actuator_id;
+        item2->assignment_pair_id = assignment_id;
+        item2->supports_set_value = item->supports_set_value;
+    }
+
     if (g_verbose_debug) {
-        printf("DEBUG: cc_map assignment supports set_value: %s\n", item->supports_set_value ? "true" : "false");
+        printf("DEBUG: cc_map assignment supports set_value: %s, has pair %i\n",
+               item->supports_set_value ? "true" : "false", assignment.assignment_pair_id);
         fflush(stdout);
     }
 
@@ -6335,20 +6361,21 @@ int effects_cc_value_set(int effect_id, const char *control_symbol, float value)
                 if (!strcmp(control_symbol, BYPASS_PORT_SYMBOL))
                     value = value > 0.5f ? 0.0f : 1.0f;
 
+                if (g_verbose_debug) {
+                    puts("DEBUG: cc_value_set sending:");
+                    printf("\tdevice_id:         %i\n", assignment->device_id);
+                    printf("\tassignment_id:     %i\n", assignment->assignment_id);
+                    printf("\assignment_pair_id: %i\n", assignment->assignment_pair_id);
+                    printf("\tactuator_id:       %i\n", assignment->actuator_id);
+                    printf("\tvalue:             %f\n", value);
+                    fflush(stdout);
+                }
+
                 cc_set_value_t update;
                 update.device_id = assignment->device_id;
                 update.assignment_id = assignment->assignment_id;
                 update.actuator_id = assignment->actuator_id;
                 update.value = value;
-
-                if (g_verbose_debug) {
-                    puts("DEBUG: cc_value_set sending:");
-                    printf("\tdevice_id:     %i\n", update.device_id);
-                    printf("\tassignment_id: %i\n", update.assignment_id);
-                    printf("\tactuator_id:   %i\n", update.actuator_id);
-                    printf("\tvalue:         %f\n", update.value);
-                    fflush(stdout);
-                }
 
                 cc_client_value_set(g_cc_client, &update);
                 return SUCCESS;
@@ -6394,14 +6421,25 @@ int effects_cc_unmap(int effect_id, const char *control_symbol)
                 cc_assignment_key_t key;
                 key.device_id = assignment->device_id;
                 key.id = assignment->assignment_id;
+                key.pair_id = assignment->assignment_pair_id;
 
                 memset(assignment, 0, sizeof(assignment_t));
                 assignment->effect_id = ASSIGNMENT_UNUSED;
+                assignment->assignment_pair_id = -1;
+
+                if (key.pair_id != -1)
+                {
+                    assignment = &g_assignments_list[i][key.pair_id];
+                    memset(assignment, 0, sizeof(assignment_t));
+                    assignment->effect_id = ASSIGNMENT_UNUSED;
+                    assignment->assignment_pair_id = -1;
+                }
 
                 if (g_verbose_debug) {
                     puts("DEBUG: cc_unmap sending:");
                     printf("\tdevice_id: %i\n", key.device_id);
                     printf("\tid:        %i\n", key.id);
+                    printf("\tpair_id:   %i\n", key.pair_id);
                     fflush(stdout);
                 }
 

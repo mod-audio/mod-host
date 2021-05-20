@@ -143,8 +143,8 @@ typedef struct {
      * ...
      */
     void (*set_unit)(LV2_HMI_WidgetControl_Handle handle,
-                      LV2_HMI_Addressing addressing,
-                      const char* unit);
+                     LV2_HMI_Addressing addressing,
+                     const char* unit);
 
 } LV2_HMI_WidgetControl;
 
