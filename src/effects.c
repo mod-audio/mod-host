@@ -6732,9 +6732,23 @@ int effects_hmi_map(int effect_id, const char *control_symbol, int hw_id,
 {
     if (!InstanceExist(effect_id))
         return ERR_INSTANCE_NON_EXISTS;
+    if (effect_id >= MAX_PLUGIN_INSTANCES)
+        return ERR_INVALID_OPERATION;
 
     effect_t *effect = &(g_effects[effect_id]);
-    port_t *port = FindEffectInputPortBySymbol(effect, control_symbol);
+    port_t *port = NULL;
+
+    // special handling for bypass, mapped to lv2:enabled designation
+    if (!strcmp(control_symbol, g_bypass_port_symbol))
+    {
+        if (effect->enabled_index >= 0)
+            port = effect->ports[effect->enabled_index];
+    }
+    // do not allow other special ports
+    else if (control_symbol[0] != ':')
+    {
+        port = FindEffectInputPortBySymbol(effect, control_symbol);
+    }
 
     if (port == NULL)
         return ERR_LV2_INVALID_PARAM_SYMBOL;
@@ -6763,7 +6777,19 @@ int effects_hmi_unmap(int effect_id, const char *control_symbol)
         return ERR_INSTANCE_NON_EXISTS;
 
     effect_t *effect = &(g_effects[effect_id]);
-    port_t *port = FindEffectInputPortBySymbol(effect, control_symbol);
+    port_t *port = NULL;
+
+    // special handling for bypass, mapped to lv2:enabled designation
+    if (!strcmp(control_symbol, g_bypass_port_symbol))
+    {
+        if (effect->enabled_index >= 0)
+            port = effect->ports[effect->enabled_index];
+    }
+    // do not allow other special ports
+    else if (control_symbol[0] != ':')
+    {
+        port = FindEffectInputPortBySymbol(effect, control_symbol);
+    }
 
     if (port == NULL)
         return ERR_LV2_INVALID_PARAM_SYMBOL;
