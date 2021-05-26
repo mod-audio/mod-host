@@ -2916,7 +2916,7 @@ static void HMIWidgetsSetLed(LV2_HMI_WidgetControl_Handle handle,
     char msg[32];
     snprintf(msg, sizeof(msg), "%x %i %i %i %i",
              sys_serial_event_type_led, assignment_id, led_color, on_blink_time, off_blink_time);
-    char msg[31] ='\0';
+    msg[31] = '\0';
 
     pthread_mutex_lock(&g_hmi_mutex);
     sys_serial_write(g_hmi_data, sys_serial_event_type_led, msg);
@@ -3042,7 +3042,7 @@ static void HMIWidgetsSetIndicator(LV2_HMI_WidgetControl_Handle handle,
     char msg[32];
     snprintf(msg, sizeof(msg), "%x %i %f",
              sys_serial_event_type_widget_indicator, assignment_id, indicator_poss);
-    char msg[31] ='\0';
+    msg[31] = '\0';
 
     pthread_mutex_lock(&g_hmi_mutex);
     sys_serial_write(g_hmi_data, sys_serial_event_type_widget_indicator, msg);
