@@ -52,10 +52,11 @@ typedef void* LV2_HMI_WidgetControl_Handle;
  *  ...
  */
 typedef enum {
-    LV2_HMI_AddressingCapability_LED   = 1 << 0,
-    LV2_HMI_AddressingCapability_Label = 1 << 1,
-    LV2_HMI_AddressingCapability_Value = 1 << 2,
-    LV2_HMI_AddressingCapability_Unit  = 1 << 3
+    LV2_HMI_AddressingCapability_LED        = 1 << 0,
+    LV2_HMI_AddressingCapability_Label      = 1 << 1,
+    LV2_HMI_AddressingCapability_Value      = 1 << 2,
+    LV2_HMI_AddressingCapability_Unit       = 1 << 3,
+    LV2_HMI_AddressingCapability_Indicator  = 1 << 4
 } LV2_HMI_AddressingCapabilities;
 
 /**
@@ -146,6 +147,12 @@ typedef struct {
                      LV2_HMI_Addressing addressing,
                      const char* unit);
 
+    /**
+     * ...
+     */
+    void (*set_indicator)(LV2_HMI_WidgetControl_Handle handle,
+                    LV2_HMI_Addressing addressing,
+                    const float indicator_poss);
 } LV2_HMI_WidgetControl;
 
 #ifdef __cplusplus

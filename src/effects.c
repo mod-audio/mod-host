@@ -761,6 +761,9 @@ static void HMIWidgetsSetValue(LV2_HMI_WidgetControl_Handle handle,
 static void HMIWidgetsSetUnit(LV2_HMI_WidgetControl_Handle handle,
                               LV2_HMI_Addressing addressing,
                               const char* unit);
+static void HMIWidgetsSetIndicator(LV2_HMI_WidgetControl_Handle handle,
+                                   LV2_HMI_Addressing addressing,
+                                   float indicator_poss);
 static char *GetLicenseFile(MOD_License_Handle handle, const char *license_uri);
 static int LogPrintf(LV2_Log_Handle handle, LV2_URID type, const char *fmt, ...);
 static int LogVPrintf(LV2_Log_Handle handle, LV2_URID type, const char *fmt, va_list ap);
@@ -3009,6 +3012,41 @@ static void HMIWidgetsSetUnit(LV2_HMI_WidgetControl_Handle handle,
     pthread_mutex_unlock(&g_hmi_mutex);
 }
 
+static void HMIWidgetsSetIndicator(LV2_HMI_WidgetControl_Handle handle,
+                                   LV2_HMI_Addressing addressing,
+                                   float indicator_poss)
+{
+    if (handle == NULL || addressing == NULL || g_hmi_data == NULL) {
+        return;
+    }
+
+    const int64_t addressing_check = (int64_t)addressing;
+
+    if (addressing_check < 0x8000 || addressing_check > 0x9000) {
+        return;
+    }
+
+    const int assignment_id = addressing_check - 0x8000;
+
+    if (g_verbose_debug) {
+        printf("DEBUG: HMIWidgetsSetIndicator %i: %f\n", assignment_id, indicator_poss);
+        fflush(stdout);
+    }
+
+    if (indicator_poss < 0.0)
+        indicator_poss = 0.0;
+    else if (indicator_poss > 1.0)
+        indicator_poss = 1.0;
+
+    char msg[32];
+    snprintf(msg, sizeof(msg), "%x %i %f",
+             sys_serial_event_type_widget_indicator, assignment_id, indicator_poss);
+
+    pthread_mutex_lock(&g_hmi_mutex);
+    sys_serial_write(g_hmi_data, sys_serial_event_type_widget_indicator, msg);
+    pthread_mutex_unlock(&g_hmi_mutex);
+}
+
 static char* GetLicenseFile(MOD_License_Handle handle, const char *license_uri)
 {
     if (!license_uri || *license_uri == '\0')
@@ -3700,11 +3738,13 @@ int effects_init(void* client)
     g_options[5].type = 0;
     g_options[5].value = NULL;
 
-    g_hmi_wc.size      = sizeof(g_hmi_wc);
-    g_hmi_wc.set_led   = HMIWidgetsSetLed;
-    g_hmi_wc.set_label = HMIWidgetsSetLabel;
-    g_hmi_wc.set_value = HMIWidgetsSetValue;
-    g_hmi_wc.set_unit  = HMIWidgetsSetUnit;
+    g_hmi_wc.size           = sizeof(g_hmi_wc);
+    g_hmi_wc.set_led        = HMIWidgetsSetLed;
+    g_hmi_wc.set_label      = HMIWidgetsSetLabel;
+    g_hmi_wc.set_value      = HMIWidgetsSetValue;
+    g_hmi_wc.set_unit       = HMIWidgetsSetUnit;
+    g_hmi_wc.set_indicator  = HMIWidgetsSetIndicator;
+
 
     // HMI integration setup
     if (sys_serial_open(&g_hmi_shmfd, &g_hmi_data))
