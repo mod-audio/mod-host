@@ -26,7 +26,8 @@ typedef enum {
     sys_serial_event_type_led = 0x80 + 'l',
     sys_serial_event_type_name = 0x80 + 'n',
     sys_serial_event_type_value = 0x80 + 'v',
-    sys_serial_event_type_unit = 0x80 + 'u'
+    sys_serial_event_type_unit = 0x80 + 'u',
+    sys_serial_event_type_widget_indicator = 0x80 + 'i'
 } sys_serial_event_type;
 
 typedef struct {
