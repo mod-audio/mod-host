@@ -706,6 +706,7 @@ static hylia_time_info_t g_hylia_timeinfo;
 /* HMI integration */
 static int g_hmi_shmfd;
 static sys_serial_shm_data* g_hmi_data;
+static pthread_t g_hmi_client_thread;
 static pthread_mutex_t g_hmi_mutex;
 
 static const char* const g_bypass_port_symbol = BYPASS_PORT_SYMBOL;
@@ -728,6 +729,7 @@ static void FreeWheelMode(int starting, void* data);
 static void PortRegistration(jack_port_id_t port_id, int reg, void* data);
 static void RunPostPonedEvents(int ignored_effect_id);
 static void* PostPonedEventsThread(void* arg);
+static void* HMIClientThread(void* arg);
 static int ProcessPlugin(jack_nframes_t nframes, void *arg);
 static bool SetPortValue(port_t *port, float value, int effect_id, bool is_bypass);
 static float UpdateValueFromMidi(midi_cc_t* mcc, uint16_t mvalue, bool highres);
@@ -1419,6 +1421,43 @@ static void* PostPonedEventsThread(void* arg)
     return NULL;
 
     UNUSED_PARAM(arg);
+}
+
+static void* HMIClientThread(void* arg)
+{
+    sys_serial_shm_data_channel* const data = (sys_serial_shm_data_channel*)arg;
+
+    sys_serial_event_type etype;
+    char msg[SYS_SERIAL_SHM_DATA_SIZE];
+
+    while (g_hmi_data != NULL && &g_hmi_data->client == data)
+    {
+        if (sem_timedwait_secs(&data->sem, 1) != 0)
+            continue;
+
+        if (g_hmi_data == NULL || &g_hmi_data->client != data)
+            break;
+
+        while (data->head != data->tail)
+        {
+            if (! sys_serial_read(data, &etype, msg))
+                continue;
+
+            // TODO
+
+// bool monitor_client_disable_compressor(void);
+// bool monitor_client_setup_compressor(float threshold, float knee, float ratio, float attack, float release, float makeup);
+// bool monitor_client_setup_volume(float volume);
+
+            switch (etype)
+            {
+            default:
+                break;
+            }
+        }
+    }
+
+    return NULL;
 }
 
 static int ProcessPlugin(jack_nframes_t nframes, void *arg)
@@ -2914,12 +2953,11 @@ static void HMIWidgetsSetLed(LV2_HMI_WidgetControl_Handle handle,
         off_blink_time = 5000;
 
     char msg[32];
-    snprintf(msg, sizeof(msg), "%x %i %i %i %i",
-             sys_serial_event_type_led, assignment_id, led_color, on_blink_time, off_blink_time);
-    msg[31] = '\0';
+    snprintf(msg, sizeof(msg), "%i %i %i %i", assignment_id, led_color, on_blink_time, off_blink_time);
+    msg[sizeof(msg)-1] = '\0';
 
     pthread_mutex_lock(&g_hmi_mutex);
-    sys_serial_write(g_hmi_data, sys_serial_event_type_led, msg);
+    sys_serial_write(&g_hmi_data->server, sys_serial_event_type_led, msg);
     pthread_mutex_unlock(&g_hmi_mutex);
 }
 
@@ -2945,11 +2983,11 @@ static void HMIWidgetsSetLabel(LV2_HMI_WidgetControl_Handle handle,
     }
 
     char msg[24];
-    snprintf(msg, sizeof(msg)-1, "%x %i %s", sys_serial_event_type_name, assignment_id, label);
-    msg[23] = '\0';
+    snprintf(msg, sizeof(msg), "%i %s", assignment_id, label);
+    msg[sizeof(msg)-1] = '\0';
 
     pthread_mutex_lock(&g_hmi_mutex);
-    sys_serial_write(g_hmi_data, sys_serial_event_type_name, msg);
+    sys_serial_write(&g_hmi_data->server, sys_serial_event_type_name, msg);
     pthread_mutex_unlock(&g_hmi_mutex);
 }
 
@@ -2975,11 +3013,11 @@ static void HMIWidgetsSetValue(LV2_HMI_WidgetControl_Handle handle,
     }
 
     char msg[24];
-    snprintf(msg, sizeof(msg)-1, "%x %i %s", sys_serial_event_type_value, assignment_id, value);
-    msg[23] = '\0';
+    snprintf(msg, sizeof(msg), "%i %s", assignment_id, value);
+    msg[sizeof(msg)-1] = '\0';
 
     pthread_mutex_lock(&g_hmi_mutex);
-    sys_serial_write(g_hmi_data, sys_serial_event_type_value, msg);
+    sys_serial_write(&g_hmi_data->server, sys_serial_event_type_value, msg);
     pthread_mutex_unlock(&g_hmi_mutex);
 }
 
@@ -3005,11 +3043,11 @@ static void HMIWidgetsSetUnit(LV2_HMI_WidgetControl_Handle handle,
     }
 
     char msg[24];
-    snprintf(msg, sizeof(msg)-1, "%x %i %s", sys_serial_event_type_unit, assignment_id, unit);
-    msg[23] = '\0';
+    snprintf(msg, sizeof(msg), "%i %s", assignment_id, unit);
+    msg[sizeof(msg)-1] = '\0';
 
     pthread_mutex_lock(&g_hmi_mutex);
-    sys_serial_write(g_hmi_data, sys_serial_event_type_unit, msg);
+    sys_serial_write(&g_hmi_data->server, sys_serial_event_type_unit, msg);
     pthread_mutex_unlock(&g_hmi_mutex);
 }
 
@@ -3040,12 +3078,11 @@ static void HMIWidgetsSetIndicator(LV2_HMI_WidgetControl_Handle handle,
         indicator_poss = 1.0f;
 
     char msg[32];
-    snprintf(msg, sizeof(msg), "%x %i %f",
-             sys_serial_event_type_widget_indicator, assignment_id, indicator_poss);
+    snprintf(msg, sizeof(msg), "%i %f", assignment_id, indicator_poss);
     msg[31] = '\0';
 
     pthread_mutex_lock(&g_hmi_mutex);
-    sys_serial_write(g_hmi_data, sys_serial_event_type_widget_indicator, msg);
+    sys_serial_write(&g_hmi_data->server, sys_serial_event_type_widget_indicator, msg);
     pthread_mutex_unlock(&g_hmi_mutex);
 }
 
@@ -3747,11 +3784,11 @@ int effects_init(void* client)
     g_hmi_wc.set_unit       = HMIWidgetsSetUnit;
     g_hmi_wc.set_indicator  = HMIWidgetsSetIndicator;
 
-
     // HMI integration setup
     if (sys_serial_open(&g_hmi_shmfd, &g_hmi_data))
     {
         g_hmi_wc.handle = g_hmi_data;
+        pthread_create(&g_hmi_client_thread, NULL, HMIClientThread, &g_hmi_data->client);
     }
     else
     {
@@ -3853,7 +3890,15 @@ int effects_finish(int close_client)
     effects_remove(REMOVE_ALL);
 
     if (g_hmi_data != NULL)
-        sys_serial_close(g_hmi_shmfd, g_hmi_data);
+    {
+        sys_serial_shm_data* hmi_data = g_hmi_data;
+        g_hmi_data = NULL;
+
+        sem_post(&hmi_data->client.sem);
+        pthread_join(g_hmi_client_thread, NULL);
+
+        sys_serial_close(g_hmi_shmfd, hmi_data);
+    }
 
 #ifdef HAVE_CONTROLCHAIN
     if (g_cc_client)
