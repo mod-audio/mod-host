@@ -1451,6 +1451,26 @@ static void* HMIClientThread(void* arg)
 
             switch (etype)
             {
+            case sys_serial_event_type_compressor_mode: {
+                // TODO
+                const int mode = msg[0] - '0';
+                if (mode == 0)
+                    monitor_client_disable_compressor();
+                break;
+            }
+            case sys_serial_event_type_compressor_release:
+                break;
+            case sys_serial_event_type_noisegate_channel:
+                break;
+            case sys_serial_event_type_noisegate_decay:
+                break;
+            case sys_serial_event_type_noisegate_threshold:
+                break;
+            case sys_serial_event_type_pedalboard_gain: {
+                const float value = atof(msg);
+                monitor_client_setup_volume(value);
+                break;
+            }
             default:
                 break;
             }
