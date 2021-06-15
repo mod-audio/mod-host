@@ -348,21 +348,7 @@ bool monitor_client_init(void)
     return true;
 }
 
-bool monitor_client_disable_compressor(void)
-{
-    monitor_client_t *const mon = g_monitor_handle;
-
-    if (!mon)
-    {
-        fprintf(stderr, "asked to disable compressor while monitor client is not active\n");
-        return false;
-    }
-
-    mon->apply_compressor = false;
-    return true;
-}
-
-bool monitor_client_setup_compressor(float threshold, float knee, float ratio, float attack, float release, float makeup)
+bool monitor_client_setup_compressor(int mode, float release)
 {
     monitor_client_t *const mon = g_monitor_handle;
 
@@ -372,8 +358,23 @@ bool monitor_client_setup_compressor(float threshold, float knee, float ratio, f
         return false;
     }
 
-    compressor_set_params(&mon->compressor, threshold, knee, ratio, attack / 1000, release / 1000, makeup);
-    mon->apply_compressor = true;
+    switch (mode)
+    {
+    case 1:
+        compressor_set_params(&mon->compressor, -12.f, 12.f, 2.f, 0.0001f, release / 1000, -3.f);
+        break;
+    case 2:
+        compressor_set_params(&mon->compressor, -12.f, 12.f, 3.f, 0.0001f, release / 1000, -3.f);
+        break;
+    case 3:
+        compressor_set_params(&mon->compressor, -15.f, 15.f, 4.f, 0.0001f, release / 1000, -3.f);
+        break;
+    case 4:
+        compressor_set_params(&mon->compressor, -25.f, 15.f, 10.f, 0.0001f, release / 1000, -6.f);
+        break;
+    }
+
+    mon->apply_compressor = mode != 0;
     return true;
 }
 

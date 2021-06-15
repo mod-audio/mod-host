@@ -709,6 +709,13 @@ static sys_serial_shm_data* g_hmi_data;
 static pthread_t g_hmi_client_thread;
 static pthread_mutex_t g_hmi_mutex;
 
+/* system plugins */
+static int g_compressor_mode = 0;
+static float g_compressor_release = 100.0f;
+static int g_noisegate_channel = 0;
+static float g_noisegate_threshold = -60.0f;
+static float g_noisegate_decay = 10.0f;
+
 static const char* const g_bypass_port_symbol = BYPASS_PORT_SYMBOL;
 static const char* const g_presets_port_symbol = PRESETS_PORT_SYMBOL;
 static const char* const g_bpb_port_symbol = BPB_PORT_SYMBOL;
@@ -1443,34 +1450,28 @@ static void* HMIClientThread(void* arg)
             if (! sys_serial_read(data, &etype, msg))
                 continue;
 
-            // TODO
-
-// bool monitor_client_disable_compressor(void);
-// bool monitor_client_setup_compressor(float threshold, float knee, float ratio, float attack, float release, float makeup);
-// bool monitor_client_setup_volume(float volume);
-
             switch (etype)
             {
-            case sys_serial_event_type_compressor_mode: {
-                // TODO
-                const int mode = msg[0] - '0';
-                if (mode == 0)
-                    monitor_client_disable_compressor();
+            case sys_serial_event_type_compressor_mode:
+                g_compressor_mode = msg[0] - '0';
+                monitor_client_setup_compressor(g_compressor_mode, g_compressor_release);
                 break;
-            }
             case sys_serial_event_type_compressor_release:
+                g_compressor_release = atof(msg);
+                monitor_client_setup_compressor(g_compressor_mode, g_compressor_release);
                 break;
             case sys_serial_event_type_noisegate_channel:
+                g_noisegate_channel = msg[0] - '0';
                 break;
             case sys_serial_event_type_noisegate_decay:
+                g_noisegate_decay = atof(msg);
                 break;
             case sys_serial_event_type_noisegate_threshold:
+                g_noisegate_threshold = atof(msg);
                 break;
-            case sys_serial_event_type_pedalboard_gain: {
-                const float value = atof(msg);
-                monitor_client_setup_volume(value);
+            case sys_serial_event_type_pedalboard_gain:
+                monitor_client_setup_volume(atof(msg));
                 break;
-            }
             default:
                 break;
             }
