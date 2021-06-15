@@ -77,8 +77,7 @@
 bool monitor_client_init(void);
 void monitor_client_stop(void);
 
-bool monitor_client_disable_compressor(void);
-bool monitor_client_setup_compressor(float threshold, float knee, float ratio, float attack, float release, float makeup);
+bool monitor_client_setup_compressor(int mode, float release);
 bool monitor_client_setup_volume(float volume);
 
 
