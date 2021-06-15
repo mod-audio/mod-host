@@ -718,8 +718,8 @@ static pthread_mutex_t g_hmi_mutex;
 static int g_compressor_mode = 0;
 static float g_compressor_release = 100.0f;
 static int g_noisegate_channel = 0;
+static int g_noisegate_decay = 10;
 static float g_noisegate_threshold = -60.0f;
-static float g_noisegate_decay = 10.0f;
 static gate_t g_noisegate;
 
 static const char* const g_bypass_port_symbol = BYPASS_PORT_SYMBOL;
@@ -1470,10 +1470,16 @@ static void* HMIClientThread(void* arg)
                 g_noisegate_channel = msg[0] - '0';
                 break;
             case sys_serial_event_type_noisegate_decay:
-                g_noisegate_decay = atof(msg);
+                g_noisegate_decay = atoi(msg);
+                gate_update(&g_noisegate, g_sample_rate, 10, 1,
+                            g_noisegate_decay, 1,
+                            g_noisegate_threshold, g_noisegate_threshold - 20.0f);
                 break;
             case sys_serial_event_type_noisegate_threshold:
                 g_noisegate_threshold = atof(msg);
+                gate_update(&g_noisegate, g_sample_rate, 10, 1,
+                            g_noisegate_decay, 1,
+                            g_noisegate_threshold, g_noisegate_threshold - 20.0f);
                 break;
             case sys_serial_event_type_pedalboard_gain:
                 monitor_client_setup_volume(atof(msg));
