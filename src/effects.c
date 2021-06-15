@@ -80,6 +80,7 @@
 
 #include "mod-host.h"
 #include "sys_host.h"
+#include "dsp/gate_core.h"
 
 #ifndef HAVE_NEW_LILV
 #define lilv_free(x) free(x)
@@ -641,6 +642,10 @@ static jack_client_t *g_jack_global_client;
 static jack_nframes_t g_sample_rate, g_block_length, g_max_allowed_midi_delta;
 static const char **g_capture_ports, **g_playback_ports;
 static size_t g_midi_buffer_size;
+static jack_port_t *g_audio_in1_port;
+static jack_port_t *g_audio_in2_port;
+static jack_port_t *g_audio_out1_port;
+static jack_port_t *g_audio_out2_port;
 static jack_port_t *g_midi_in_port;
 static jack_position_t g_jack_pos;
 static bool g_jack_rolling;
@@ -715,6 +720,7 @@ static float g_compressor_release = 100.0f;
 static int g_noisegate_channel = 0;
 static float g_noisegate_threshold = -60.0f;
 static float g_noisegate_decay = 10.0f;
+static gate_t g_noisegate;
 
 static const char* const g_bypass_port_symbol = BYPASS_PORT_SYMBOL;
 static const char* const g_presets_port_symbol = PRESETS_PORT_SYMBOL;
@@ -741,7 +747,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg);
 static bool SetPortValue(port_t *port, float value, int effect_id, bool is_bypass);
 static float UpdateValueFromMidi(midi_cc_t* mcc, uint16_t mvalue, bool highres);
 static bool UpdateGlobalJackPosition(enum UpdatePositionFlag flag, bool do_post);
-static int ProcessMidi(jack_nframes_t nframes, void *arg);
+static int ProcessGlobalClient(jack_nframes_t nframes, void *arg);
 static void JackTimebase(jack_transport_state_t state, jack_nframes_t nframes,
                          jack_position_t* pos, int new_pos, void* arg);
 static void JackThreadInit(void *arg);
@@ -2267,7 +2273,7 @@ static bool UpdateGlobalJackPosition(enum UpdatePositionFlag flag, bool do_post)
     return true;
 }
 
-static int ProcessMidi(jack_nframes_t nframes, void *arg)
+static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
 {
     jack_midi_event_t event;
     uint8_t channel, controller;
@@ -2513,6 +2519,37 @@ static int ProcessMidi(jack_nframes_t nframes, void *arg)
         }
     }
 
+    // Handle audio
+    const float *const audio_in1_buf = (float*)jack_port_get_buffer(g_audio_in1_port, nframes);
+    const float *const audio_in2_buf = (float*)jack_port_get_buffer(g_audio_in2_port, nframes);
+    /* */ float *const audio_out1_buf = (float*)jack_port_get_buffer(g_audio_out1_port, nframes);
+    /* */ float *const audio_out2_buf = (float*)jack_port_get_buffer(g_audio_out2_port, nframes);
+
+    switch (g_noisegate_channel)
+    {
+    case 0: // no gate
+        memcpy(audio_out1_buf, audio_in1_buf, sizeof(float)*nframes);
+        memcpy(audio_out2_buf, audio_in2_buf, sizeof(float)*nframes);
+        break;
+    case 1: // left channel only
+        memcpy(audio_out2_buf, audio_in2_buf, sizeof(float)*nframes);
+        for (uint32_t i=0; i<nframes; ++i)
+            audio_out1_buf[i] = gate_run(&g_noisegate, audio_in1_buf[i]);
+        break;
+    case 2: // right channel only
+        memcpy(audio_out1_buf, audio_in1_buf, sizeof(float)*nframes);
+        for (uint32_t i=0; i<nframes; ++i)
+            audio_out2_buf[i] = gate_run(&g_noisegate, audio_in2_buf[i]);
+        break;
+    case 3: // left & right channels
+        for (uint32_t i=0; i<nframes; ++i)
+        {
+            audio_out1_buf[i] = gate_run(&g_noisegate, audio_in1_buf[i]);
+            audio_out2_buf[i] = gate_apply(&g_noisegate, audio_in2_buf[i]);
+        }
+        break;
+    }
+
     if (UpdateGlobalJackPosition(pos_flag, false))
         needs_post = true;
 
@@ -2547,7 +2584,7 @@ static void JackTimebase(jack_transport_state_t state, jack_nframes_t nframes,
     // volatile and meant to be set from anywhere.
 
     // g_transport_bpm is only set on lines 1352
-    // (UpdateValueFromMIDI), 1427 (ProcessMidi), 2016 (CCDataUpdate)
+    // (UpdateValueFromMIDI), 1427 (ProcessGlobalClient), 2016 (CCDataUpdate)
     // and 4451 (effects_transport).
 
     // Update the extended position information.
@@ -3486,6 +3523,19 @@ int effects_init(void* client)
         return ERR_JACK_PORT_REGISTER;
     }
 
+    g_audio_in1_port = jack_port_register(g_jack_global_client, "in1", JACK_DEFAULT_AUDIO_TYPE, JackPortIsInput, 0);
+    g_audio_in2_port = jack_port_register(g_jack_global_client, "in2", JACK_DEFAULT_AUDIO_TYPE, JackPortIsInput, 0);
+    g_audio_out1_port = jack_port_register(g_jack_global_client, "out1", JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput, 0);
+    g_audio_out2_port = jack_port_register(g_jack_global_client, "out2", JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput, 0);
+
+    if (! (g_audio_in1_port && g_audio_in2_port && g_audio_out1_port && g_audio_out2_port))
+    {
+        fprintf(stderr, "can't register global jack audio ports\n");
+        if (client == NULL)
+            jack_client_close(g_jack_global_client);
+        return ERR_JACK_PORT_REGISTER;
+    }
+
     if (! monitor_client_init())
     {
         return ERR_JACK_CLIENT_CREATION;
@@ -3634,7 +3684,7 @@ int effects_init(void* client)
     /* Set jack callbacks */
     jack_set_thread_init_callback(g_jack_global_client, JackThreadInit, NULL);
     jack_set_timebase_callback(g_jack_global_client, 1, JackTimebase, NULL);
-    jack_set_process_callback(g_jack_global_client, ProcessMidi, NULL);
+    jack_set_process_callback(g_jack_global_client, ProcessGlobalClient, NULL);
     jack_set_buffer_size_callback(g_jack_global_client, BufferSize, NULL);
     jack_set_port_registration_callback(g_jack_global_client, PortRegistration, NULL);
 
@@ -3817,6 +3867,8 @@ int effects_init(void* client)
         fprintf(stderr, "sys_host HMI setup failed\n");
     }
 
+    gate_init(&g_noisegate);
+
     g_license.handle = NULL;
     g_license.license = GetLicenseFile;
     g_license.free = FreePluginString;
@@ -3890,6 +3942,19 @@ int effects_init(void* client)
     else
     {
         ConnectToAllHardwareMIDIPorts();
+    }
+
+    /* Connect to capture ports if avaiable */
+    if (g_capture_ports != NULL && g_capture_ports[0] != NULL)
+    {
+        const char *ourportname = jack_port_name(g_audio_in1_port);
+        jack_connect(g_jack_global_client, g_capture_ports[0], ourportname);
+
+        if (g_capture_ports[1] != NULL)
+        {
+            ourportname = jack_port_name(g_audio_in2_port);
+            jack_connect(g_jack_global_client, g_capture_ports[1], ourportname);
+        }
     }
 
     g_processing_enabled = true;
