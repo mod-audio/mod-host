@@ -120,7 +120,7 @@ bool doubles_differ_enough(double a, double b)
 static inline
 int clamp(int value, int min, int max)
 {
-    return value < min ? min : (value > max ? max : max);
+    return value < min ? min : (value > max ? max : value);
 }
 
 
