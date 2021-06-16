@@ -168,12 +168,22 @@ bool sys_serial_read(sys_serial_shm_data_channel* data,
 
     switch (firstbyte)
     {
+#ifdef SERVER_MODE
     case sys_serial_event_type_led:
     case sys_serial_event_type_name:
     case sys_serial_event_type_value:
     case sys_serial_event_type_unit:
     case sys_serial_event_type_widget_indicator:
         break;
+#else
+    case sys_serial_event_type_compressor_mode:
+    case sys_serial_event_type_compressor_release:
+    case sys_serial_event_type_noisegate_channel:
+    case sys_serial_event_type_noisegate_decay:
+    case sys_serial_event_type_noisegate_threshold:
+    case sys_serial_event_type_pedalboard_gain:
+        break;
+#endif
     default:
         fprintf(stderr, "sys_serial_read: failed, invalid byte %02x\n", firstbyte);
         data->tail = tail + 1;
