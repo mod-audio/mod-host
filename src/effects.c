@@ -1456,6 +1456,11 @@ static void* HMIClientThread(void* arg)
             if (! sys_serial_read(data, &etype, msg))
                 continue;
 
+            if (g_verbose_debug) {
+                printf("DEBUG: HMIClientThread received event %x (%c)\n", etype, etype-0x80);
+                fflush(stdout);
+            }
+
             switch (etype)
             {
             case sys_serial_event_type_compressor_mode:
