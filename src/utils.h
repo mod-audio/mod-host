@@ -116,6 +116,13 @@ bool doubles_differ_enough(double a, double b)
     return fabs(a - b) >= DBL_EPSILON;
 }
 
+// clamp a value to be within a certain range
+static inline
+int clamp(int value, int min, int max)
+{
+    return value < min ? min : (value > max ? max : max);
+}
+
 
 /*
 ************************************************************************************************************************
