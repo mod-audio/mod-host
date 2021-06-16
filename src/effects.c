@@ -1464,30 +1464,30 @@ static void* HMIClientThread(void* arg)
             switch (etype)
             {
             case sys_serial_event_type_compressor_mode:
-                g_compressor_mode = msg[0] - '0';
+                g_compressor_mode = clamp(msg[0] - '0', 0, 4);
                 monitor_client_setup_compressor(g_compressor_mode, g_compressor_release);
                 break;
             case sys_serial_event_type_compressor_release:
-                g_compressor_release = atoi(msg);
+                g_compressor_release = clamp(atoi(msg), 50, 1000);
                 monitor_client_setup_compressor(g_compressor_mode, g_compressor_release);
                 break;
             case sys_serial_event_type_noisegate_channel:
-                g_noisegate_channel = msg[0] - '0';
+                g_noisegate_channel = clamp(msg[0] - '0', 0, 3);
                 break;
             case sys_serial_event_type_noisegate_decay:
-                g_noisegate_decay = atoi(msg);
+                g_noisegate_decay = clamp(atoi(msg), 1, 200);
                 gate_update(&g_noisegate, g_sample_rate, 10, 1,
                             g_noisegate_decay, 1,
                             g_noisegate_threshold, g_noisegate_threshold - 20);
                 break;
             case sys_serial_event_type_noisegate_threshold:
-                g_noisegate_threshold = atoi(msg);
+                g_noisegate_threshold = clamp(atoi(msg), -80, -10);
                 gate_update(&g_noisegate, g_sample_rate, 10, 1,
                             g_noisegate_decay, 1,
                             g_noisegate_threshold, g_noisegate_threshold - 20);
                 break;
             case sys_serial_event_type_pedalboard_gain:
-                monitor_client_setup_volume(atoi(msg));
+                monitor_client_setup_volume(clamp(atoi(msg), -30, 30));
                 break;
             default:
                 break;
