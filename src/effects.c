@@ -218,7 +218,9 @@ enum {
     URID_MAP_FEATURE,
     URID_UNMAP_FEATURE,
     OPTIONS_FEATURE,
+#ifdef __MOD_DEVICES__
     HMI_WC_FEATURE,
+#endif
     LICENSE_FEATURE,
     BUF_SIZE_POWER2_FEATURE,
     BUF_SIZE_FIXED_FEATURE,
@@ -369,7 +371,9 @@ typedef struct EFFECT_T {
     worker_t worker;
     const MOD_License_Interface *license_iface;
     const LV2_State_Interface *state_iface;
+#ifdef __MOD_DEVICES__
     const LV2_HMI_PluginNotification *hmi_notif;
+#endif
 
     jack_ringbuffer_t *events_in_buffer;
     jack_ringbuffer_t *events_out_buffer;
@@ -673,7 +677,9 @@ static char *g_lv2_scratch_dir;
 static Symap* g_symap;
 static lilv_nodes_t g_lilv_nodes;
 static urids_t g_urids;
+#ifdef __MOD_DEVICES__
 static LV2_HMI_WidgetControl g_hmi_wc;
+#endif
 static MOD_License_Feature g_license;
 static LV2_Atom_Forge g_lv2_atom_forge;
 static LV2_Log_Log g_lv2_log;
@@ -688,7 +694,9 @@ static LV2_Feature g_buf_size_features[3] = {
     { LV2_BUF_SIZE__fixedBlockLength, NULL },
     { LV2_BUF_SIZE__boundedBlockLength, NULL }
 };
+#ifdef __MOD_DEVICES__
 static LV2_Feature g_hmi_wc_feature = { LV2_HMI__WidgetControl, &g_hmi_wc };
+#endif
 static LV2_Feature g_license_feature = { MOD_LICENSE__feature, &g_license };
 static LV2_Feature g_lv2_log_feature = { LV2_LOG__log, &g_lv2_log };
 static LV2_Feature g_options_feature = { LV2_OPTIONS__options, &g_options };
@@ -708,11 +716,13 @@ static hylia_t* g_hylia_instance;
 static hylia_time_info_t g_hylia_timeinfo;
 #endif
 
+#ifdef __MOD_DEVICES__
 /* HMI integration */
 static int g_hmi_shmfd;
 static sys_serial_shm_data* g_hmi_data;
 static pthread_t g_hmi_client_thread;
 static pthread_mutex_t g_hmi_mutex;
+#endif
 
 /* system plugins */
 static int g_compressor_mode = 0;
@@ -742,7 +752,9 @@ static void FreeWheelMode(int starting, void* data);
 static void PortRegistration(jack_port_id_t port_id, int reg, void* data);
 static void RunPostPonedEvents(int ignored_effect_id);
 static void* PostPonedEventsThread(void* arg);
+#ifdef __MOD_DEVICES__
 static void* HMIClientThread(void* arg);
+#endif
 static int ProcessPlugin(jack_nframes_t nframes, void *arg);
 static bool SetPortValue(port_t *port, float value, int effect_id, bool is_bypass);
 static float UpdateValueFromMidi(midi_cc_t* mcc, uint16_t mvalue, bool highres);
@@ -762,6 +774,7 @@ static int LoadPresets(effect_t *effect);
 static void FreeFeatures(effect_t *effect);
 static void FreePluginString(void* handle, char *str);
 static void ConnectToAllHardwareMIDIPorts(void);
+#ifdef __MOD_DEVICES__
 static void HMIWidgetsSetLed(LV2_HMI_WidgetControl_Handle handle,
                              LV2_HMI_Addressing addressing,
                              LV2_HMI_LED_Colour led_color,
@@ -779,6 +792,7 @@ static void HMIWidgetsSetUnit(LV2_HMI_WidgetControl_Handle handle,
 static void HMIWidgetsSetIndicator(LV2_HMI_WidgetControl_Handle handle,
                                    LV2_HMI_Addressing addressing,
                                    float indicator_poss);
+#endif
 static char *GetLicenseFile(MOD_License_Handle handle, const char *license_uri);
 static int LogPrintf(LV2_Log_Handle handle, LV2_URID type, const char *fmt, ...);
 static int LogVPrintf(LV2_Log_Handle handle, LV2_URID type, const char *fmt, va_list ap);
@@ -1436,6 +1450,7 @@ static void* PostPonedEventsThread(void* arg)
     UNUSED_PARAM(arg);
 }
 
+#ifdef __MOD_DEVICES__
 static void* HMIClientThread(void* arg)
 {
     sys_serial_shm_data_channel* const data = (sys_serial_shm_data_channel*)arg;
@@ -1497,6 +1512,7 @@ static void* HMIClientThread(void* arg)
 
     return NULL;
 }
+#endif
 
 static int ProcessPlugin(jack_nframes_t nframes, void *arg)
 {
@@ -2764,7 +2780,9 @@ static void GetFeatures(effect_t *effect)
     features[URID_MAP_FEATURE]          = &g_urid_map_feature;
     features[URID_UNMAP_FEATURE]        = &g_urid_unmap_feature;
     features[OPTIONS_FEATURE]           = &g_options_feature;
+#ifdef __MOD_DEVICES__
     features[HMI_WC_FEATURE]            = &g_hmi_wc_feature;
+#endif
     features[LICENSE_FEATURE]           = &g_license_feature;
     features[BUF_SIZE_POWER2_FEATURE]   = &g_buf_size_features[0];
     features[BUF_SIZE_FIXED_FEATURE]    = &g_buf_size_features[1];
@@ -2987,6 +3005,7 @@ static void ConnectToAllHardwareMIDIPorts(void)
     }
 }
 
+#ifdef __MOD_DEVICES__
 static void HMIWidgetsSetLed(LV2_HMI_WidgetControl_Handle handle,
                              LV2_HMI_Addressing addressing,
                              LV2_HMI_LED_Colour led_color,
@@ -3154,6 +3173,7 @@ static void HMIWidgetsSetIndicator(LV2_HMI_WidgetControl_Handle handle,
     sys_serial_write(&g_hmi_data->server, sys_serial_event_type_widget_indicator, msg);
     pthread_mutex_unlock(&g_hmi_mutex);
 }
+#endif
 
 static char* GetLicenseFile(MOD_License_Handle handle, const char *license_uri)
 {
@@ -3575,7 +3595,9 @@ int effects_init(void* client)
     pthread_mutex_init(&g_rtsafe_mutex, &mutex_atts);
     pthread_mutex_init(&g_raw_midi_port_mutex, &mutex_atts);
     pthread_mutex_init(&g_midi_learning_mutex, &mutex_atts);
+#ifdef __MOD_DEVICES__
     pthread_mutex_init(&g_hmi_mutex, &mutex_atts);
+#endif
 
     sem_init(&g_postevents_semaphore, 0, 0);
 
@@ -3859,6 +3881,7 @@ int effects_init(void* client)
     g_options[5].type = 0;
     g_options[5].value = NULL;
 
+#ifdef __MOD_DEVICES__
     g_hmi_wc.size           = sizeof(g_hmi_wc);
     g_hmi_wc.set_led        = HMIWidgetsSetLed;
     g_hmi_wc.set_label      = HMIWidgetsSetLabel;
@@ -3877,6 +3900,7 @@ int effects_init(void* client)
         g_hmi_wc.handle = NULL;
         fprintf(stderr, "sys_host HMI setup failed\n");
     }
+#endif
 
     gate_init(&g_noisegate);
 
@@ -3986,6 +4010,7 @@ int effects_finish(int close_client)
 
     effects_remove(REMOVE_ALL);
 
+#ifdef __MOD_DEVICES__
     if (g_hmi_data != NULL)
     {
         sys_serial_shm_data* hmi_data = g_hmi_data;
@@ -3996,6 +4021,7 @@ int effects_finish(int close_client)
 
         sys_serial_close(g_hmi_shmfd, hmi_data);
     }
+#endif
 
 #ifdef HAVE_CONTROLCHAIN
     if (g_cc_client)
@@ -4057,7 +4083,9 @@ int effects_finish(int close_client)
     pthread_mutex_destroy(&g_rtsafe_mutex);
     pthread_mutex_destroy(&g_raw_midi_port_mutex);
     pthread_mutex_destroy(&g_midi_learning_mutex);
+#ifdef __MOD_DEVICES__
     pthread_mutex_destroy(&g_hmi_mutex);
+#endif
 
     effect_t *effect = &g_effects[GLOBAL_EFFECT_ID];
     if (effect->ports)
@@ -4227,12 +4255,14 @@ int effects_add(const char *uri, int instance)
         }
     }
 
+#ifdef __MOD_DEVICES__
     if (lilv_plugin_has_extension_data(effect->lilv_plugin, g_lilv_nodes.hmi_interface))
     {
         effect->hmi_notif =
             (const LV2_HMI_PluginNotification*) lilv_instance_get_extension_data(effect->lilv_instance,
                                                                                  LV2_HMI__PluginNotification);
     }
+#endif
 
     /* Create the URI for identify the ports */
     ports_count = lilv_plugin_get_num_ports(plugin);
@@ -5047,7 +5077,9 @@ int effects_preset_save(int effect_id, const char *dir, const char *file_name, c
         &g_urid_map_feature,
         &g_urid_unmap_feature,
         &g_options_feature,
+#ifdef __MOD_DEVICES__
         &g_hmi_wc_feature,
+#endif
         &g_license_feature,
         &g_buf_size_features[0],
         &g_buf_size_features[1],
@@ -6914,6 +6946,7 @@ int effects_cv_unmap(int effect_id, const char *control_symbol)
 int effects_hmi_map(int effect_id, const char *control_symbol, int hw_id,
                     int caps, int flags, const char *label, float minimum, float maximum, int steps)
 {
+#ifdef __MOD_DEVICES__
     if (!InstanceExist(effect_id))
         return ERR_INSTANCE_NON_EXISTS;
     if (effect_id >= MAX_PLUGIN_INSTANCES)
@@ -6953,10 +6986,24 @@ int effects_hmi_map(int effect_id, const char *control_symbol, int hw_id,
     effect->hmi_notif->addressed(handle, port->index, (LV2_HMI_Addressing)addressing, &info);
 
     return SUCCESS;
+#else
+    return ERR_HMI_UNAVAILABLE;
+
+    UNUSED_PARAM(effect_id);
+    UNUSED_PARAM(control_symbol);
+    UNUSED_PARAM(hw_id);
+    UNUSED_PARAM(caps);
+    UNUSED_PARAM(flags);
+    UNUSED_PARAM(label);
+    UNUSED_PARAM(minimum);
+    UNUSED_PARAM(maximum);
+    UNUSED_PARAM(steps);
+#endif
 }
 
 int effects_hmi_unmap(int effect_id, const char *control_symbol)
 {
+#ifdef __MOD_DEVICES__
     if (!InstanceExist(effect_id))
         return ERR_INSTANCE_NON_EXISTS;
 
@@ -6985,6 +7032,12 @@ int effects_hmi_unmap(int effect_id, const char *control_symbol)
     effect->hmi_notif->unaddressed(handle, port->index);
 
     return SUCCESS;
+#else
+    return ERR_HMI_UNAVAILABLE;
+
+    UNUSED_PARAM(effect_id);
+    UNUSED_PARAM(control_symbol);
+#endif
 }
 
 float effects_jack_cpu_load(void)
@@ -7084,7 +7137,9 @@ int effects_state_load(const char *dir)
         &g_urid_map_feature,
         &g_urid_unmap_feature,
         &g_options_feature,
+#ifdef __MOD_DEVICES__
         &g_hmi_wc_feature,
+#endif
         &g_license_feature,
         &g_buf_size_features[0],
         &g_buf_size_features[1],
@@ -7171,7 +7226,9 @@ int effects_state_save(const char *dir)
         &g_urid_map_feature,
         &g_urid_unmap_feature,
         &g_options_feature,
+#ifdef __MOD_DEVICES__
         &g_hmi_wc_feature,
+#endif
         &g_license_feature,
         &g_buf_size_features[0],
         &g_buf_size_features[1],
