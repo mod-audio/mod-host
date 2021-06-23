@@ -415,15 +415,17 @@ static void cv_unmap_cb(proto_t *proto)
 static void hmi_map_cb(proto_t *proto)
 {
     int resp;
-    resp = effects_hmi_map(atoi(proto->list[1]),  // effect_id
-                                proto->list[2],   // control_symbol
-                           atoi(proto->list[3]),  // hw_id
-                           atoi(proto->list[4]),  // caps
-                           atof(proto->list[5]),  // flags
-                                proto->list[6],   // label
-                           atof(proto->list[7]),  // min
-                           atof(proto->list[8]),  // max
-                           atoi(proto->list[9])); // steps
+    resp = effects_hmi_map(atoi(proto->list[ 1]),  // effect_id
+                                proto->list[ 2],   // control_symbol
+                           atoi(proto->list[ 3]),  // hw_id
+                           atoi(proto->list[ 4]),  // page
+                           atoi(proto->list[ 5]),  // subpage
+                           atoi(proto->list[ 6]),  // caps
+                           atof(proto->list[ 7]),  // flags
+                                proto->list[ 8],   // label
+                           atof(proto->list[ 9]),  // min
+                           atof(proto->list[10]),  // max
+                           atoi(proto->list[11])); // steps
     protocol_response_int(resp, proto);
 }
 

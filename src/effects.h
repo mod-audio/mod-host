@@ -65,6 +65,7 @@ enum {
     ERR_ASSIGNMENT_INVALID_OP = -302,
     ERR_ASSIGNMENT_LIST_FULL = -303,
     ERR_ASSIGNMENT_FAILED = -304,
+    ERR_ASSIGNMENT_UNUSED = -305,
 
     ERR_CONTROL_CHAIN_UNAVAILABLE = -401,
     ERR_ABLETON_LINK_UNAVAILABLE = -402,
@@ -93,6 +94,7 @@ typedef enum {
 #define MAX_INSTANCES           (MAX_PLUGIN_INSTANCES + MAX_TOOL_INSTANCES)
 #define MAX_MIDI_CC_ASSIGN      1024
 #define MAX_POSTPONED_EVENTS    8192
+#define MAX_HMI_ADDRESSINGS     128
 
 // used for local stack variables
 #define MAX_CHAR_BUF_SIZE       255
@@ -165,7 +167,7 @@ int effects_cc_unmap(int effect_id, const char *control_symbol);
 int effects_cv_map(int effect_id, const char *control_symbol, const char *source_port_name, float minimum, float maximum, const char* mode);
 int effects_cv_unmap(int effect_id, const char *control_symbol);
 
-int effects_hmi_map(int effect_id, const char *control_symbol, int hw_id,
+int effects_hmi_map(int effect_id, const char *control_symbol, int hw_id, int page, int subpage,
                     int caps, int flags, const char *label, float minimum, float maximum, int steps);
 int effects_hmi_unmap(int effect_id, const char *control_symbol);
 

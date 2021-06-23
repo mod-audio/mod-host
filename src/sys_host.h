@@ -152,8 +152,11 @@ void sys_serial_close(int shmfd, sys_serial_shm_data* data)
 
 // server, read must only be a result of a semaphore post action
 static inline
-bool sys_serial_read(sys_serial_shm_data_channel* data,
-                     sys_serial_event_type* etype,
+bool sys_serial_read(sys_serial_shm_data_channel* const data,
+                     sys_serial_event_type* const etype,
+#ifdef SERVER_MODE
+                     uint8_t* const page, uint8_t* const subpage,
+#endif
                      char msg[SYS_SERIAL_SHM_DATA_SIZE])
 {
     if (data->head == data->tail)
@@ -192,6 +195,16 @@ bool sys_serial_read(sys_serial_shm_data_channel* data,
 
     // keep reading until reaching null byte or head
     uint32_t i, nexttail = tail + 1;
+#ifdef SERVER_MODE
+    // page
+    if (nexttail == SYS_SERIAL_SHM_DATA_SIZE)
+        nexttail = 0;
+    *page = data->buffer[nexttail++];
+    // subpage
+    if (nexttail == SYS_SERIAL_SHM_DATA_SIZE)
+        nexttail = 0;
+    *subpage = data->buffer[nexttail++];
+#endif
     for (i=0; i < SYS_SERIAL_SHM_DATA_SIZE; ++i, ++nexttail)
     {
         if (nexttail == SYS_SERIAL_SHM_DATA_SIZE)
@@ -199,7 +212,7 @@ bool sys_serial_read(sys_serial_shm_data_channel* data,
 
         msg[i] = data->buffer[nexttail];
 
-        if (msg[i] == 0)
+        if (msg[i] == '\0')
             break;
 
         if (nexttail == head)
@@ -225,6 +238,9 @@ bool sys_serial_read(sys_serial_shm_data_channel* data,
 static inline
 bool sys_serial_write(sys_serial_shm_data_channel* const data,
                       const sys_serial_event_type etype,
+#ifndef SERVER_MODE
+                      const uint8_t page, const uint8_t subpage,
+#endif
                       const char* const msg)
 {
     uint32_t size = strlen(msg);
@@ -243,7 +259,12 @@ bool sys_serial_write(sys_serial_shm_data_channel* const data,
     // add space for etype and terminating null byte
     size += 2;
 
-    const uint32_t head = data->head;
+#ifndef SERVER_MODE
+    // add space for page and subpage
+    size += 2;
+#endif
+
+    /* */ uint32_t head = data->head;
     const uint32_t tail = data->tail;
     const uint32_t wrap = tail > head ? 0 : SYS_SERIAL_SHM_DATA_SIZE;
 
@@ -254,6 +275,16 @@ bool sys_serial_write(sys_serial_shm_data_channel* const data,
     }
 
     data->buffer[head] = etype;
+
+#ifndef SERVER_MODE
+    if (++head == SYS_SERIAL_SHM_DATA_SIZE)
+        head = 0;
+    data->buffer[head] = page;
+    if (++head == SYS_SERIAL_SHM_DATA_SIZE)
+        head = 0;
+    data->buffer[head] = subpage;
+    size -= 2;
+#endif
 
     uint32_t nexthead = head + size;
 

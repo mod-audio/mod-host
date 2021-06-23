@@ -258,6 +258,9 @@ enum UpdatePositionFlag {
 ************************************************************************************************************************
 */
 
+#ifdef __MOD_DEVICES__
+typedef struct HMI_ADDRESSING_T hmi_addressing_t;
+#endif
 typedef struct PORT_T port_t;
 
 typedef struct CV_SOURCE_T {
@@ -289,6 +292,9 @@ typedef struct PORT_T {
     LilvScalePoints* scale_points;
     cv_source_t* cv_source;
     pthread_mutex_t cv_source_mutex;
+#ifdef __MOD_DEVICES__
+    hmi_addressing_t* hmi_addressing;
+#endif
 } port_t;
 
 typedef struct PROPERTY_T {
@@ -509,6 +515,12 @@ typedef struct ASSIGNMENT_T {
     bool supports_set_value;
 } assignment_t;
 
+typedef struct HMI_ADDRESSING_T {
+    int actuator_id;
+    uint8_t page;
+    uint8_t subpage;
+} hmi_addressing_t;
+
 typedef struct POSTPONED_PARAMETER_EVENT_T {
     int effect_id;
     const char* symbol;
@@ -722,6 +734,7 @@ static int g_hmi_shmfd;
 static sys_serial_shm_data* g_hmi_data;
 static pthread_t g_hmi_client_thread;
 static pthread_mutex_t g_hmi_mutex;
+static hmi_addressing_t g_hmi_addressings[MAX_HMI_ADDRESSINGS];
 #endif
 
 /* system plugins */
@@ -3007,22 +3020,20 @@ static void ConnectToAllHardwareMIDIPorts(void)
 
 #ifdef __MOD_DEVICES__
 static void HMIWidgetsSetLed(LV2_HMI_WidgetControl_Handle handle,
-                             LV2_HMI_Addressing addressing,
+                             LV2_HMI_Addressing addressing_ptr,
                              LV2_HMI_LED_Colour led_color,
                              int on_blink_time,
                              int off_blink_time)
 {
-    if (handle == NULL || addressing == NULL || g_hmi_data == NULL) {
+    if (handle == NULL || addressing_ptr == NULL || g_hmi_data == NULL) {
         return;
     }
 
-    const int64_t addressing_check = (int64_t)addressing;
+    const hmi_addressing_t *addressing = (const hmi_addressing_t*)addressing_ptr;
 
-    if (addressing_check < 0x8000 || addressing_check > 0x9000) {
-        return;
-    }
-
-    const int assignment_id = addressing_check - 0x8000;
+    const int assignment_id = addressing->actuator_id;
+    const uint8_t page = addressing->page;
+    const uint8_t subpage = addressing->subpage;
 
     if (g_verbose_debug) {
         printf("DEBUG: HMISetLedColour %i: %i %i %i\n",
@@ -3045,28 +3056,26 @@ static void HMIWidgetsSetLed(LV2_HMI_WidgetControl_Handle handle,
     msg[sizeof(msg)-1] = '\0';
 
     pthread_mutex_lock(&g_hmi_mutex);
-    sys_serial_write(&g_hmi_data->server, sys_serial_event_type_led, msg);
+    sys_serial_write(&g_hmi_data->server, sys_serial_event_type_led, page, subpage, msg);
     pthread_mutex_unlock(&g_hmi_mutex);
 }
 
 static void HMIWidgetsSetLabel(LV2_HMI_WidgetControl_Handle handle,
-                               LV2_HMI_Addressing addressing,
+                               LV2_HMI_Addressing addressing_ptr,
                                const char* label)
 {
-    if (handle == NULL || addressing == NULL || g_hmi_data == NULL) {
+    if (handle == NULL || addressing_ptr == NULL || g_hmi_data == NULL) {
         return;
     }
 
-    const int64_t addressing_check = (int64_t)addressing;
+    const hmi_addressing_t *addressing = (const hmi_addressing_t*)addressing_ptr;
 
-    if (addressing_check < 0x8000 || addressing_check > 0x9000) {
-        return;
-    }
-
-    const int assignment_id = addressing_check - 0x8000;
+    const int assignment_id = addressing->actuator_id;
+    const uint8_t page = addressing->page;
+    const uint8_t subpage = addressing->subpage;
 
     if (g_verbose_debug) {
-        printf("DEBUG: HMISetLedColour %i: '%s'\n", assignment_id, label);
+        printf("DEBUG: HMIWidgetsSetLabel %i: '%s'\n", assignment_id, label);
         fflush(stdout);
     }
 
@@ -3075,28 +3084,26 @@ static void HMIWidgetsSetLabel(LV2_HMI_WidgetControl_Handle handle,
     msg[sizeof(msg)-1] = '\0';
 
     pthread_mutex_lock(&g_hmi_mutex);
-    sys_serial_write(&g_hmi_data->server, sys_serial_event_type_name, msg);
+    sys_serial_write(&g_hmi_data->server, sys_serial_event_type_name, page, subpage, msg);
     pthread_mutex_unlock(&g_hmi_mutex);
 }
 
 static void HMIWidgetsSetValue(LV2_HMI_WidgetControl_Handle handle,
-                               LV2_HMI_Addressing addressing,
+                               LV2_HMI_Addressing addressing_ptr,
                                const char* value)
 {
-    if (handle == NULL || addressing == NULL || g_hmi_data == NULL) {
+    if (handle == NULL || addressing_ptr == NULL || g_hmi_data == NULL) {
         return;
     }
 
-    const int64_t addressing_check = (int64_t)addressing;
+    const hmi_addressing_t *addressing = (const hmi_addressing_t*)addressing_ptr;
 
-    if (addressing_check < 0x8000 || addressing_check > 0x9000) {
-        return;
-    }
-
-    const int assignment_id = addressing_check - 0x8000;
+    const int assignment_id = addressing->actuator_id;
+    const uint8_t page = addressing->page;
+    const uint8_t subpage = addressing->subpage;
 
     if (g_verbose_debug) {
-        printf("DEBUG: HMISetLedColour %i: '%s'\n", assignment_id, value);
+        printf("DEBUG: HMIWidgetsSetValue %i: '%s'\n", assignment_id, value);
         fflush(stdout);
     }
 
@@ -3105,28 +3112,26 @@ static void HMIWidgetsSetValue(LV2_HMI_WidgetControl_Handle handle,
     msg[sizeof(msg)-1] = '\0';
 
     pthread_mutex_lock(&g_hmi_mutex);
-    sys_serial_write(&g_hmi_data->server, sys_serial_event_type_value, msg);
+    sys_serial_write(&g_hmi_data->server, sys_serial_event_type_value, page, subpage, msg);
     pthread_mutex_unlock(&g_hmi_mutex);
 }
 
 static void HMIWidgetsSetUnit(LV2_HMI_WidgetControl_Handle handle,
-                              LV2_HMI_Addressing addressing,
+                              LV2_HMI_Addressing addressing_ptr,
                               const char* unit)
 {
-    if (handle == NULL || addressing == NULL || g_hmi_data == NULL) {
+    if (handle == NULL || addressing_ptr == NULL || g_hmi_data == NULL) {
         return;
     }
 
-    const int64_t addressing_check = (int64_t)addressing;
+    const hmi_addressing_t *addressing = (const hmi_addressing_t*)addressing_ptr;
 
-    if (addressing_check < 0x8000 || addressing_check > 0x9000) {
-        return;
-    }
-
-    const int assignment_id = addressing_check - 0x8000;
+    const int assignment_id = addressing->actuator_id;
+    const uint8_t page = addressing->page;
+    const uint8_t subpage = addressing->subpage;
 
     if (g_verbose_debug) {
-        printf("DEBUG: HMISetLedColour %i: '%s'\n", assignment_id, unit);
+        printf("DEBUG: HMIWidgetsSetUnit %i: '%s'\n", assignment_id, unit);
         fflush(stdout);
     }
 
@@ -3135,25 +3140,23 @@ static void HMIWidgetsSetUnit(LV2_HMI_WidgetControl_Handle handle,
     msg[sizeof(msg)-1] = '\0';
 
     pthread_mutex_lock(&g_hmi_mutex);
-    sys_serial_write(&g_hmi_data->server, sys_serial_event_type_unit, msg);
+    sys_serial_write(&g_hmi_data->server, sys_serial_event_type_unit, page, subpage, msg);
     pthread_mutex_unlock(&g_hmi_mutex);
 }
 
 static void HMIWidgetsSetIndicator(LV2_HMI_WidgetControl_Handle handle,
-                                   LV2_HMI_Addressing addressing,
+                                   LV2_HMI_Addressing addressing_ptr,
                                    float indicator_poss)
 {
-    if (handle == NULL || addressing == NULL || g_hmi_data == NULL) {
+    if (handle == NULL || addressing_ptr == NULL || g_hmi_data == NULL) {
         return;
     }
 
-    const int64_t addressing_check = (int64_t)addressing;
+    const hmi_addressing_t *addressing = (const hmi_addressing_t*)addressing_ptr;
 
-    if (addressing_check < 0x8000 || addressing_check > 0x9000) {
-        return;
-    }
-
-    const int assignment_id = addressing_check - 0x8000;
+    const int assignment_id = addressing->actuator_id;
+    const uint8_t page = addressing->page;
+    const uint8_t subpage = addressing->subpage;
 
     if (g_verbose_debug) {
         printf("DEBUG: HMIWidgetsSetIndicator %i: %f\n", assignment_id, indicator_poss);
@@ -3170,7 +3173,7 @@ static void HMIWidgetsSetIndicator(LV2_HMI_WidgetControl_Handle handle,
     msg[31] = '\0';
 
     pthread_mutex_lock(&g_hmi_mutex);
-    sys_serial_write(&g_hmi_data->server, sys_serial_event_type_widget_indicator, msg);
+    sys_serial_write(&g_hmi_data->server, sys_serial_event_type_widget_indicator, page, subpage, msg);
     pthread_mutex_unlock(&g_hmi_mutex);
 }
 #endif
@@ -3900,6 +3903,9 @@ int effects_init(void* client)
         g_hmi_wc.handle = NULL;
         fprintf(stderr, "sys_host HMI setup failed\n");
     }
+
+    for (int i = 0; i < MAX_HMI_ADDRESSINGS; i++)
+        g_hmi_addressings[i].actuator_id = -1;
 #endif
 
     gate_init(&g_noisegate);
@@ -5151,8 +5157,7 @@ int effects_preset_show(const char *uri, char **state_str)
 
 int effects_remove(int effect_id)
 {
-    uint32_t i;
-    int j, start, end;
+    int start, end;
     effect_t *effect;
     char state_filename[g_lv2_scratch_dir != NULL ? PATH_MAX : 1];
 
@@ -5169,14 +5174,14 @@ int effects_remove(int effect_id)
         /* Disconnect the system connections */
         if (g_capture_ports != NULL)
         {
-            for (i = 0; g_capture_ports[i]; i++)
+            for (int i = 0; g_capture_ports[i]; i++)
             {
                 const char **capture_connections =
                     jack_port_get_connections(jack_port_by_name(g_jack_global_client, g_capture_ports[i]));
 
                 if (capture_connections)
                 {
-                    for (j = 0; capture_connections[j]; j++)
+                    for (int j = 0; capture_connections[j]; j++)
                     {
                         if (strstr(capture_connections[j], "system"))
                             jack_disconnect(g_jack_global_client, g_capture_ports[i], capture_connections[j]);
@@ -5196,7 +5201,7 @@ int effects_remove(int effect_id)
         end = start + 1;
     }
 
-    for (j = start; j < end; j++)
+    for (int j = start; j < end; j++)
     {
         if (InstanceExist(j))
         {
@@ -5209,7 +5214,7 @@ int effects_remove(int effect_id)
 
             if (effect->event_ports)
             {
-                for (i = 0; i < effect->event_ports_count; i++)
+                for (uint32_t i = 0; i < effect->event_ports_count; i++)
                 {
                     lv2_evbuf_free(effect->event_ports[i]->evbuf);
                 }
@@ -5217,7 +5222,7 @@ int effects_remove(int effect_id)
 
             if (effect->ports)
             {
-                for (i = 0; i < effect->ports_count; i++)
+                for (uint32_t i = 0; i < effect->ports_count; i++)
                 {
                     if (effect->ports[i])
                     {
@@ -5232,7 +5237,7 @@ int effects_remove(int effect_id)
 
             if (effect->properties)
             {
-                for (i = 0; i < effect->properties_count; i++)
+                for (uint32_t i = 0; i < effect->properties_count; i++)
                 {
                     if (effect->properties[i])
                     {
@@ -5262,7 +5267,7 @@ int effects_remove(int effect_id)
 
             if (effect->presets)
             {
-                for (i = 0; i < effect->presets_count; i++)
+                for (uint32_t i = 0; i < effect->presets_count; i++)
                 {
                     lilv_free(effect->presets[i]->uri);
                     free(effect->presets[i]);
@@ -5295,7 +5300,7 @@ int effects_remove(int effect_id)
         g_midi_learning = NULL;
         pthread_mutex_unlock(&g_midi_learning_mutex);
 
-        for (j = 0; j < MAX_MIDI_CC_ASSIGN; j++)
+        for (int j = 0; j < MAX_MIDI_CC_ASSIGN; j++)
         {
             g_midi_cc_list[j].channel = -1;
             g_midi_cc_list[j].controller = 0;
@@ -5395,7 +5400,7 @@ int effects_remove(int effect_id)
         }
         pthread_mutex_unlock(&g_midi_learning_mutex);
 
-        for (j = 0; j < MAX_MIDI_CC_ASSIGN; j++)
+        for (int j = 0; j < MAX_MIDI_CC_ASSIGN; j++)
         {
             if (g_midi_cc_list[j].effect_id == ASSIGNMENT_NULL)
                 break;
@@ -5441,6 +5446,11 @@ int effects_remove(int effect_id)
                 assignment->assignment_pair_id = -1;
             }
         }
+#endif
+
+#ifdef __MOD_DEVICES__
+        for (int i = 0; i < MAX_HMI_ADDRESSINGS; i++)
+            g_hmi_addressings[i].actuator_id = -1;
 #endif
 
         // flush events for all effects except this one
@@ -6943,16 +6953,24 @@ int effects_cv_unmap(int effect_id, const char *control_symbol)
     return SUCCESS;
 }
 
-int effects_hmi_map(int effect_id, const char *control_symbol, int hw_id,
+int effects_hmi_map(int effect_id, const char *control_symbol, int hw_id, int page, int subpage,
                     int caps, int flags, const char *label, float minimum, float maximum, int steps)
 {
 #ifdef __MOD_DEVICES__
     if (!InstanceExist(effect_id))
         return ERR_INSTANCE_NON_EXISTS;
     if (effect_id >= MAX_PLUGIN_INSTANCES)
-        return ERR_INVALID_OPERATION;
+        return ERR_ASSIGNMENT_INVALID_OP;
+    if (page < 0 || page > 0xff)
+        return ERR_ASSIGNMENT_INVALID_OP;
+    if (subpage < 0 || subpage > 0xff)
+        return ERR_ASSIGNMENT_INVALID_OP;
 
     effect_t *effect = &(g_effects[effect_id]);
+
+    if (effect->hmi_notif == NULL)
+        return ERR_ASSIGNMENT_UNUSED;
+
     port_t *port = NULL;
 
     // special handling for bypass, mapped to lv2:enabled designation
@@ -6970,12 +6988,30 @@ int effects_hmi_map(int effect_id, const char *control_symbol, int hw_id,
     if (port == NULL)
         return ERR_LV2_INVALID_PARAM_SYMBOL;
 
-    if (effect->hmi_notif == NULL)
-        return ERR_INVALID_OPERATION;
+    // find unused hmi addressing
+    hmi_addressing_t *addressing;
 
-    LV2_Handle handle = lilv_instance_get_handle(effect->lilv_instance);
-    int64_t addressing = (0x8000 + hw_id);
-    LV2_HMI_AddressingInfo info = {
+    for (int i = 0; i < MAX_HMI_ADDRESSINGS;)
+    {
+        addressing = &g_hmi_addressings[i];
+
+        if (addressing->actuator_id != -1)
+        {
+            if (++i == MAX_HMI_ADDRESSINGS)
+                addressing = NULL;
+            continue;
+        }
+
+        addressing->actuator_id = hw_id;
+        addressing->page = page;
+        addressing->subpage = subpage;
+        break;
+    }
+
+    if (addressing == NULL)
+        return ERR_ASSIGNMENT_LIST_FULL;
+
+    const LV2_HMI_AddressingInfo info = {
         .caps = (LV2_HMI_AddressingCapabilities)caps,
         .flags = (LV2_HMI_AddressingFlags)flags,
         .label = label,
@@ -6983,7 +7019,9 @@ int effects_hmi_map(int effect_id, const char *control_symbol, int hw_id,
         .max = maximum,
         .steps = steps,
     };
-    effect->hmi_notif->addressed(handle, port->index, (LV2_HMI_Addressing)addressing, &info);
+    port->hmi_addressing = addressing;
+    effect->hmi_notif->addressed(lilv_instance_get_handle(effect->lilv_instance),
+                                 port->index, (LV2_HMI_Addressing)addressing, &info);
 
     return SUCCESS;
 #else
@@ -6992,6 +7030,8 @@ int effects_hmi_map(int effect_id, const char *control_symbol, int hw_id,
     UNUSED_PARAM(effect_id);
     UNUSED_PARAM(control_symbol);
     UNUSED_PARAM(hw_id);
+    UNUSED_PARAM(page);
+    UNUSED_PARAM(subpage);
     UNUSED_PARAM(caps);
     UNUSED_PARAM(flags);
     UNUSED_PARAM(label);
@@ -7008,6 +7048,10 @@ int effects_hmi_unmap(int effect_id, const char *control_symbol)
         return ERR_INSTANCE_NON_EXISTS;
 
     effect_t *effect = &(g_effects[effect_id]);
+
+    if (effect->hmi_notif == NULL)
+        return ERR_INVALID_OPERATION;
+
     port_t *port = NULL;
 
     // special handling for bypass, mapped to lv2:enabled designation
@@ -7025,11 +7069,13 @@ int effects_hmi_unmap(int effect_id, const char *control_symbol)
     if (port == NULL)
         return ERR_LV2_INVALID_PARAM_SYMBOL;
 
-    if (effect->hmi_notif == NULL)
-        return ERR_INVALID_OPERATION;
+    effect->hmi_notif->unaddressed(lilv_instance_get_handle(effect->lilv_instance), port->index);
 
-    LV2_Handle handle = lilv_instance_get_handle(effect->lilv_instance);
-    effect->hmi_notif->unaddressed(handle, port->index);
+    if (port->hmi_addressing != NULL)
+    {
+        port->hmi_addressing->actuator_id = -1;
+        port->hmi_addressing = NULL;
+    }
 
     return SUCCESS;
 #else
@@ -7080,6 +7126,8 @@ void effects_bundle_add(const char* bpath)
 
     // refresh plugins
     g_plugins = lilv_world_get_all_plugins(g_lv2_data);
+#else
+    UNUSED_PARAM(bpath);
 #endif
 }
 
@@ -7116,8 +7164,12 @@ void effects_bundle_remove(const char* bpath)
 
     // refresh plugins
     g_plugins = lilv_world_get_all_plugins(g_lv2_data);
+#else
+    UNUSED_PARAM(bpath);
 #endif
 }
+
+#undef OS_SEP
 
 int effects_state_load(const char *dir)
 {
