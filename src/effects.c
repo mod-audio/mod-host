@@ -7009,6 +7009,11 @@ int effects_hmi_map(int effect_id, const char *control_symbol, int hw_id, int pa
     if (port == NULL)
         return ERR_LV2_INVALID_PARAM_SYMBOL;
 
+    // check if already addressed
+    if (port->hmi_addressing != NULL)
+        return port->hmi_addressing->actuator_id == hw_id ? ERR_ASSIGNMENT_ALREADY_EXISTS
+                                                          : ERR_ASSIGNMENT_FAILED;
+
     // find unused hmi addressing
     hmi_addressing_t *addressing;
 
