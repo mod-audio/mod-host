@@ -789,6 +789,7 @@ static int LoadPresets(effect_t *effect);
 static void FreeFeatures(effect_t *effect);
 static void FreePluginString(void* handle, char *str);
 static void ConnectToAllHardwareMIDIPorts(void);
+static void ConnectToMIDIThroughPorts(void);
 #ifdef __MOD_DEVICES__
 static void HMIWidgetsSetLed(LV2_HMI_WidgetControl_Handle handle,
                              LV2_HMI_Addressing addressing,
@@ -3022,6 +3023,41 @@ static void ConnectToAllHardwareMIDIPorts(void)
     }
 }
 
+static void ConnectToMIDIThroughPorts(void)
+{
+    if (g_jack_global_client == NULL)
+        return;
+
+    const char** const midihwports = jack_get_ports(g_jack_global_client, "system:midi_capture_",
+                                                    JACK_DEFAULT_MIDI_TYPE,
+                                                    JackPortIsTerminal|JackPortIsPhysical|JackPortIsOutput);
+    if (midihwports != NULL)
+    {
+        char  aliases[2][320];
+        char* aliasesptr[2] = {
+            aliases[0],
+            aliases[1]
+        };
+
+        const char *ourportname = jack_port_name(g_midi_in_port);
+
+        for (int i=0; midihwports[i] != NULL; ++i)
+        {
+            jack_port_t* const port = jack_port_by_name(g_jack_global_client, midihwports[i]);
+
+            if (port == NULL)
+                continue;
+            if (jack_port_get_aliases(port, aliasesptr) <= 0)
+                continue;
+            if (strncmp(aliases[0], "alsa_pcm:Midi-Through/", 22))
+                continue;
+            jack_connect(g_jack_global_client, midihwports[i], ourportname);
+        }
+
+        jack_free(midihwports);
+    }
+}
+
 #ifdef __MOD_DEVICES__
 static void HMIWidgetsSetLed(LV2_HMI_WidgetControl_Handle handle,
                              LV2_HMI_Addressing addressing_ptr,
@@ -3984,6 +4020,7 @@ int effects_init(void* client)
     {
         const char *ourportname = jack_port_name(g_midi_in_port);
         jack_connect(g_jack_global_client, "mod-midi-merger:out", ourportname);
+        ConnectToMIDIThroughPorts();
     }
     /* Else connect to all good hw ports (system, ttymidi and nooice) */
     else
@@ -7494,10 +7531,13 @@ int effects_aggregated_midi_enable(int enable)
                                           JackUseExactName|JackLoadName, NULL, "mod-midi-broadcaster") == 0)
                 return ERR_JACK_CLIENT_ACTIVATION;
 
-        // step 4. Connect to midi-merger */
+        // step 4. Connect to midi-merger
         jack_connect(g_jack_global_client, "mod-midi-merger:out", ourportname);
 
-        // step 5. Connect all raw-midi ports too */
+        // step 5. Connect to midi through ports
+        ConnectToMIDIThroughPorts();
+
+        // step 6. Connect all raw-midi ports
         {
             struct list_head *it;
             pthread_mutex_lock(&g_raw_midi_port_mutex);
