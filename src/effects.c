@@ -5226,6 +5226,27 @@ int effects_remove(int effect_id)
                 {
                     if (effect->ports[i])
                     {
+#ifdef __MOD_DEVICES__
+                        if (effect->ports[i]->hmi_addressing != NULL)
+                        {
+                            if (g_hmi_data != NULL)
+                            {
+                                char msg[24];
+                                snprintf(msg, sizeof(msg), "%i", effect->ports[i]->hmi_addressing->actuator_id);
+                                msg[sizeof(msg)-1] = '\0';
+
+                                pthread_mutex_lock(&g_hmi_mutex);
+                                sys_serial_write(&g_hmi_data->server,
+                                                 sys_serial_event_type_unassign,
+                                                 effect->ports[i]->hmi_addressing->page,
+                                                 effect->ports[i]->hmi_addressing->subpage, msg);
+                                pthread_mutex_unlock(&g_hmi_mutex);
+                            }
+
+                            effect->ports[i]->hmi_addressing->actuator_id = -1;
+                        }
+#endif
+
                         // TODO destroy port mutexes
                         free(effect->ports[i]->buffer);
                         lilv_scale_points_free(effect->ports[i]->scale_points);
@@ -7073,6 +7094,20 @@ int effects_hmi_unmap(int effect_id, const char *control_symbol)
 
     if (port->hmi_addressing != NULL)
     {
+        if (g_hmi_data != NULL)
+        {
+            char msg[24];
+            snprintf(msg, sizeof(msg), "%i", port->hmi_addressing->actuator_id);
+            msg[sizeof(msg)-1] = '\0';
+
+            pthread_mutex_lock(&g_hmi_mutex);
+            sys_serial_write(&g_hmi_data->server,
+                             sys_serial_event_type_unassign,
+                             port->hmi_addressing->page,
+                             port->hmi_addressing->subpage, msg);
+            pthread_mutex_unlock(&g_hmi_mutex);
+        }
+
         port->hmi_addressing->actuator_id = -1;
         port->hmi_addressing = NULL;
     }
