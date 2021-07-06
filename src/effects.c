@@ -2122,6 +2122,8 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
 
 static bool SetPortValue(port_t *port, float value, int effect_id, bool is_bypass)
 {
+    bool update_transport = false;
+
     if (is_bypass)
     {
         effect_t *effect = &g_effects[effect_id];
@@ -2133,10 +2135,12 @@ static bool SetPortValue(port_t *port, float value, int effect_id, bool is_bypas
         if (!strcmp(port->symbol, g_bpb_port_symbol))
         {
             g_transport_bpb = value;
+            update_transport = true;
         }
         else if (!strcmp(port->symbol, g_bpm_port_symbol))
         {
             g_transport_bpm = value;
+            update_transport = true;
         }
         else if (!strcmp(port->symbol, g_rolling_port_symbol))
         {
@@ -2150,6 +2154,7 @@ static bool SetPortValue(port_t *port, float value, int effect_id, bool is_bypas
                 jack_transport_locate(g_jack_global_client, 0);
             }
             g_transport_reset = true;
+            update_transport = true;
         }
     }
 
@@ -2169,6 +2174,9 @@ static bool SetPortValue(port_t *port, float value, int effect_id, bool is_bypas
     pthread_mutex_lock(&g_rtsafe_mutex);
     list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
     pthread_mutex_unlock(&g_rtsafe_mutex);
+
+    if (update_transport)
+        return UpdateGlobalJackPosition(UPDATE_POSITION_FORCED, false);
 
     return true;
 }
