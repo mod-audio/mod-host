@@ -4040,12 +4040,21 @@ int effects_init(void* client)
     /* Connect to capture ports if avaiable */
     if (g_capture_ports != NULL && g_capture_ports[0] != NULL)
     {
-        const char *ourportname = jack_port_name(g_audio_in1_port);
+        const char *ourportname;
+#ifndef _MOD_DEVICE_DWARF
+        ourportname = jack_port_name(g_audio_in1_port);
+#else
+        ourportname = jack_port_name(g_audio_in2_port);
+#endif
         jack_connect(g_jack_global_client, g_capture_ports[0], ourportname);
 
         if (g_capture_ports[1] != NULL)
         {
+#ifndef _MOD_DEVICE_DWARF
             ourportname = jack_port_name(g_audio_in2_port);
+#else
+            ourportname = jack_port_name(g_audio_in1_port);
+#endif
             jack_connect(g_jack_global_client, g_capture_ports[1], ourportname);
         }
     }
