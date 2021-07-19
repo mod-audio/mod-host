@@ -3620,7 +3620,7 @@ int effects_init(void* client)
     }
 #endif
 
-    if (! monitor_client_init())
+    if (client != NULL && ! monitor_client_init())
     {
         return ERR_JACK_CLIENT_CREATION;
     }
@@ -3942,16 +3942,19 @@ int effects_init(void* client)
     g_hmi_wc.set_unit       = HMIWidgetsSetUnit;
     g_hmi_wc.set_indicator  = HMIWidgetsSetIndicator;
 
-    // HMI integration setup
-    if (sys_serial_open(&g_hmi_shmfd, &g_hmi_data))
+    if (client != NULL)
     {
-        g_hmi_wc.handle = g_hmi_data;
-        pthread_create(&g_hmi_client_thread, NULL, HMIClientThread, &g_hmi_data->client);
-    }
-    else
-    {
-        g_hmi_wc.handle = NULL;
-        fprintf(stderr, "sys_host HMI setup failed\n");
+        // HMI integration setup
+        if (sys_serial_open(&g_hmi_shmfd, &g_hmi_data))
+        {
+            g_hmi_wc.handle = g_hmi_data;
+            pthread_create(&g_hmi_client_thread, NULL, HMIClientThread, &g_hmi_data->client);
+        }
+        else
+        {
+            g_hmi_wc.handle = NULL;
+            fprintf(stderr, "sys_host HMI setup failed\n");
+        }
     }
 
     for (int i = 0; i < MAX_HMI_ADDRESSINGS; i++)
@@ -4074,7 +4077,8 @@ int effects_finish(int close_client)
     sem_post(&g_postevents_semaphore);
     pthread_join(g_postevents_thread, NULL);
 
-    monitor_client_stop();
+    if (close_client)
+        monitor_client_stop();
 
     effects_remove(REMOVE_ALL);
 
