@@ -293,17 +293,19 @@ int jack_initialize(jack_client_t* client, const char* load_init)
 
     const char* const ourclientname = jack_get_client_name(client);
 
+#ifndef _MOD_DEVICE_DWARF
     snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:out_1", ourclientname);
     jack_connect(client, ourportname, "system:playback_1");
 
-    if (jack_port_by_name(client, "mod-peakmeter:in_3") != NULL)
-        jack_connect(client, ourportname, "mod-peakmeter:in_3");
-
     snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:out_2", ourclientname);
     jack_connect(client, ourportname, "system:playback_2");
+#else
+    snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:out_1", ourclientname);
+    jack_connect(client, ourportname, "system:playback_2");
 
-    if (jack_port_by_name(client, "mod-peakmeter:in_4") != NULL)
-        jack_connect(client, ourportname, "mod-peakmeter:in_4");
+    snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:out_2", ourclientname);
+    jack_connect(client, ourportname, "system:playback_1");
+#endif
 
     return 0;
 }
