@@ -123,6 +123,13 @@ int clamp(int value, int min, int max)
     return value < min ? min : (value > max ? max : value);
 }
 
+// clamp a value to be within a certain range (float version)
+static inline
+float clampf(float value, float min, float max)
+{
+    return value < min ? min : (value > max ? max : value);
+}
+
 
 /*
 ************************************************************************************************************************

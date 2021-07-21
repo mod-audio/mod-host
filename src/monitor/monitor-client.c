@@ -71,6 +71,7 @@ typedef struct MONITOR_CLIENT_T {
     bool in2_connected;
     bool apply_compressor;
     bool apply_volume;
+    bool muted;
     sf_compressor_state_st compressor;
     float volume;
 } monitor_client_t;
@@ -121,6 +122,10 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
     float *const bufIn2  = jack_port_get_buffer(mon->ports[PORT_IN2], nframes);
     float *const bufOut1 = jack_port_get_buffer(mon->ports[PORT_OUT1], nframes);
     float *const bufOut2 = jack_port_get_buffer(mon->ports[PORT_OUT2], nframes);
+
+    if (mon->muted)
+        goto muted;
+
     const float volume = mon->volume;
     const bool apply_compressor = mon->apply_compressor;
     const bool apply_volume = mon->apply_volume;
@@ -197,6 +202,7 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
         return 0;
     }
 
+muted:
     // nothing connected in input1 or input2
     memset(bufOut1, 0, sizeof(float)*nframes);
     memset(bufOut2, 0, sizeof(float)*nframes);
@@ -252,6 +258,7 @@ int jack_initialize(jack_client_t* client, const char* load_init)
 
     mon->apply_compressor = false;
     mon->apply_volume = false;
+    mon->muted = false;
     mon->volume = 1.0f;
 
     compressor_init(&mon->compressor, jack_get_sample_rate(client));
@@ -393,9 +400,11 @@ bool monitor_client_setup_volume(float volume)
     // local variables for calculations before changing the real struct values
     const float final_volume = cmop_db2lin(volume);
     const bool apply_volume = floats_differ_enough(final_volume, 1.0f);
+    const bool muted = !floats_differ_enough(volume, -80.0f);
 
     mon->volume = final_volume;
     mon->apply_volume = apply_volume;
+    mon->muted = muted;
     return true;
 }
 
