@@ -659,10 +659,12 @@ static jack_nframes_t g_sample_rate, g_block_length, g_max_allowed_midi_delta;
 static const char **g_capture_ports, **g_playback_ports;
 static size_t g_midi_buffer_size;
 #ifdef __MOD_DEVICES__
+#ifdef _MOD_DEVICE_DWARF
 static jack_port_t *g_audio_in1_port;
 static jack_port_t *g_audio_in2_port;
 static jack_port_t *g_audio_out1_port;
 static jack_port_t *g_audio_out2_port;
+#endif
 #endif
 static jack_port_t *g_midi_in_port;
 static jack_position_t g_jack_pos;
@@ -738,13 +740,15 @@ static pthread_t g_hmi_client_thread;
 static pthread_mutex_t g_hmi_mutex;
 static hmi_addressing_t g_hmi_addressings[MAX_HMI_ADDRESSINGS];
 
-/* system plugins */
+/* internal processing */
 static int g_compressor_mode = 0;
 static int g_compressor_release = 100;
+#ifdef _MOD_DEVICE_DWARF
 static int g_noisegate_channel = 0;
 static int g_noisegate_decay = 10;
 static int g_noisegate_threshold = -60;
 static gate_t g_noisegate;
+#endif
 #endif
 
 static const char* const g_bypass_port_symbol = BYPASS_PORT_SYMBOL;
@@ -1502,6 +1506,7 @@ static void* HMIClientThread(void* arg)
                 g_compressor_release = clampf(atof(msg), 50.0f, 500.0f);
                 monitor_client_setup_compressor(g_compressor_mode, g_compressor_release);
                 break;
+#ifdef _MOD_DEVICE_DWARF
             case sys_serial_event_type_noisegate_channel:
                 g_noisegate_channel = clamp(msg[0] - '0', 0, 3);
                 break;
@@ -1517,6 +1522,7 @@ static void* HMIClientThread(void* arg)
                             g_noisegate_decay, 1,
                             g_noisegate_threshold, g_noisegate_threshold - 20);
                 break;
+#endif
             case sys_serial_event_type_pedalboard_gain:
                 monitor_client_setup_volume(clampf(atof(msg), -80.0f, 20.0f));
                 break;
@@ -2571,6 +2577,7 @@ static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
     }
 
 #ifdef __MOD_DEVICES__
+#ifdef _MOD_DEVICE_DWARF
     // Handle audio
     const float *const audio_in1_buf = (float*)jack_port_get_buffer(g_audio_in1_port, nframes);
     const float *const audio_in2_buf = (float*)jack_port_get_buffer(g_audio_in2_port, nframes);
@@ -2601,6 +2608,7 @@ static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
         }
         break;
     }
+#endif
 #endif
 
     if (UpdateGlobalJackPosition(pos_flag, false))
@@ -3606,6 +3614,7 @@ int effects_init(void* client)
     }
 
 #ifdef __MOD_DEVICES__
+#ifdef _MOD_DEVICE_DWARF
     g_audio_in1_port = jack_port_register(g_jack_global_client, "in1", JACK_DEFAULT_AUDIO_TYPE, JackPortIsInput, 0);
     g_audio_in2_port = jack_port_register(g_jack_global_client, "in2", JACK_DEFAULT_AUDIO_TYPE, JackPortIsInput, 0);
     g_audio_out1_port = jack_port_register(g_jack_global_client, "out1", JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput, 0);
@@ -3618,6 +3627,7 @@ int effects_init(void* client)
             jack_client_close(g_jack_global_client);
         return ERR_JACK_PORT_REGISTER;
     }
+#endif
 #endif
 
     if (client != NULL && ! monitor_client_init())
@@ -3960,7 +3970,9 @@ int effects_init(void* client)
     for (int i = 0; i < MAX_HMI_ADDRESSINGS; i++)
         g_hmi_addressings[i].actuator_id = -1;
 
+#ifdef _MOD_DEVICE_DWARF
     gate_init(&g_noisegate);
+#endif
 #endif
 
     g_license.handle = NULL;
@@ -4040,6 +4052,7 @@ int effects_init(void* client)
     }
 
 #ifdef __MOD_DEVICES__
+#ifdef _MOD_DEVICE_DWARF
     /* Connect to capture ports if avaiable */
     if (g_capture_ports != NULL && g_capture_ports[0] != NULL)
     {
@@ -4061,6 +4074,7 @@ int effects_init(void* client)
             jack_connect(g_jack_global_client, g_capture_ports[1], ourportname);
         }
     }
+#endif
 #endif
 
     g_processing_enabled = true;
