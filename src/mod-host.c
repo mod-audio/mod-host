@@ -488,7 +488,9 @@ static void save_cb(proto_t *proto)
     {
         /* removes the save command from history */
         entry = remove_history(history_length-1);
+#ifndef __APPLE__
         free_history_entry(entry);
+#endif
 
         /* saves the history in the file */
         write_history(proto->list[1]);

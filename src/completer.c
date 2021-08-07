@@ -502,7 +502,9 @@ static char **completion(const char *text, int start, int end)
         }
     }
 
+#ifndef __APPLE__
     if (!g_list) rl_bind_key('\t', rl_abort);
+#endif
 
     matches = rl_completion_matches(text, generator);
 

@@ -20,7 +20,6 @@ MANDIR = $(SHAREDIR)/man/man1/
 CFLAGS += -O3 -Wall -Wextra -c -std=gnu99 -fPIC -D_GNU_SOURCE -pthread
 CFLAGS += -Wno-deprecated-declarations
 CFLAGS += -Werror=implicit-function-declaration -Werror=return-type
-LDFLAGS += -Wl,--no-undefined
 
 # debug mode compiler and linker flags
 ifeq ($(DEBUG), 1)
@@ -47,7 +46,7 @@ CFLAGS += -Winit-self -Wjump-misses-init -Wmissing-prototypes -Wnested-externs -
 endif
 
 # libraries
-LIBS = $(shell pkg-config --libs jack lilv-0) -lpthread -lrt -lm
+LIBS = $(shell pkg-config --libs jack lilv-0) -lpthread -lm
 
 # include paths
 INCS = $(shell pkg-config --cflags jack lilv-0)
@@ -92,6 +91,12 @@ endif
 ifeq ($(shell pkg-config --exists hylia && echo true), true)
 LIBS += $(shell pkg-config --libs hylia)
 INCS += $(shell pkg-config --cflags hylia) -DHAVE_HYLIA
+endif
+
+# macOS incompatible flags
+ifeq (,$(findstring apple,$(shell $(CC) -dumpmachine)))
+LDFLAGS += -Wl,--no-undefined
+LIBS += -lrt
 endif
 
 # source and object files

@@ -79,8 +79,10 @@
 #endif
 
 #include "mod-host.h"
+#ifdef __MOD_DEVICES__
 #include "sys_host.h"
 #include "dsp/gate_core.h"
+#endif
 
 #ifndef HAVE_NEW_LILV
 #define lilv_free(x) free(x)
@@ -842,6 +844,19 @@ static uint32_t GetHyliaOutputLatency(void);
 ************************************************************************************************************************
 */
 
+
+#ifdef __APPLE__
+// FIXME missing on macOS
+static char* strchrnul(const char *s, int c)
+{
+    char *r = strchr(s, c);
+
+    if (r != NULL)
+        *r = '\0';
+
+    return r;
+}
+#endif
 
 static void InstanceDelete(int effect_id)
 {
@@ -3630,7 +3645,7 @@ int effects_init(void* client)
 #endif
 #endif
 
-    if (client != NULL && ! monitor_client_init())
+    if (g_jack_global_client != NULL && strcmp(jack_get_client_name(g_jack_global_client), "mod-host") == 0 && ! monitor_client_init())
     {
         return ERR_JACK_CLIENT_CREATION;
     }

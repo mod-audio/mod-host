@@ -3,7 +3,10 @@
 
 #define MOD_SEMAPHORE_USE_FUTEX
 
-#ifdef MOD_SEMAPHORE_USE_FUTEX
+#ifdef __APPLE__
+#include <mach/mach.h>
+#include <mach/semaphore.h>
+#elif defined(MOD_SEMAPHORE_USE_FUTEX)
 #include <linux/futex.h>
 #include <sys/time.h>
 #include <errno.h>
@@ -13,7 +16,53 @@
 #include <semaphore.h>
 #endif
 
-#ifdef MOD_SEMAPHORE_USE_FUTEX
+#ifdef __APPLE__
+/* --------------------------------------------------------------------- */
+// macOS semaphore
+
+typedef struct _sem_t {
+    semaphore_t s;
+} sem_t;
+
+static inline
+int sem_init(sem_t* sem, int pshared, int value)
+{
+    // unsupported
+    if (pshared)
+        return 1;
+
+    return semaphore_create(mach_task_self(), &sem->s, SYNC_POLICY_FIFO, value) != KERN_SUCCESS;
+}
+
+static inline
+void sem_destroy(sem_t* sem)
+{
+    semaphore_destroy(mach_task_self(), sem->s);
+}
+
+static inline
+void sem_post(sem_t* sem)
+{
+    semaphore_signal(sem->s);
+}
+
+static inline
+int sem_wait(sem_t* sem)
+{
+    return semaphore_wait(sem->s) != KERN_SUCCESS;
+}
+
+// 0 = ok
+static inline
+int sem_timedwait_secs(sem_t* sem, int secs)
+{
+    struct mach_timespec time;
+    time.tv_sec = secs;
+    time.tv_nsec = 0;
+
+    return semaphore_timedwait(sem->s, time) != KERN_SUCCESS;
+}
+#elif defined(MOD_SEMAPHORE_USE_FUTEX)
 /* --------------------------------------------------------------------- */
 // Linux futex
 
