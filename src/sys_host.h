@@ -253,7 +253,7 @@ bool sys_serial_write(sys_serial_shm_data_channel* const data,
 {
     uint32_t size = strlen(msg);
 
-#ifndef SERVER_MODE
+#ifdef SERVER_MODE
     if (size == 0)
     {
         fprintf(stderr, "sys_serial_write: failed, empty message\n");
