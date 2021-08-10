@@ -1493,6 +1493,10 @@ static void* HMIClientThread(void* arg)
     sys_serial_event_type etype;
     char msg[SYS_SERIAL_SHM_DATA_SIZE];
 
+    pthread_mutex_lock(&g_hmi_mutex);
+    sys_serial_write(&g_hmi_data->server, sys_serial_event_type_req_io_values, 0, 0, "");
+    pthread_mutex_unlock(&g_hmi_mutex);
+
     while (g_hmi_data != NULL && &g_hmi_data->client == data)
     {
         if (sem_timedwait_secs(&data->sem, 1) != 0)

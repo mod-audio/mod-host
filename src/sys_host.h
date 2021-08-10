@@ -24,6 +24,7 @@
 typedef enum {
     sys_serial_event_type_null = 0,
     // client -> server
+    sys_serial_event_type_req_io_values = 0x80 + 'q',
     sys_serial_event_type_unassign = 0x80 + 'x',
     sys_serial_event_type_led = 0x80 + 'l',
     sys_serial_event_type_name = 0x80 + 'n',
@@ -173,6 +174,7 @@ bool sys_serial_read(sys_serial_shm_data_channel* const data,
     switch (firstbyte)
     {
 #ifdef SERVER_MODE
+    case sys_serial_event_type_req_io_values:
     case sys_serial_event_type_unassign:
     case sys_serial_event_type_led:
     case sys_serial_event_type_name:
@@ -215,7 +217,11 @@ bool sys_serial_read(sys_serial_shm_data_channel* const data,
         msg[i] = data->buffer[nexttail];
 
         if (msg[i] == '\0')
+        {
+            if (++nexttail == SYS_SERIAL_SHM_DATA_SIZE)
+                nexttail = 0;
             break;
+        }
 
         if (nexttail == head)
         {
@@ -232,7 +238,7 @@ bool sys_serial_read(sys_serial_shm_data_channel* const data,
     }
 
     *etype = firstbyte;
-    data->tail = nexttail + 1;
+    data->tail = nexttail;
     return true;
 }
 
@@ -247,11 +253,13 @@ bool sys_serial_write(sys_serial_shm_data_channel* const data,
 {
     uint32_t size = strlen(msg);
 
+#ifndef SERVER_MODE
     if (size == 0)
     {
         fprintf(stderr, "sys_serial_write: failed, empty message\n");
         return false;
     }
+#endif
     if (size >= SYS_SERIAL_SHM_DATA_SIZE)
     {
         fprintf(stderr, "sys_serial_write: failed, message too big\n");
@@ -299,7 +307,7 @@ bool sys_serial_write(sys_serial_shm_data_channel* const data,
         if (firstpart != 0)
             memcpy(data->buffer + head + 1, msg, firstpart);
 
-        memcpy(data->buffer, msg + firstpart, nexthead - 1);
+        memcpy(data->buffer, msg + firstpart, nexthead);
     }
     else
     {
