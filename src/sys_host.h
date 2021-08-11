@@ -174,7 +174,7 @@ bool sys_serial_read(sys_serial_shm_data_channel* const data,
     switch (firstbyte)
     {
 #ifdef SERVER_MODE
-    case sys_serial_event_type_req_io_values:
+    case sys_serial_event_type_special_req:
     case sys_serial_event_type_unassign:
     case sys_serial_event_type_led:
     case sys_serial_event_type_name:
