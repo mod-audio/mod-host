@@ -1493,10 +1493,6 @@ static void* HMIClientThread(void* arg)
     sys_serial_event_type etype;
     char msg[SYS_SERIAL_SHM_DATA_SIZE];
 
-    pthread_mutex_lock(&g_hmi_mutex);
-    sys_serial_write(&g_hmi_data->server, sys_serial_event_type_req_io_values, 0, 0, "");
-    pthread_mutex_unlock(&g_hmi_mutex);
-
     while (g_hmi_data != NULL && &g_hmi_data->client == data)
     {
         if (sem_timedwait_secs(&data->sem, 1) != 0)
@@ -3977,6 +3973,7 @@ int effects_init(void* client)
         if (sys_serial_open(&g_hmi_shmfd, &g_hmi_data))
         {
             g_hmi_wc.handle = g_hmi_data;
+            sys_serial_write(&g_hmi_data->server, sys_serial_event_type_special_req, 0, 0, "restart");
             pthread_create(&g_hmi_client_thread, NULL, HMIClientThread, &g_hmi_data->client);
         }
         else
@@ -5466,6 +5463,18 @@ int effects_remove(int effect_id)
         }
 #endif
 
+#ifdef __MOD_DEVICES__
+        for (int i = 0; i < MAX_HMI_ADDRESSINGS; i++)
+            g_hmi_addressings[i].actuator_id = -1;
+
+        if (g_hmi_data != NULL)
+        {
+            pthread_mutex_lock(&g_hmi_mutex);
+            sys_serial_write(&g_hmi_data->server, sys_serial_event_type_special_req, 0, 0, "pages");
+            pthread_mutex_unlock(&g_hmi_mutex);
+        }
+#endif
+
         // reset all events
         struct list_head queue, *it, *it2;
 
@@ -5566,11 +5575,6 @@ int effects_remove(int effect_id)
                 assignment->assignment_pair_id = -1;
             }
         }
-#endif
-
-#ifdef __MOD_DEVICES__
-        for (int i = 0; i < MAX_HMI_ADDRESSINGS; i++)
-            g_hmi_addressings[i].actuator_id = -1;
 #endif
 
         // flush events for all effects except this one

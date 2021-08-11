@@ -24,7 +24,7 @@
 typedef enum {
     sys_serial_event_type_null = 0,
     // client -> server
-    sys_serial_event_type_req_io_values = 0x80 + 'q',
+    sys_serial_event_type_special_req = 0x80 + 's',
     sys_serial_event_type_unassign = 0x80 + 'x',
     sys_serial_event_type_led = 0x80 + 'l',
     sys_serial_event_type_name = 0x80 + 'n',
