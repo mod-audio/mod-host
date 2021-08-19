@@ -2599,6 +2599,9 @@ static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
     /* */ float *const audio_out1_buf = (float*)jack_port_get_buffer(g_audio_out1_port, nframes);
     /* */ float *const audio_out2_buf = (float*)jack_port_get_buffer(g_audio_out2_port, nframes);
 
+    for (uint32_t i=0; i<nframes; ++i)
+        gate_push_sample(&g_noisegate, audio_in1_buf[i], audio_in2_buf[i]);
+
     switch (g_noisegate_channel)
     {
     case 0: // no gate
