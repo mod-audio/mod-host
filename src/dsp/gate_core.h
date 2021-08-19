@@ -107,7 +107,24 @@ inline float gate_run(gate_t* const gate, const float input)
         break;
 
         case DECAY:
-            if (gate->_decayCounter > gate->_decayTime)
+            gate->_rmsValue = sqrt(gate->_keyValue * gate->_keyValue) * 0.707106781187;
+            if (gate->_rmsValue > gate->_upperThreshold)
+            {
+                if (gate->_attackCounter > gate->_attackTime)
+                {
+                    gate->_currentState = HOLD;
+                    gate->_holdCounter = 0;
+                    gate->_attackCounter = 0;
+                    gate->_gainFactor = 1.0f;
+                }
+                else
+                {
+                    gate->_attackCounter++;
+                    gate->_decayCounter++;
+                    gate->_gainFactor = powf((float)gate->_decayCounter - (float)gate->_decayTime, 2.0f) / powf((float)gate->_decayTime, 2.0f);
+                }
+            }
+            else if (gate->_decayCounter > gate->_decayTime)
             {
                 gate->_currentState = IDLE;
                 gate->_gainFactor = 0.0f;
