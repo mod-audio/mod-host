@@ -400,7 +400,7 @@ bool monitor_client_setup_volume(float volume)
     // local variables for calculations before changing the real struct values
     const float final_volume = cmop_db2lin(volume);
     const bool apply_volume = floats_differ_enough(final_volume, 1.0f);
-    const bool muted = !floats_differ_enough(volume, -80.0f);
+    const bool muted = !floats_differ_enough(volume, -30.0f);
 
     mon->volume = final_volume;
     mon->apply_volume = apply_volume;

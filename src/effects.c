@@ -1539,7 +1539,7 @@ static void* HMIClientThread(void* arg)
                 break;
 #endif
             case sys_serial_event_type_pedalboard_gain:
-                monitor_client_setup_volume(clampf(atof(msg), -80.0f, 20.0f));
+                monitor_client_setup_volume(clampf(atof(msg), -30.0f, 20.0f));
                 break;
             default:
                 break;
