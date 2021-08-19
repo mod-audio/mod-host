@@ -38,7 +38,8 @@ typedef struct GATE_T {
     uint32_t _attackCounter, _decayCounter, _holdCounter;
     uint32_t _currentState;
     uint32_t _tau;
-    ringbuffer_t window;
+    ringbuffer_t window1;
+    ringbuffer_t window2;
     gate_state_t state;
 } gate_t;
 
@@ -58,13 +59,12 @@ inline void gate_init(gate_t* const gate)
     gate->_currentState = IDLE;
     gate->_tau = 0;
     gate->_gainFactor = 0.0f;
-    ringbuffer_clear(&gate->window, GATE_RINGBUFFER_SIZE);
+    ringbuffer_clear(&gate->window1, GATE_RINGBUFFER_SIZE);
+    ringbuffer_clear(&gate->window2, GATE_RINGBUFFER_SIZE);
 }
 
 inline float gate_run(gate_t* const gate, const float input)
 {
-    gate->_keyValue = ringbuffer_push_and_calculate_power(&gate->window, input);
-
     switch (gate->_currentState)
     {
         case IDLE:
@@ -135,6 +135,14 @@ inline float gate_run(gate_t* const gate, const float input)
 inline float gate_apply(gate_t* const gate, const float input)
 {
     return input * gate->_gainFactor;
+}
+
+inline void gate_push_sample(gate_t* const gate, const float input1, const float input2)
+{
+    float key1 = ringbuffer_push_and_calculate_power(&gate->window1, input1);
+    float key2 = ringbuffer_push_and_calculate_power(&gate->window2, input2);
+
+    gate->_keyValue = (key1>key2) ? key1 : key2;
 }
 
 inline void gate_update(gate_t* const gate,
