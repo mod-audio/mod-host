@@ -26,6 +26,10 @@ static inline float lin2db(float lin){ // linear to dB
 	return 20.0f * log10f(lin);
 }
 
+static inline float cmop_db2lin(float db){ // dB to linear
+	return powf(10.0f, 0.05f * db);
+}
+
 // for more information on the knee curve, check out the compressor-curve.html demo + source code
 // included in this repo
 static inline float kneecurve(float x, float k, float linearthreshold){
@@ -59,14 +63,14 @@ static inline float clampf(float v, float min, float max){
 	return v < min ? min : (v > max ? max : v);
 }
 
+static float maxf(float v1, float v2){
+	return v1 > v2 ? v1 : v2;
+}
+
 static inline float fixf(float v, float def){
 	if (isnan(v) || isinf(v))
 		return def;
 	return v;
-}
-
-float cmop_db2lin(float db){ // dB to linear
-	return powf(10.0f, 0.05f * db);
 }
 
 void compressor_init(sf_compressor_state_st *state, int samplerate)
@@ -86,20 +90,20 @@ void compressor_set_params(sf_compressor_state_st *state, float threshold,
 	float knee, float ratio, float attack, float release, float makeup){
 
 	// useful values
-	float linearthreshold = cmop_db2lin(threshold);
-	float slope = 1.0f / ratio;
-	float attacksamples = state->samplerate * attack;
-	float attacksamplesinv = 1.0f / attacksamples;
-	float releasesamples = state->samplerate * release;
-	float satrelease = 0.0025f; // seconds
-	float satreleasesamplesinv = 1.0f / ((float)state->samplerate * satrelease);
+	const float linearthreshold = cmop_db2lin(threshold);
+	const float slope = 1.0f / ratio;
+	const float attacksamples = state->samplerate * attack;
+	const float attacksamplesinv = 1.0f / attacksamples;
+	const float releasesamples = state->samplerate * release;
+	const float satrelease = 0.0025f; // seconds
+	const float satreleasesamplesinv = 1.0f / (state->samplerate * satrelease);
 
 	// calculate knee curve parameters
 	float k = 5.0f; // initial guess
 	float kneedboffset = 0.0f;
 	float linearthresholdknee = 0.0f;
 	if (knee > 0.0f){ // if a knee exists, search for a good k value
-		float xknee = cmop_db2lin(threshold + knee);
+		const float xknee = cmop_db2lin(threshold + knee);
 		float mink = 0.1f;
 		float maxk = 10000.0f;
 		// search by comparing the knee slope at the current k guess, to the ideal slope
@@ -115,21 +119,21 @@ void compressor_set_params(sf_compressor_state_st *state, float threshold,
 	}
 
 	// calculate a master gain based on what sounds good
-	float fulllevel = compcurve(1.0f, k, slope, linearthreshold, linearthresholdknee,
+	const float fulllevel = compcurve(1.0f, k, slope, linearthreshold, linearthresholdknee,
 		threshold, knee, kneedboffset);
-	float mastergain = cmop_db2lin(makeup) * powf(1.0f / fulllevel, 0.6f);
+	const float mastergain = cmop_db2lin(makeup) * powf(1.0f / fulllevel, 0.6f);
 
 	// calculate the adaptive release curve parameters
 	// solve a,b,c,d in `y = a*x^3 + b*x^2 + c*x + d`
 	// interescting points (0, y1), (1, y2), (2, y3), (3, y4)
-	float y1 = releasesamples * 0.090f;
-	float y2 = releasesamples * 0.160f;
-	float y3 = releasesamples * 0.420f;
-	float y4 = releasesamples * 0.980f;
-	float a = (-y1 + 3.0f * y2 - 3.0f * y3 + y4) / 6.0f;
-	float b = y1 - 2.5f * y2 + 2.0f * y3 - 0.5f * y4;
-	float c = (-11.0f * y1 + 18.0f * y2 - 9.0f * y3 + 2.0f * y4) / 6.0f;
-	float d = y1;
+	const float y1 = releasesamples * 0.090f;
+	const float y2 = releasesamples * 0.160f;
+	const float y3 = releasesamples * 0.420f;
+	const float y4 = releasesamples * 0.980f;
+	const float a = (-y1 + 3.0f * y2 - 3.0f * y3 + y4) / 6.0f;
+	const float b = y1 - 2.5f * y2 + 2.0f * y3 - 0.5f * y4;
+	const float c = (-11.0f * y1 + 18.0f * y2 - 9.0f * y3 + 2.0f * y4) / 6.0f;
+	const float d = y1;
 
 	// save everything
 	state->threshold            = threshold;

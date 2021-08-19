@@ -24,13 +24,13 @@ void compressor_process_mono(sf_compressor_state_st *state, int size, float *inp
 	float compgain             = state->compgain;
 	float maxcompdiffdb        = state->maxcompdiffdb;
 
-	int chunks = size / SF_COMPRESSOR_SPU;
+	const int chunks = size / SF_COMPRESSOR_SPU;
 	int samplepos = 0;
 
 	for (int ch = 0; ch < chunks; ch++){
 		detectoravg = fixf(detectoravg, 1.0f);
-		float desiredgain = detectoravg;
-		float scaleddesiredgain = asinf(desiredgain) * state->ang90inv;
+		const float desiredgain = detectoravg;
+		const float scaleddesiredgain = asinf(desiredgain) * state->ang90inv;
 		float compdiffdb = lin2db(compgain / scaleddesiredgain);
 
 		// calculate envelope rate based on whether we're attacking or releasing
@@ -40,7 +40,8 @@ void compressor_process_mono(sf_compressor_state_st *state, int size, float *inp
 			maxcompdiffdb = -1; // reset for a future attack mode
 			// apply the adaptive release curve
 			// scale compdiffdb between 0-3
-			float releasesamples = adaptivereleasecurve(((clampf(compdiffdb, -12.0f, 0.0f) + 12.0f) * 0.25f), a, b, c, d);
+			const float x = (clampf(compdiffdb, -12.0f, 0.0f) + 12.0f) * 0.25f;
+			const float releasesamples = adaptivereleasecurve(x, a, b, c, d);
 			enveloperate = cmop_db2lin(5.0f / releasesamples);
 		}
 		else{ // compresorgain > scaleddesiredgain, so we're attacking
@@ -57,9 +58,9 @@ void compressor_process_mono(sf_compressor_state_st *state, int size, float *inp
 		for (int chi = 0; chi < SF_COMPRESSOR_SPU; chi++, samplepos++)
 		{
 #ifdef STEREO
-			float inputmax = fabs(input_L[samplepos]) > fabs(input_R[samplepos]) ? fabs(input_L[samplepos]) : fabs(input_R[samplepos]);
+			const float inputmax = maxf(fabs(input_L[samplepos]), fabs(input_R[samplepos]));
 #else
-			float inputmax = fabs(input[samplepos]);
+			const float inputmax = fabs(input[samplepos]);
 #endif
 
 			float attenuation;
@@ -96,11 +97,12 @@ void compressor_process_mono(sf_compressor_state_st *state, int size, float *inp
 			}
 
 			// apply the gain
+			const float gain = mastergain * sinf(state->ang90 * compgain);
 #ifdef STEREO
-			output_L[samplepos] = input_L[samplepos] * mastergain * sinf(state->ang90 * compgain);
-			output_R[samplepos] = input_R[samplepos] * mastergain * sinf(state->ang90 * compgain);
+			output_L[samplepos] = input_L[samplepos] * gain;
+			output_R[samplepos] = input_R[samplepos] * gain;
 #else
-			output[samplepos] = input[samplepos] * mastergain * sinf(state->ang90 * compgain);
+			output[samplepos] = input[samplepos] * gain;
 #endif
 		}
 	}

@@ -44,12 +44,10 @@ typedef struct {
 	float detectoravg;
 	float compgain;
 	float maxcompdiffdb;
-	int samplerate;
+	float samplerate;
 	float ang90;
 	float ang90inv;
 } sf_compressor_state_st;
-
-float cmop_db2lin(float db);
 
 void compressor_init(sf_compressor_state_st *state, int samplerate);
 
