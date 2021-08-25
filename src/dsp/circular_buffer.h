@@ -36,7 +36,7 @@ typedef struct RINGBUFFER_T {
     float power;
 } ringbuffer_t;
 
-inline void ringbuffer_clear(ringbuffer_t* const buffer, const uint32_t size)
+static inline void ringbuffer_clear(ringbuffer_t* const buffer, const uint32_t size)
 {
     buffer->S = size;
     buffer->m_size = 0;
@@ -46,7 +46,7 @@ inline void ringbuffer_clear(ringbuffer_t* const buffer, const uint32_t size)
     memset(buffer->m_buffer, 0, sizeof(buffer->m_buffer));
 }
 
-inline void ringbuffer_push(ringbuffer_t* const buffer)
+static inline void ringbuffer_push(ringbuffer_t* const buffer)
 {
     buffer->m_back = (buffer->m_back + 1) % buffer->S;
 
@@ -60,13 +60,13 @@ inline void ringbuffer_push(ringbuffer_t* const buffer)
     }
 }
 
-inline void ringbuffer_push_sample(ringbuffer_t* const buffer, const float x)
+static inline void ringbuffer_push_sample(ringbuffer_t* const buffer, const float x)
 {
     ringbuffer_push(buffer);
     buffer->m_buffer[buffer->m_back] = x;
 }
 
-inline void ringbuffer_pop(ringbuffer_t* const buffer)
+static inline void ringbuffer_pop(ringbuffer_t* const buffer)
 {
     if (buffer->m_size > 0)
     {
@@ -75,37 +75,37 @@ inline void ringbuffer_pop(ringbuffer_t* const buffer)
     }
 }
 
-float ringbuffer_front(ringbuffer_t* const buffer)
+static inline float ringbuffer_front(ringbuffer_t* const buffer)
 {
     return buffer->m_buffer[buffer->m_front];
 }
 
-float ringbuffer_back(ringbuffer_t* const buffer)
+static inline float ringbuffer_back(ringbuffer_t* const buffer)
 {
     return buffer->m_buffer[buffer->m_back];
 }
 
-float ringbuffer_get_val(ringbuffer_t* const buffer, uint32_t index)
+static inline float ringbuffer_get_val(ringbuffer_t* const buffer, uint32_t index)
 {
     return buffer->m_buffer[index];
 }
 
-int ringbuffer_empty(ringbuffer_t* const buffer)
+static inline int ringbuffer_empty(ringbuffer_t* const buffer)
 {
     return buffer->m_size == 0;
 }
 
-int ringbuffer_full(ringbuffer_t* const buffer)
+static inline int ringbuffer_full(ringbuffer_t* const buffer)
 {
     return buffer->m_size == buffer->S;
 }
 
-float* ringbuffer_get_first_pointer(ringbuffer_t* const buffer)
+static inline float* ringbuffer_get_first_pointer(ringbuffer_t* const buffer)
 {
     return &buffer->m_buffer[buffer->m_back];
 }
 
-inline void ringbuffer_back_erase(ringbuffer_t* const buffer, const uint32_t n)
+static inline void ringbuffer_back_erase(ringbuffer_t* const buffer, const uint32_t n)
 {
     if (n >= buffer->m_size)
     {
@@ -118,7 +118,7 @@ inline void ringbuffer_back_erase(ringbuffer_t* const buffer, const uint32_t n)
     }
 }
 
-inline void ringbuffer_front_erase(ringbuffer_t* const buffer, const uint32_t n)
+static inline void ringbuffer_front_erase(ringbuffer_t* const buffer, const uint32_t n)
 {
     if (n >= buffer->m_size)
     {
@@ -131,7 +131,7 @@ inline void ringbuffer_front_erase(ringbuffer_t* const buffer, const uint32_t n)
     }
 }
 
-inline int ringbuffer_peek_index(ringbuffer_t* const buffer)
+static inline int ringbuffer_peek_index(ringbuffer_t* const buffer)
 {
     uint32_t peek_index = 0;
     float peek_value = 0;
@@ -149,7 +149,7 @@ inline int ringbuffer_peek_index(ringbuffer_t* const buffer)
     return peek_index;
 }
 
-float ringbuffer_push_and_calculate_power(ringbuffer_t* const buffer, const float input)
+static inline float ringbuffer_push_and_calculate_power(ringbuffer_t* const buffer, const float input)
 {
     float pow = sqrt(input * input) * (1.0f / buffer->S);
 
