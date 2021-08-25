@@ -45,6 +45,7 @@ Dependencies:
     libreadline     >= 6.2
     lilv-utils      (optional)
     fftw            (optional)
+    hylia           (optional)
 
 
 Running
