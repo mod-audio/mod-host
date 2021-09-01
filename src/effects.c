@@ -5480,6 +5480,8 @@ int effects_remove(int effect_id)
             sys_serial_write(&g_hmi_data->server, sys_serial_event_type_special_req, 0, 0, "pages");
             pthread_mutex_unlock(&g_hmi_mutex);
         }
+
+        monitor_client_setup_volume(0.0f);
 #endif
 
         // reset all events
