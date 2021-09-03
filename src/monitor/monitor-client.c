@@ -73,7 +73,7 @@ typedef struct MONITOR_CLIENT_T {
     bool apply_volume;
     bool muted;
     sf_compressor_state_st compressor;
-    float volume;
+    float volume, smooth_volume;
 } monitor_client_t;
 
 /*
@@ -132,7 +132,13 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
         goto muted;
 
     const float volume = mon->volume;
+    float smooth_volume = mon->smooth_volume;
     const bool apply_compressor = mon->apply_compressor;
+
+    //if changing gains from 0dB
+    if (floats_differ_enough(volume, smooth_volume))
+        mon->apply_volume = true;
+
     const bool apply_volume = mon->apply_volume;
 
     if (mon->in1_connected && mon->in2_connected)
@@ -146,8 +152,10 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
             {
                 for (jack_nframes_t i=0; i<nframes; ++i)
                 {
-                    bufOut1[i] *= volume;
-                    bufOut2[i] *= volume;
+                    if (floats_differ_enough(volume, smooth_volume))
+                        smooth_volume = 0.5 * volume + 0.5 * smooth_volume;
+                    bufOut1[i] *= smooth_volume;
+                    bufOut2[i] *= smooth_volume;
                 }
             }
         }
@@ -157,8 +165,10 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
             {
                 for (jack_nframes_t i=0; i<nframes; ++i)
                 {
-                    bufOut1[i] = bufIn1[i] * volume;
-                    bufOut2[i] = bufIn2[i] * volume;
+                    if (floats_differ_enough(volume, smooth_volume))
+                        smooth_volume = 0.5 * volume + 0.5 * smooth_volume;
+                    bufOut1[i] = bufIn1[i] * smooth_volume;
+                    bufOut2[i] = bufIn2[i] * smooth_volume;
                 }
             }
             else
@@ -167,6 +177,8 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
                 memcpy(bufOut2, bufIn2, sizeof(float)*nframes);
             }
         }
+
+        mon->apply_volume = floats_differ_enough(smooth_volume, 1.0f);
         return 0;
     }
 
@@ -184,7 +196,11 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
             if (apply_volume)
             {
                 for (jack_nframes_t i=0; i<nframes; ++i)
-                    bufOutR[i] *= volume;
+                {
+                    if (floats_differ_enough(volume, smooth_volume))
+                        smooth_volume = 0.5 * volume + 0.5 * smooth_volume;
+                    bufOutR[i] *= smooth_volume;
+                }
             }
         }
         else
@@ -192,7 +208,11 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
             if (apply_volume)
             {
                 for (jack_nframes_t i=0; i<nframes; ++i)
-                    bufOutR[i] = bufInR[i] * volume;
+                {
+                    if (floats_differ_enough(volume, smooth_volume))
+                        smooth_volume = 0.5 * volume + 0.5 * smooth_volume;
+                    bufOutR[i] = bufInR[i] * smooth_volume;
+                }
             }
             else
             {
@@ -204,6 +224,8 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
             memcpy(bufOutC, bufInR, sizeof(float)*nframes);
         else
             memset(bufOutC, 0, sizeof(float)*nframes);
+
+        mon->apply_volume = floats_differ_enough(smooth_volume, 1.0f);
         return 0;
     }
 
