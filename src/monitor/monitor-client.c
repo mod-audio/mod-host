@@ -179,6 +179,7 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
         }
 
         mon->apply_volume = floats_differ_enough(smooth_volume, 1.0f);
+        mon->smooth_volume = smooth_volume;
         return 0;
     }
 
@@ -226,6 +227,7 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
             memset(bufOutC, 0, sizeof(float)*nframes);
 
         mon->apply_volume = floats_differ_enough(smooth_volume, 1.0f);
+        mon->smooth_volume = smooth_volume;
         return 0;
     }
 
