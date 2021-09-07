@@ -132,10 +132,9 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
         goto muted;
 
     const float volume = mon->volume;
-    float smooth_volume = mon->smooth_volume;
+    const float smooth_volume = mon->smooth_volume;
     const bool apply_compressor = mon->apply_compressor;
 
-    //if changing gains from 0dB
     if (floats_differ_enough(volume, smooth_volume))
         mon->apply_volume = true;
 

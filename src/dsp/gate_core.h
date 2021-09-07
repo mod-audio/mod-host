@@ -150,8 +150,6 @@ static inline void gate_push_samples(gate_t* const gate, const float input1, con
             }
         break;
     }
-
-    return;
 }
 
 static inline float gate_apply(gate_t* const gate, const float input)
