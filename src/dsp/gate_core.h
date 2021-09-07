@@ -63,13 +63,8 @@ static inline void gate_init(gate_t* const gate)
     ringbuffer_clear(&gate->window2, GATE_RINGBUFFER_SIZE);
 }
 
-static inline void gate_push_samples(gate_t* const gate, const float input1, const float input2)
+static inline void gate_run(gate_t* const gate)
 {
-    float key1 = ringbuffer_push_and_calculate_power(&gate->window1, input1);
-    float key2 = ringbuffer_push_and_calculate_power(&gate->window2, input2);
-
-    gate->_keyValue = (key1>key2) ? key1 : key2;
-
     switch (gate->_currentState)
     {
         case IDLE:
@@ -150,6 +145,25 @@ static inline void gate_push_samples(gate_t* const gate, const float input1, con
             }
         break;
     }
+}
+
+static inline void gate_push_samples_and_run(gate_t* const gate, const float input1, const float input2)
+{
+    float key1 = ringbuffer_push_and_calculate_power(&gate->window1, input1);
+    float key2 = ringbuffer_push_and_calculate_power(&gate->window2, input2);
+
+    gate->_keyValue = (key1>key2) ? key1 : key2;
+
+    gate_run(gate);
+}
+
+static inline float gate_push_sample_and_apply(gate_t* const gate, const float input)
+{
+    gate->_keyValue = ringbuffer_push_and_calculate_power(&gate->window1, input);
+
+    gate_run(gate);
+
+    return input * gate->_gainFactor;
 }
 
 static inline float gate_apply(gate_t* const gate, const float input)

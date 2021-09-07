@@ -2608,23 +2608,17 @@ static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
     case 1: // left channel only
         memcpy(audio_out2_buf, audio_in2_buf, sizeof(float)*nframes);
         for (uint32_t i=0; i<nframes; ++i)
-        {
-            gate_push_samples(&g_noisegate, audio_in1_buf[i], 0.f);
-            audio_out1_buf[i] = gate_apply(&g_noisegate, audio_in1_buf[i]);
-        }
+            audio_out1_buf[i] = gate_push_sample_and_apply(&g_noisegate, audio_in1_buf[i]);
         break;
     case 2: // right channel only
         memcpy(audio_out1_buf, audio_in1_buf, sizeof(float)*nframes);
         for (uint32_t i=0; i<nframes; ++i)
-        {
-            gate_push_samples(&g_noisegate, 0.f, audio_in2_buf[i]);
-            audio_out2_buf[i] = gate_apply(&g_noisegate, audio_in2_buf[i]);
-        }
+            audio_out2_buf[i] = gate_push_sample_and_apply(&g_noisegate, audio_in2_buf[i]);
         break;
     case 3: // left & right channels
         for (uint32_t i=0; i<nframes; ++i)
         {
-            gate_push_samples(&g_noisegate, audio_in1_buf[i], audio_in2_buf[i]);
+            gate_push_samples_and_run(&g_noisegate, audio_in1_buf[i], audio_in2_buf[i]);
             audio_out1_buf[i] = gate_apply(&g_noisegate, audio_in1_buf[i]);
             audio_out2_buf[i] = gate_apply(&g_noisegate, audio_in2_buf[i]);
         }
