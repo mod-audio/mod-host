@@ -70,7 +70,7 @@ typedef struct MONITOR_CLIENT_T {
     bool in1_connected;
     bool in2_connected;
     bool apply_compressor;
-    bool apply_volume;
+    bool apply_volume, apply_smoothing;
     bool muted;
     sf_compressor_state_st compressor;
     float volume, smooth_volume;
@@ -132,13 +132,17 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
         goto muted;
 
     const float volume = mon->volume;
-    const float smooth_volume = mon->smooth_volume;
     const bool apply_compressor = mon->apply_compressor;
 
-    if (floats_differ_enough(volume, smooth_volume))
+    float smooth_volume = mon->smooth_volume;
+
+    if (floats_differ_enough(volume, smooth_volume)) {
         mon->apply_volume = true;
+        mon->apply_smoothing = true;
+    }
 
     const bool apply_volume = mon->apply_volume;
+    const bool apply_smoothing = mon->apply_smoothing;
 
     if (mon->in1_connected && mon->in2_connected)
     {
@@ -151,7 +155,7 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
             {
                 for (jack_nframes_t i=0; i<nframes; ++i)
                 {
-                    if (floats_differ_enough(volume, smooth_volume))
+                    if (apply_smoothing)
                         smooth_volume = 0.5 * volume + 0.5 * smooth_volume;
                     bufOut1[i] *= smooth_volume;
                     bufOut2[i] *= smooth_volume;
@@ -164,7 +168,7 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
             {
                 for (jack_nframes_t i=0; i<nframes; ++i)
                 {
-                    if (floats_differ_enough(volume, smooth_volume))
+                    if (apply_smoothing)
                         smooth_volume = 0.5 * volume + 0.5 * smooth_volume;
                     bufOut1[i] = bufIn1[i] * smooth_volume;
                     bufOut2[i] = bufIn2[i] * smooth_volume;
@@ -197,7 +201,7 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
             {
                 for (jack_nframes_t i=0; i<nframes; ++i)
                 {
-                    if (floats_differ_enough(volume, smooth_volume))
+                    if (apply_smoothing)
                         smooth_volume = 0.5 * volume + 0.5 * smooth_volume;
                     bufOutR[i] *= smooth_volume;
                 }
@@ -209,7 +213,7 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
             {
                 for (jack_nframes_t i=0; i<nframes; ++i)
                 {
-                    if (floats_differ_enough(volume, smooth_volume))
+                    if (apply_smoothing)
                         smooth_volume = 0.5 * volume + 0.5 * smooth_volume;
                     bufOutR[i] = bufInR[i] * smooth_volume;
                 }
