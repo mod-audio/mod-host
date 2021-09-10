@@ -44,7 +44,7 @@ typedef struct {
 	float detectoravg;
 	float compgain;
 	float maxcompdiffdb;
-	int samplerate;
+	float samplerate;
 	float ang90;
 	float ang90inv;
 } sf_compressor_state_st;

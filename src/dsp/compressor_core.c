@@ -96,7 +96,7 @@ void compressor_set_params(sf_compressor_state_st *state, float threshold,
 	const float attacksamplesinv = 1.0f / attacksamples;
 	const float releasesamples = state->samplerate * release;
 	const float satrelease = 0.0025f; // seconds
-	const float satreleasesamplesinv = 1.0f / ((float)state->samplerate * satrelease);
+	const float satreleasesamplesinv = 1.0f / (state->samplerate * satrelease);
 
 	// calculate knee curve parameters
 	float k = 5.0f; // initial guess
