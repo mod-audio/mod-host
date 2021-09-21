@@ -134,6 +134,9 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
     const float volume = mon->volume;
     const bool apply_compressor = mon->apply_compressor;
 
+    const float new_volume_weight = 0.001;
+    const float old_volume_weight = 1.f - new_volume_weight;
+
     float smooth_volume = mon->smooth_volume;
 
     if (floats_differ_enough(volume, smooth_volume)) {
@@ -156,7 +159,7 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
                 for (jack_nframes_t i=0; i<nframes; ++i)
                 {
                     if (apply_smoothing)
-                        smooth_volume = 0.5 * volume + 0.5 * smooth_volume;
+                        smooth_volume = new_volume_weight * volume + old_volume_weight * smooth_volume;
                     bufOut1[i] *= smooth_volume;
                     bufOut2[i] *= smooth_volume;
                 }
@@ -169,7 +172,7 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
                 for (jack_nframes_t i=0; i<nframes; ++i)
                 {
                     if (apply_smoothing)
-                        smooth_volume = 0.5 * volume + 0.5 * smooth_volume;
+                        smooth_volume = new_volume_weight * volume + old_volume_weight * smooth_volume;
                     bufOut1[i] = bufIn1[i] * smooth_volume;
                     bufOut2[i] = bufIn2[i] * smooth_volume;
                 }
@@ -202,7 +205,7 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
                 for (jack_nframes_t i=0; i<nframes; ++i)
                 {
                     if (apply_smoothing)
-                        smooth_volume = 0.5 * volume + 0.5 * smooth_volume;
+                        smooth_volume = new_volume_weight * volume + old_volume_weight * smooth_volume;
                     bufOutR[i] *= smooth_volume;
                 }
             }
@@ -214,7 +217,7 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
                 for (jack_nframes_t i=0; i<nframes; ++i)
                 {
                     if (apply_smoothing)
-                        smooth_volume = 0.5 * volume + 0.5 * smooth_volume;
+                        smooth_volume = new_volume_weight * volume + old_volume_weight * smooth_volume;
                     bufOutR[i] = bufInR[i] * smooth_volume;
                 }
             }
