@@ -16,5 +16,5 @@ jobs:
         uses: Gottox/irc-message-action@v2
         with:
           channel: '#moddevices'
-          nickname: moddevices-irc-bot
+          nickname: moddevices-bot
           message: ${{ steps.message.outputs.message }}
