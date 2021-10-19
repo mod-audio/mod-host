@@ -5475,7 +5475,8 @@ int effects_remove(int effect_id)
             pthread_mutex_unlock(&g_hmi_mutex);
         }
 
-        monitor_client_setup_volume(0.0f);
+        // this resets volume back 0dB if needed
+        // monitor_client_setup_volume(0.0f);
 #endif
 
         // reset all events
