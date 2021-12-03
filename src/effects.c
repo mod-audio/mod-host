@@ -3695,18 +3695,27 @@ int effects_init(void* client)
     g_max_allowed_midi_delta = (jack_nframes_t)(g_sample_rate * 0.2); // max 200ms of allowed delta
 
     /* Get RT thread information */
-    const int prio = jack_is_realtime(g_jack_global_client)
-                   ? jack_client_real_time_priority(g_jack_global_client)
-                   : -1;
-    if (prio > 1)
+    const char* const mod_plugthreadprio = getenv("MOD_PLUGIN_THREAD_PRIORITY");
+    if (mod_plugthreadprio != NULL)
     {
-        g_thread_priority = prio + sched_get_priority_min(SCHED_FIFO) - 1;
+        g_thread_priority = atoi(mod_plugthreadprio);
         g_thread_policy = SCHED_FIFO;
     }
     else
     {
-        g_thread_priority = 0;
-        g_thread_policy = SCHED_OTHER;
+        const int prio = jack_is_realtime(g_jack_global_client)
+                       ? jack_client_real_time_priority(g_jack_global_client)
+                       : -1;
+        if (prio > 1)
+        {
+            g_thread_priority = prio - 1;
+            g_thread_policy = SCHED_FIFO;
+        }
+        else
+        {
+            g_thread_priority = 0;
+            g_thread_policy = SCHED_OTHER;
+        }
     }
 
     /* initial transport state */
