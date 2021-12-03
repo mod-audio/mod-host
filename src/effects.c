@@ -42,6 +42,7 @@
 #include <jack/intclient.h>
 #include <jack/metadata.h>
 #include <jack/midiport.h>
+#include <jack/thread.h>
 #include <jack/transport.h>
 #include <jack/uuid.h>
 
@@ -494,6 +495,8 @@ typedef struct URIDS_T {
     LV2_URID time_ticksPerBeat;
     LV2_URID time_frame;
     LV2_URID time_speed;
+    LV2_URID threads_schedPolicy;
+    LV2_URID threads_schedPriority;
 } urids_t;
 
 typedef struct MIDI_CC_T {
@@ -660,6 +663,7 @@ static jack_client_t *g_jack_global_client;
 static jack_nframes_t g_sample_rate, g_block_length, g_max_allowed_midi_delta;
 static const char **g_capture_ports, **g_playback_ports;
 static size_t g_midi_buffer_size;
+static int32_t g_thread_policy, g_thread_priority;
 #ifdef __MOD_DEVICES__
 #ifdef _MOD_DEVICE_DWARF
 static jack_port_t *g_audio_in1_port;
@@ -701,7 +705,7 @@ static LV2_HMI_WidgetControl g_hmi_wc;
 static MOD_License_Feature g_license;
 static LV2_Atom_Forge g_lv2_atom_forge;
 static LV2_Log_Log g_lv2_log;
-static LV2_Options_Option g_options[6];
+static LV2_Options_Option g_options[8];
 static LV2_State_Free_Path g_state_freePath;
 static LV2_URI_Map_Feature g_uri_map;
 static LV2_URID_Map g_urid_map;
@@ -3690,6 +3694,21 @@ int effects_init(void* client)
     g_midi_buffer_size = jack_port_type_get_buffer_size(g_jack_global_client, JACK_DEFAULT_MIDI_TYPE);
     g_max_allowed_midi_delta = (jack_nframes_t)(g_sample_rate * 0.2); // max 200ms of allowed delta
 
+    /* Get RT thread information */
+    const int prio = jack_is_realtime(g_jack_global_client)
+                   ? jack_client_real_time_priority(g_jack_global_client)
+                   : -1;
+    if (prio > 1)
+    {
+        g_thread_priority = prio + sched_get_priority_min(SCHED_FIFO) - 1;
+        g_thread_policy = SCHED_FIFO;
+    }
+    else
+    {
+        g_thread_priority = 0;
+        g_thread_policy = SCHED_OTHER;
+    }
+
     /* initial transport state */
     g_transport_reset = true;
     g_transport_bpb = 4.0;
@@ -3917,6 +3936,9 @@ int effects_init(void* client)
     g_urids.time_frame           = urid_to_id(g_symap, LV2_TIME__frame);
     g_urids.time_speed           = urid_to_id(g_symap, LV2_TIME__speed);
 
+    g_urids.threads_schedPolicy   = urid_to_id(g_symap, "http://ardour.org/lv2/threads/#schedPolicy");
+    g_urids.threads_schedPriority = urid_to_id(g_symap, "http://ardour.org/lv2/threads/#schedPriority");
+
     /* Options Feature initialization */
     g_options[0].context = LV2_OPTIONS_INSTANCE;
     g_options[0].subject = 0;
@@ -3955,10 +3977,24 @@ int effects_init(void* client)
 
     g_options[5].context = LV2_OPTIONS_INSTANCE;
     g_options[5].subject = 0;
-    g_options[5].key = 0;
-    g_options[5].size = 0;
-    g_options[5].type = 0;
-    g_options[5].value = NULL;
+    g_options[5].key = g_urids.threads_schedPolicy;
+    g_options[5].size = sizeof(int32_t);
+    g_options[5].type = g_urids.atom_Int;
+    g_options[5].value = &g_thread_policy;
+
+    g_options[6].context = LV2_OPTIONS_INSTANCE;
+    g_options[6].subject = 0;
+    g_options[6].key = g_urids.threads_schedPriority;
+    g_options[6].size = sizeof(int32_t);
+    g_options[6].type = g_urids.atom_Int;
+    g_options[6].value = &g_thread_priority;
+
+    g_options[7].context = LV2_OPTIONS_INSTANCE;
+    g_options[7].subject = 0;
+    g_options[7].key = 0;
+    g_options[7].size = 0;
+    g_options[7].type = 0;
+    g_options[7].value = NULL;
 
 #ifdef __MOD_DEVICES__
     g_hmi_wc.size           = sizeof(g_hmi_wc);
