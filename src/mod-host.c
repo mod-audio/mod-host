@@ -787,6 +787,7 @@ int main(int argc, char **argv)
 #ifndef SKIP_READLINE
                     "  -i, --interactive              interactive mode\n"
 #endif
+                    "  -n, --nofork                   run in nonforking mode\n"
                     "  -V, --version                  print program version and exit\n"
                     "  -h, --help                     print this help and exit\n",
                 argv[0]);
