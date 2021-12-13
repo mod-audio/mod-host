@@ -91,6 +91,17 @@ typedef enum {
 } LV2_HMI_AddressingFlags;
 
 /**
+ *  The (pre-set) blink timings of an LED.
+ *  Conveniently defined as an enum to ensure consistency between plugins.
+ */
+typedef enum {
+    LV2_HMI_LED_Blink_None = 0,
+    LV2_HMI_LED_Blink_Slow = -1,
+    LV2_HMI_LED_Blink_Mid = -2,
+    LV2_HMI_LED_Blink_Fast = -3
+} LV2_HMI_LED_Blink;
+
+/**
  *  The (pre-set) brightness values of an LED.
  *  Conveniently defined as an enum to ensure consistency between plugins.
  */
@@ -184,7 +195,11 @@ typedef struct {
     size_t size;
 
     /**
-     * Set the LED color, with optional blink timing in milliseconds.
+     * Set the LED color, with optional blink timing in milliseconds from 0 to 5000.
+     * Using 0 as @a on_blink_time means no blinking.
+     *
+     * The plugin SHOULD use values from LV2_HMI_LED_Blink unless it has very good reasons not to do so.
+     * When using values from LV2_HMI_LED_Blink, only the @a on_blink_time needs to be set, @a off_blink_time can be 0.
      */
     void (*set_led_with_blink)(LV2_HMI_WidgetControl_Handle handle,
                                LV2_HMI_Addressing addressing,
@@ -194,7 +209,8 @@ typedef struct {
 
     /**
      * Set the LED color, with optional brightness from 0 to 100.
-     * Using 0 as brightness means to turn off the LED.
+     * Using 0 as @a brightness means to turn off the LED.
+     *
      * The plugin SHOULD use values from LV2_HMI_LED_Brightness unless it has very good reasons not to do so.
      */
     void (*set_led_with_brightness)(LV2_HMI_WidgetControl_Handle handle,

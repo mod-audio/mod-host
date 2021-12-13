@@ -3122,14 +3122,21 @@ static void HMIWidgetsSetLedWithBlink(LV2_HMI_WidgetControl_Handle handle,
     }
 
     if (on_blink_time < 0)
-        on_blink_time = 0;
-    else if (on_blink_time > 5000)
-        on_blink_time = 5000;
-
-    if (off_blink_time < 0)
+    {
+        if (on_blink_time < LV2_HMI_LED_Blink_Fast)
+            on_blink_time = LV2_HMI_LED_Blink_Fast;
         off_blink_time = 0;
-    else if (off_blink_time > 5000)
-        off_blink_time = 5000;
+    }
+    else
+    {
+        if (on_blink_time > 5000)
+            on_blink_time = 5000;
+
+        if (off_blink_time < 0)
+            off_blink_time = 0;
+        else if (off_blink_time > 5000)
+            off_blink_time = 5000;
+    }
 
     char msg[32];
     snprintf(msg, sizeof(msg), "%i %i %i %i", assignment_id, led_color, on_blink_time, off_blink_time);
