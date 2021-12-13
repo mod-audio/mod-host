@@ -26,7 +26,8 @@ typedef enum {
     // client -> server
     sys_serial_event_type_special_req = 0x80 + 's',
     sys_serial_event_type_unassign = 0x80 + 'x',
-    sys_serial_event_type_led = 0x80 + 'l',
+    sys_serial_event_type_led_blink = 0x80 + 'l',
+    sys_serial_event_type_led_brightness = 0x80 + 'h',
     sys_serial_event_type_name = 0x80 + 'n',
     sys_serial_event_type_value = 0x80 + 'v',
     sys_serial_event_type_unit = 0x80 + 'u',
@@ -176,7 +177,8 @@ bool sys_serial_read(sys_serial_shm_data_channel* const data,
 #ifdef SERVER_MODE
     case sys_serial_event_type_special_req:
     case sys_serial_event_type_unassign:
-    case sys_serial_event_type_led:
+    case sys_serial_event_type_led_blink:
+    case sys_serial_event_type_led_brightness:
     case sys_serial_event_type_name:
     case sys_serial_event_type_value:
     case sys_serial_event_type_unit:
