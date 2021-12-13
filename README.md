@@ -49,7 +49,7 @@ Dependencies:
 
 On Ubuntu (tested on 21.10) these besides Hylia can be installed with:
 
-   sudo apt install libreadline-dev liblilv-dev lilv-utils fftw-dev libjack-jackd2-dev
+   sudo apt install libreadline-dev liblilv-dev lilv-utils libfftw3-dev libjack-jackd2-dev
 
 For Hylia, please go to https://github.com/falkTX/Hylia to install from source.
 
