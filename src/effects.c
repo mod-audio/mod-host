@@ -801,11 +801,15 @@ static void FreePluginString(void* handle, char *str);
 static void ConnectToAllHardwareMIDIPorts(void);
 static void ConnectToMIDIThroughPorts(void);
 #ifdef __MOD_DEVICES__
-static void HMIWidgetsSetLed(LV2_HMI_WidgetControl_Handle handle,
-                             LV2_HMI_Addressing addressing,
-                             LV2_HMI_LED_Colour led_color,
-                             int on_blink_time,
-                             int off_blink_time);
+static void HMIWidgetsSetLedWithBlink(LV2_HMI_WidgetControl_Handle handle,
+                                      LV2_HMI_Addressing addressing,
+                                      LV2_HMI_LED_Colour led_color,
+                                      int on_blink_time,
+                                      int off_blink_time);
+static void HMIWidgetsSetLedWithBrightness(LV2_HMI_WidgetControl_Handle handle,
+                                           LV2_HMI_Addressing addressing,
+                                           LV2_HMI_LED_Colour led_color,
+                                           int brightness);
 static void HMIWidgetsSetLabel(LV2_HMI_WidgetControl_Handle handle,
                                LV2_HMI_Addressing addressing,
                                const char* label);
@@ -3095,11 +3099,11 @@ static void ConnectToMIDIThroughPorts(void)
 }
 
 #ifdef __MOD_DEVICES__
-static void HMIWidgetsSetLed(LV2_HMI_WidgetControl_Handle handle,
-                             LV2_HMI_Addressing addressing_ptr,
-                             LV2_HMI_LED_Colour led_color,
-                             int on_blink_time,
-                             int off_blink_time)
+static void HMIWidgetsSetLedWithBlink(LV2_HMI_WidgetControl_Handle handle,
+                                      LV2_HMI_Addressing addressing_ptr,
+                                      LV2_HMI_LED_Colour led_color,
+                                      int on_blink_time,
+                                      int off_blink_time)
 {
     if (handle == NULL || addressing_ptr == NULL || g_hmi_data == NULL) {
         return;
@@ -3112,7 +3116,7 @@ static void HMIWidgetsSetLed(LV2_HMI_WidgetControl_Handle handle,
     const uint8_t subpage = addressing->subpage;
 
     if (g_verbose_debug) {
-        printf("DEBUG: HMISetLedColour %i: %i %i %i\n",
+        printf("DEBUG: HMIWidgetsSetLedWithBlink %i: %i %i %i\n",
                assignment_id, led_color, on_blink_time, off_blink_time);
         fflush(stdout);
     }
@@ -3132,7 +3136,42 @@ static void HMIWidgetsSetLed(LV2_HMI_WidgetControl_Handle handle,
     msg[sizeof(msg)-1] = '\0';
 
     pthread_mutex_lock(&g_hmi_mutex);
-    sys_serial_write(&g_hmi_data->server, sys_serial_event_type_led, page, subpage, msg);
+    sys_serial_write(&g_hmi_data->server, sys_serial_event_type_led_blink, page, subpage, msg);
+    pthread_mutex_unlock(&g_hmi_mutex);
+}
+
+static void HMIWidgetsSetLedWithBrightness(LV2_HMI_WidgetControl_Handle handle,
+                                           LV2_HMI_Addressing addressing_ptr,
+                                           LV2_HMI_LED_Colour led_color,
+                                           int brightness)
+{
+    if (handle == NULL || addressing_ptr == NULL || g_hmi_data == NULL) {
+        return;
+    }
+
+    const hmi_addressing_t *addressing = (const hmi_addressing_t*)addressing_ptr;
+
+    const int assignment_id = addressing->actuator_id;
+    const uint8_t page = addressing->page;
+    const uint8_t subpage = addressing->subpage;
+
+    if (g_verbose_debug) {
+        printf("DEBUG: HMIWidgetsSetLedWithBrightness %i: %i %i\n",
+               assignment_id, led_color, brightness);
+        fflush(stdout);
+    }
+
+    if (brightness < LV2_HMI_LED_Brightness_Normal)
+        brightness = LV2_HMI_LED_Brightness_Normal;
+    else if (brightness > 100)
+        brightness = 100;
+
+    char msg[32];
+    snprintf(msg, sizeof(msg), "%i %i %i", assignment_id, led_color, brightness);
+    msg[sizeof(msg)-1] = '\0';
+
+    pthread_mutex_lock(&g_hmi_mutex);
+    sys_serial_write(&g_hmi_data->server, sys_serial_event_type_led_brightness, page, subpage, msg);
     pthread_mutex_unlock(&g_hmi_mutex);
 }
 
@@ -4006,12 +4045,13 @@ int effects_init(void* client)
     g_options[7].value = NULL;
 
 #ifdef __MOD_DEVICES__
-    g_hmi_wc.size           = sizeof(g_hmi_wc);
-    g_hmi_wc.set_led        = HMIWidgetsSetLed;
-    g_hmi_wc.set_label      = HMIWidgetsSetLabel;
-    g_hmi_wc.set_value      = HMIWidgetsSetValue;
-    g_hmi_wc.set_unit       = HMIWidgetsSetUnit;
-    g_hmi_wc.set_indicator  = HMIWidgetsSetIndicator;
+    g_hmi_wc.size                    = sizeof(g_hmi_wc);
+    g_hmi_wc.set_led_with_blink      = HMIWidgetsSetLedWithBlink;
+    g_hmi_wc.set_led_with_brightness = HMIWidgetsSetLedWithBrightness;
+    g_hmi_wc.set_label               = HMIWidgetsSetLabel;
+    g_hmi_wc.set_value               = HMIWidgetsSetValue;
+    g_hmi_wc.set_unit                = HMIWidgetsSetUnit;
+    g_hmi_wc.set_indicator           = HMIWidgetsSetIndicator;
 
     if (client != NULL)
     {
