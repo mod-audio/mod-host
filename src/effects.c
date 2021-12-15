@@ -5358,6 +5358,7 @@ int effects_remove(int effect_id)
         pthread_join(g_postevents_thread, NULL);
     }
 
+    // disconnect system ports
     if (effect_id == REMOVE_ALL)
     {
         /* Disconnect the system connections */
@@ -5390,6 +5391,7 @@ int effects_remove(int effect_id)
         end = start + 1;
     }
 
+    // stop plugins processing
     for (int j = start; j < end; j++)
     {
         if (InstanceExist(j))
@@ -5398,112 +5400,10 @@ int effects_remove(int effect_id)
 
             if (jack_deactivate(effect->jack_client) != 0)
                 return ERR_JACK_CLIENT_DEACTIVATION;
-
-            FreeFeatures(effect);
-
-            if (effect->event_ports)
-            {
-                for (uint32_t i = 0; i < effect->event_ports_count; i++)
-                {
-                    lv2_evbuf_free(effect->event_ports[i]->evbuf);
-                }
-            }
-
-            if (effect->ports)
-            {
-                for (uint32_t i = 0; i < effect->ports_count; i++)
-                {
-                    if (effect->ports[i])
-                    {
-#ifdef __MOD_DEVICES__
-                        if (effect->ports[i]->hmi_addressing != NULL)
-                        {
-                            if (g_hmi_data != NULL)
-                            {
-                                char msg[24];
-                                snprintf(msg, sizeof(msg), "%i", effect->ports[i]->hmi_addressing->actuator_id);
-                                msg[sizeof(msg)-1] = '\0';
-
-                                pthread_mutex_lock(&g_hmi_mutex);
-                                sys_serial_write(&g_hmi_data->server,
-                                                 sys_serial_event_type_unassign,
-                                                 effect->ports[i]->hmi_addressing->page,
-                                                 effect->ports[i]->hmi_addressing->subpage, msg);
-                                pthread_mutex_unlock(&g_hmi_mutex);
-                            }
-
-                            effect->ports[i]->hmi_addressing->actuator_id = -1;
-                        }
-#endif
-
-                        // TODO destroy port mutexes
-                        free(effect->ports[i]->buffer);
-                        lilv_scale_points_free(effect->ports[i]->scale_points);
-                        free(effect->ports[i]);
-                    }
-                }
-                free(effect->ports);
-            }
-
-            if (effect->properties)
-            {
-                for (uint32_t i = 0; i < effect->properties_count; i++)
-                {
-                    if (effect->properties[i])
-                    {
-                        lilv_node_free(effect->properties[i]->uri);
-                        lilv_node_free(effect->properties[i]->type);
-                        free(effect->properties[i]);
-                    }
-                }
-                free(effect->properties);
-            }
-
-            if (effect->lilv_instance)
-                lilv_instance_deactivate(effect->lilv_instance);
-            lilv_instance_free(effect->lilv_instance);
-
-            if (effect->jack_client)
-                jack_client_close(effect->jack_client);
-
-            free(effect->audio_ports);
-            free(effect->input_audio_ports);
-            free(effect->output_audio_ports);
-            free(effect->control_ports);
-            if (effect->events_in_buffer)
-                jack_ringbuffer_free(effect->events_in_buffer);
-            if (effect->events_out_buffer)
-                jack_ringbuffer_free(effect->events_out_buffer);
-
-            if (effect->presets)
-            {
-                for (uint32_t i = 0; i < effect->presets_count; i++)
-                {
-                    lilv_free(effect->presets[i]->uri);
-                    free(effect->presets[i]);
-                }
-                free(effect->presets);
-            }
-
-            if (effect->hints & HINT_HAS_STATE)
-            {
-                if (g_lv2_scratch_dir != NULL)
-                {
-                    // recursively delete state folder
-                    bzero(state_filename, sizeof(state_filename));
-                    snprintf(state_filename, PATH_MAX-1, "%s/effect-%d",
-                             g_lv2_scratch_dir, effect->instance);
-                    RecursivelyRemovePluginPath(state_filename);
-                }
-
-                if (effect->hints & HINT_STATE_UNSAFE)
-                    pthread_mutex_destroy(&effect->state_restore_mutex);
-            }
-
-            InstanceDelete(j);
         }
     }
 
+    // remove addressings, midi learn and other stuff related to plugins
     if (effect_id == REMOVE_ALL)
     {
         pthread_mutex_lock(&g_midi_learning_mutex);
@@ -5675,6 +5575,118 @@ int effects_remove(int effect_id)
 
         // flush events for all effects except this one
         RunPostPonedEvents(effect_id);
+    }
+
+    // now finally cleanup the plugin(s)
+    for (int j = start; j < end; j++)
+    {
+        if (InstanceExist(j))
+        {
+            effect = &g_effects[j];
+
+            FreeFeatures(effect);
+
+            if (effect->event_ports)
+            {
+                for (uint32_t i = 0; i < effect->event_ports_count; i++)
+                {
+                    lv2_evbuf_free(effect->event_ports[i]->evbuf);
+                }
+            }
+
+            if (effect->ports)
+            {
+                for (uint32_t i = 0; i < effect->ports_count; i++)
+                {
+                    if (effect->ports[i])
+                    {
+#ifdef __MOD_DEVICES__
+                        if (effect->ports[i]->hmi_addressing != NULL)
+                        {
+                            if (g_hmi_data != NULL)
+                            {
+                                char msg[24];
+                                snprintf(msg, sizeof(msg), "%i", effect->ports[i]->hmi_addressing->actuator_id);
+                                msg[sizeof(msg)-1] = '\0';
+
+                                pthread_mutex_lock(&g_hmi_mutex);
+                                sys_serial_write(&g_hmi_data->server,
+                                                 sys_serial_event_type_unassign,
+                                                 effect->ports[i]->hmi_addressing->page,
+                                                 effect->ports[i]->hmi_addressing->subpage, msg);
+                                pthread_mutex_unlock(&g_hmi_mutex);
+                            }
+
+                            effect->ports[i]->hmi_addressing->actuator_id = -1;
+                        }
+#endif
+
+                        // TODO destroy port mutexes
+                        free(effect->ports[i]->buffer);
+                        lilv_scale_points_free(effect->ports[i]->scale_points);
+                        free(effect->ports[i]);
+                    }
+                }
+                free(effect->ports);
+            }
+
+            if (effect->properties)
+            {
+                for (uint32_t i = 0; i < effect->properties_count; i++)
+                {
+                    if (effect->properties[i])
+                    {
+                        lilv_node_free(effect->properties[i]->uri);
+                        lilv_node_free(effect->properties[i]->type);
+                        free(effect->properties[i]);
+                    }
+                }
+                free(effect->properties);
+            }
+
+            if (effect->lilv_instance)
+                lilv_instance_deactivate(effect->lilv_instance);
+            lilv_instance_free(effect->lilv_instance);
+
+            if (effect->jack_client)
+                jack_client_close(effect->jack_client);
+
+            free(effect->audio_ports);
+            free(effect->input_audio_ports);
+            free(effect->output_audio_ports);
+            free(effect->control_ports);
+            if (effect->events_in_buffer)
+                jack_ringbuffer_free(effect->events_in_buffer);
+            if (effect->events_out_buffer)
+                jack_ringbuffer_free(effect->events_out_buffer);
+
+            if (effect->presets)
+            {
+                for (uint32_t i = 0; i < effect->presets_count; i++)
+                {
+                    lilv_free(effect->presets[i]->uri);
+                    free(effect->presets[i]);
+                }
+                free(effect->presets);
+            }
+
+            if (effect->hints & HINT_HAS_STATE)
+            {
+                if (g_lv2_scratch_dir != NULL)
+                {
+                    // recursively delete state folder
+                    bzero(state_filename, sizeof(state_filename));
+                    snprintf(state_filename, PATH_MAX-1, "%s/effect-%d",
+                             g_lv2_scratch_dir, effect->instance);
+                    RecursivelyRemovePluginPath(state_filename);
+                }
+
+                if (effect->hints & HINT_STATE_UNSAFE)
+                    pthread_mutex_destroy(&effect->state_restore_mutex);
+            }
+
+            InstanceDelete(j);
+        }
     }
 
     // start thread again
