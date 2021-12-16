@@ -434,6 +434,7 @@ typedef struct LILV_NODES_T {
     LilvNode *minimumSize;
     LilvNode *mod_cvport;
     LilvNode *mod_default;
+    LilvNode *mod_default_custom;
     LilvNode *mod_maximum;
     LilvNode *mod_minimum;
     LilvNode *output;
@@ -3914,6 +3915,17 @@ int effects_init(void* client)
     g_lilv_nodes.minimumSize = lilv_new_uri(g_lv2_data, LV2_RESIZE_PORT__minimumSize);
     g_lilv_nodes.mod_cvport = lilv_new_uri(g_lv2_data, LILV_NS_MOD "CVPort");
     g_lilv_nodes.mod_default = lilv_new_uri(g_lv2_data, LILV_NS_MOD "default");
+#if defined(_MOD_DEVICE_DUO)
+    g_lilv_nodes.mod_default_custom = lilv_new_uri(g_lv2_data, LILV_NS_MOD "default_duo");
+#elif defined(_MOD_DEVICE_DUOX)
+    g_lilv_nodes.mod_default_custom = lilv_new_uri(g_lv2_data, LILV_NS_MOD "default_duox");
+#elif defined(_MOD_DEVICE_DWARF)
+    g_lilv_nodes.mod_default_custom = lilv_new_uri(g_lv2_data, LILV_NS_MOD "default_dwarf");
+#elif defined(_MOD_DEVICE_X86_64)
+    g_lilv_nodes.mod_default_custom = lilv_new_uri(g_lv2_data, LILV_NS_MOD "default_x64");
+#else
+    g_lilv_nodes.mod_default_custom = NULL;
+#endif
     g_lilv_nodes.mod_maximum = lilv_new_uri(g_lv2_data, LILV_NS_MOD "maximum");
     g_lilv_nodes.mod_minimum = lilv_new_uri(g_lv2_data, LILV_NS_MOD "minimum");
     g_lilv_nodes.output = lilv_new_uri(g_lv2_data, LILV_URI_OUTPUT_PORT);
@@ -4251,6 +4263,7 @@ int effects_finish(int close_client)
     lilv_node_free(g_lilv_nodes.minimumSize);
     lilv_node_free(g_lilv_nodes.mod_cvport);
     lilv_node_free(g_lilv_nodes.mod_default);
+    lilv_node_free(g_lilv_nodes.mod_default_custom);
     lilv_node_free(g_lilv_nodes.mod_maximum);
     lilv_node_free(g_lilv_nodes.mod_minimum);
     lilv_node_free(g_lilv_nodes.output);
@@ -4622,7 +4635,11 @@ int effects_add(const char *uri, int instance)
             }
             else
             {
-                LilvNodes* lilvvalue_default = lilv_port_get_value(plugin, lilv_port, g_lilv_nodes.mod_default);
+                LilvNodes* lilvvalue_default = g_lilv_nodes.mod_default_custom != NULL
+                                             ? lilv_port_get_value(plugin, lilv_port, g_lilv_nodes.mod_default_custom)
+                                             : NULL;
+                if (lilvvalue_default == NULL)
+                    lilvvalue_default = lilv_port_get_value(plugin, lilv_port, g_lilv_nodes.mod_default);
                 if (lilvvalue_default == NULL)
                     lilvvalue_default = lilv_port_get_value(plugin, lilv_port, g_lilv_nodes.default_);
 
