@@ -636,6 +636,9 @@ static int mod_host_init(jack_client_t* client, int socket_port, int feedback_po
     /* Make fftw thread-safe */
     fftw_make_planner_thread_safe();
     fftwf_make_planner_thread_safe();
+    /* Load system-wide fftw wisdom files */
+    fftw_import_system_wisdom();
+    fftwf_import_system_wisdom();
 #endif
 #ifdef HAVE_NE10
     /* Initialize ne10 */
