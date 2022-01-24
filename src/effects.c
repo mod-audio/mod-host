@@ -1538,7 +1538,7 @@ static void* HMIClientThread(void* arg)
                 g_noisegate_decay = clampf(atof(msg), 1.0f, 500.0f);
                 gate_update(&g_noisegate, g_sample_rate, 10, 1,
                             g_noisegate_decay, 1,
-                            g_noisegate_threshold, g_noisegate_threshold - 20.0f);
+                            g_noisegate_threshold, g_noisegate_threshold - 20);
                 break;
             case sys_serial_event_type_noisegate_threshold:
                 g_noisegate_threshold = clampf(atof(msg), -70.0f, -10.0f);
