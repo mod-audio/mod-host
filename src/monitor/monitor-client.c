@@ -54,7 +54,16 @@ enum Ports {
     PORT_IN2,
     PORT_OUT1,
     PORT_OUT2,
-    PORT_COUNT
+    PORT_COUNT,
+#ifdef _MOD_DEVICE_DUOX
+    PORT_EXTRA_IN3 = PORT_COUNT,
+    PORT_EXTRA_IN4,
+    PORT_EXTRA_OUT3,
+    PORT_EXTRA_OUT4,
+    PORT_EXTRA_COUNT
+#else
+    PORT_EXTRA_COUNT = PORT_COUNT
+#endif
 };
 
 /*
@@ -65,14 +74,22 @@ enum Ports {
 
 typedef struct MONITOR_CLIENT_T {
     jack_client_t *client;
-    jack_port_t *ports[PORT_COUNT];
+    jack_port_t *ports[PORT_EXTRA_COUNT];
     bool mono_copy;
     bool in1_connected;
     bool in2_connected;
+#ifdef _MOD_DEVICE_DUOX
+    bool extra_active;
+    bool in3_connected;
+    bool in4_connected;
+#endif
     bool apply_compressor;
     bool apply_volume, apply_smoothing;
     bool muted;
     sf_compressor_state_st compressor;
+#ifdef _MOD_DEVICE_DUOX
+    sf_compressor_state_st compressor2;
+#endif
     float volume, smooth_volume;
 } monitor_client_t;
 
@@ -120,6 +137,10 @@ static inline float db2lin(float db)
     return powf(10.0f, 0.05f * db);
 }
 
+#ifdef _MOD_DEVICE_DUOX
+static void ProcessMonitorExtra(monitor_client_t *const mon, jack_nframes_t nframes);
+#endif
+
 static int ProcessMonitor(jack_nframes_t nframes, void *arg)
 {
     monitor_client_t *const mon = arg;
@@ -129,13 +150,25 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
     float *const bufOut2 = jack_port_get_buffer(mon->ports[PORT_OUT2], nframes);
 
     if (mon->muted)
-        goto muted;
+    {
+        memset(bufOut1, 0, sizeof(float)*nframes);
+        memset(bufOut2, 0, sizeof(float)*nframes);
+#ifdef _MOD_DEVICE_DUOX
+        if (mon->extra_active)
+        {
+            float *const bufOut3 = jack_port_get_buffer(mon->ports[PORT_EXTRA_OUT3], nframes);
+            float *const bufOut4 = jack_port_get_buffer(mon->ports[PORT_EXTRA_OUT4], nframes);
+            memset(bufOut3, 0, sizeof(float)*nframes);
+            memset(bufOut4, 0, sizeof(float)*nframes);
+        }
+#endif
+        return 0;
+    }
+
+    const float new_volume_weight = 0.001f;
+    const float old_volume_weight = 1.f - new_volume_weight;
 
     const float volume = mon->volume;
-    const bool apply_compressor = mon->apply_compressor;
-
-    const float new_volume_weight = 0.001;
-    const float old_volume_weight = 1.f - new_volume_weight;
 
     float smooth_volume = mon->smooth_volume;
 
@@ -144,8 +177,14 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
         mon->apply_smoothing = true;
     }
 
-    const bool apply_volume = mon->apply_volume;
+    const bool apply_compressor = mon->apply_compressor;
     const bool apply_smoothing = mon->apply_smoothing;
+    const bool apply_volume = mon->apply_volume;
+
+#ifdef _MOD_DEVICE_DUOX
+    if (mon->extra_active)
+        ProcessMonitorExtra(mon, nframes);
+#endif
 
     if (mon->in1_connected && mon->in2_connected)
     {
@@ -237,11 +276,113 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
         return 0;
     }
 
-muted:
     // nothing connected in input1 or input2
     memset(bufOut1, 0, sizeof(float)*nframes);
     memset(bufOut2, 0, sizeof(float)*nframes);
     return 0;
+}
+
+static void ProcessMonitorExtra(monitor_client_t *const mon, jack_nframes_t nframes)
+{
+    float *const bufIn3  = jack_port_get_buffer(mon->ports[PORT_EXTRA_IN3], nframes);
+    float *const bufIn4  = jack_port_get_buffer(mon->ports[PORT_EXTRA_IN4], nframes);
+    float *const bufOut3 = jack_port_get_buffer(mon->ports[PORT_EXTRA_OUT3], nframes);
+    float *const bufOut4 = jack_port_get_buffer(mon->ports[PORT_EXTRA_OUT4], nframes);
+
+    const float new_volume_weight = 0.001f;
+    const float old_volume_weight = 1.f - new_volume_weight;
+
+    const float volume = mon->volume;
+
+    const bool apply_compressor = mon->apply_compressor;
+    const bool apply_smoothing = mon->apply_smoothing;
+    const bool apply_volume = mon->apply_volume;
+
+    float smooth_volume = mon->smooth_volume;
+
+    if (mon->in3_connected && mon->in4_connected)
+    {
+        // input3 and input4 have connections
+        if (apply_compressor)
+        {
+            compressor_process(&mon->compressor2, nframes, bufIn3, bufIn4, bufOut3, bufOut4);
+
+            if (apply_volume)
+            {
+                for (jack_nframes_t i=0; i<nframes; ++i)
+                {
+                    if (apply_smoothing)
+                        smooth_volume = new_volume_weight * volume + old_volume_weight * smooth_volume;
+                    bufOut3[i] *= smooth_volume;
+                    bufOut4[i] *= smooth_volume;
+                }
+            }
+        }
+        else
+        {
+            if (apply_volume)
+            {
+                for (jack_nframes_t i=0; i<nframes; ++i)
+                {
+                    if (apply_smoothing)
+                        smooth_volume = new_volume_weight * volume + old_volume_weight * smooth_volume;
+                    bufOut3[i] = bufIn3[i] * smooth_volume;
+                    bufOut4[i] = bufIn4[i] * smooth_volume;
+                }
+            }
+            else
+            {
+                memcpy(bufOut3, bufIn3, sizeof(float)*nframes);
+                memcpy(bufOut4, bufIn4, sizeof(float)*nframes);
+            }
+        }
+        return;
+    }
+
+    if (mon->in3_connected || mon->in4_connected)
+    {
+        // only one input has connections
+        float *const bufInR  = mon->in3_connected ? bufIn3 : bufIn4;
+        float *const bufOutR = mon->in3_connected ? bufOut3 : bufOut4;
+        float *const bufOutC = mon->in3_connected ? bufOut4 : bufOut3;
+
+        if (apply_compressor)
+        {
+            compressor_process_mono(&mon->compressor2, nframes, bufInR, bufOutR);
+
+            if (apply_volume)
+            {
+                for (jack_nframes_t i=0; i<nframes; ++i)
+                {
+                    if (apply_smoothing)
+                        smooth_volume = new_volume_weight * volume + old_volume_weight * smooth_volume;
+                    bufOutR[i] *= smooth_volume;
+                }
+            }
+        }
+        else
+        {
+            if (apply_volume)
+            {
+                for (jack_nframes_t i=0; i<nframes; ++i)
+                {
+                    if (apply_smoothing)
+                        smooth_volume = new_volume_weight * volume + old_volume_weight * smooth_volume;
+                    bufOutR[i] = bufInR[i] * smooth_volume;
+                }
+            }
+            else
+            {
+                memcpy(bufOutR, bufInR, sizeof(float)*nframes);
+            }
+        }
+        memset(bufOutC, 0, sizeof(float)*nframes);
+        return;
+    }
+
+    // nothing connected in input3 or input4
+    memset(bufOut3, 0, sizeof(float)*nframes);
+    memset(bufOut4, 0, sizeof(float)*nframes);
 }
 
 static void PortConnectMonitor(jack_port_id_t a, jack_port_id_t b, int connect, void* arg)
@@ -255,6 +396,16 @@ static void PortConnectMonitor(jack_port_id_t a, jack_port_id_t b, int connect, 
         mon->in1_connected = jack_port_connected(mon->ports[PORT_IN1]) > 0;
     else if (port_a == mon->ports[PORT_IN2] || port_b == mon->ports[PORT_IN2])
         mon->in2_connected = jack_port_connected(mon->ports[PORT_IN2]) > 0;
+
+#ifdef _MOD_DEVICE_DUOX
+    if (mon->extra_active)
+    {
+        if (port_a == mon->ports[PORT_EXTRA_IN3] || port_b == mon->ports[PORT_EXTRA_IN3])
+            mon->in3_connected = jack_port_connected(mon->ports[PORT_EXTRA_IN3]) > 0;
+        else if (port_a == mon->ports[PORT_EXTRA_IN4] || port_b == mon->ports[PORT_EXTRA_IN4])
+            mon->in4_connected = jack_port_connected(mon->ports[PORT_EXTRA_IN4]) > 0;
+    }
+#endif
 
     return;
 
@@ -290,6 +441,9 @@ int jack_initialize(jack_client_t* client, const char* load_init)
     mon->in1_connected = false;
     mon->in2_connected = false;
     mon->mono_copy = (load_init && !strcmp(load_init, "1")) || access("/data/jack-mono-copy", F_OK) != -1;
+#ifdef _MOD_DEVICE_DUOX
+    mon->extra_active = access("/data/separate-spdif-outs", F_OK) != -1;
+#endif
 
     mon->apply_compressor = false;
     mon->apply_volume = false;
@@ -297,6 +451,10 @@ int jack_initialize(jack_client_t* client, const char* load_init)
     mon->volume = 1.0f;
 
     compressor_init(&mon->compressor, jack_get_sample_rate(client));
+#ifdef _MOD_DEVICE_DUOX
+    if (mon->extra_active)
+        compressor_init(&mon->compressor2, jack_get_sample_rate(client));
+#endif
 
     /* Register jack ports */
     mon->ports[PORT_IN1 ] = jack_port_register(client, "in_1", JACK_DEFAULT_AUDIO_TYPE, JackPortIsInput, 0);
@@ -313,6 +471,24 @@ int jack_initialize(jack_client_t* client, const char* load_init)
             return 1;
         }
     }
+
+#ifdef _MOD_DEVICE_DUOX
+    /* Register extra jack ports */
+    mon->ports[PORT_EXTRA_IN3 ] = jack_port_register(client, "in_3", JACK_DEFAULT_AUDIO_TYPE, JackPortIsInput, 0);
+    mon->ports[PORT_EXTRA_IN4 ] = jack_port_register(client, "in_4", JACK_DEFAULT_AUDIO_TYPE, JackPortIsInput, 0);
+    mon->ports[PORT_EXTRA_OUT3] = jack_port_register(client, "out_3", JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput, 0);
+    mon->ports[PORT_EXTRA_OUT4] = jack_port_register(client, "out_4", JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput, 0);
+
+    for (int i=PORT_COUNT; i<PORT_EXTRA_COUNT; ++i)
+    {
+        if (! mon->ports[i])
+        {
+            fprintf(stderr, "can't register jack ports\n");
+            free(mon);
+            return 1;
+        }
+    }
+#endif
 
     /* Set jack callbacks */
     jack_set_port_connect_callback(client, PortConnectMonitor, mon);
@@ -347,6 +523,14 @@ int jack_initialize(jack_client_t* client, const char* load_init)
 
     snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:out_2", ourclientname);
     jack_connect(client, ourportname, "system:playback_1");
+#endif
+
+#ifdef _MOD_DEVICE_DUOX
+    snprintf(ourportname, MAX_CHAR_BUF_SIZE, mon->extra_active ? "%s:out_3" : "%s:out_1", ourclientname);
+    jack_connect(client, ourportname, "system:playback_3");
+
+    snprintf(ourportname, MAX_CHAR_BUF_SIZE, mon->extra_active ? "%s:out_4" : "%s:out_2", ourclientname);
+    jack_connect(client, ourportname, "system:playback_4");
 #endif
 
     return 0;
@@ -406,15 +590,31 @@ bool monitor_client_setup_compressor(int mode, float release)
     {
     case 1:
         compressor_set_params(&mon->compressor, -12.f, 12.f, 2.f, 0.0001f, release / 1000, -3.f);
+#ifdef _MOD_DEVICE_DUOX
+        if (mon->extra_active)
+            compressor_set_params(&mon->compressor2, -12.f, 12.f, 2.f, 0.0001f, release / 1000, -3.f);
+#endif
         break;
     case 2:
         compressor_set_params(&mon->compressor, -12.f, 12.f, 3.f, 0.0001f, release / 1000, -3.f);
+#ifdef _MOD_DEVICE_DUOX
+        if (mon->extra_active)
+            compressor_set_params(&mon->compressor2, -12.f, 12.f, 3.f, 0.0001f, release / 1000, -3.f);
+#endif
         break;
     case 3:
         compressor_set_params(&mon->compressor, -15.f, 15.f, 4.f, 0.0001f, release / 1000, -3.f);
+#ifdef _MOD_DEVICE_DUOX
+        if (mon->extra_active)
+            compressor_set_params(&mon->compressor2, -15.f, 15.f, 4.f, 0.0001f, release / 1000, -3.f);
+#endif
         break;
     case 4:
         compressor_set_params(&mon->compressor, -25.f, 15.f, 10.f, 0.0001f, release / 1000, -6.f);
+#ifdef _MOD_DEVICE_DUOX
+        if (mon->extra_active)
+            compressor_set_params(&mon->compressor2, -25.f, 15.f, 10.f, 0.0001f, release / 1000, -6.f);
+#endif
         break;
     }
 
