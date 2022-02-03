@@ -475,19 +475,22 @@ int jack_initialize(jack_client_t* client, const char* load_init)
     }
 
 #ifdef _MOD_DEVICE_DUOX
-    /* Register extra jack ports */
-    mon->ports[PORT_EXTRA_IN3 ] = jack_port_register(client, "in_3", JACK_DEFAULT_AUDIO_TYPE, JackPortIsInput, 0);
-    mon->ports[PORT_EXTRA_IN4 ] = jack_port_register(client, "in_4", JACK_DEFAULT_AUDIO_TYPE, JackPortIsInput, 0);
-    mon->ports[PORT_EXTRA_OUT3] = jack_port_register(client, "out_3", JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput, 0);
-    mon->ports[PORT_EXTRA_OUT4] = jack_port_register(client, "out_4", JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput, 0);
-
-    for (int i=PORT_COUNT; i<PORT_EXTRA_COUNT; ++i)
+    if (mon->extra_active)
     {
-        if (! mon->ports[i])
+        /* Register extra jack ports */
+        mon->ports[PORT_EXTRA_IN3 ] = jack_port_register(client, "in_3", JACK_DEFAULT_AUDIO_TYPE, JackPortIsInput, 0);
+        mon->ports[PORT_EXTRA_IN4 ] = jack_port_register(client, "in_4", JACK_DEFAULT_AUDIO_TYPE, JackPortIsInput, 0);
+        mon->ports[PORT_EXTRA_OUT3] = jack_port_register(client, "out_3", JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput, 0);
+        mon->ports[PORT_EXTRA_OUT4] = jack_port_register(client, "out_4", JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput, 0);
+
+        for (int i=PORT_COUNT; i<PORT_EXTRA_COUNT; ++i)
         {
-            fprintf(stderr, "can't register jack ports\n");
-            free(mon);
-            return 1;
+            if (! mon->ports[i])
+            {
+                fprintf(stderr, "can't register jack ports\n");
+                free(mon);
+                return 1;
+            }
         }
     }
 #endif
