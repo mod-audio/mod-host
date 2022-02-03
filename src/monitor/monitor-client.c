@@ -282,6 +282,7 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
     return 0;
 }
 
+#ifdef _MOD_DEVICE_DUOX
 static void ProcessMonitorExtra(monitor_client_t *const mon, jack_nframes_t nframes)
 {
     float *const bufIn3  = jack_port_get_buffer(mon->ports[PORT_EXTRA_IN3], nframes);
@@ -384,6 +385,7 @@ static void ProcessMonitorExtra(monitor_client_t *const mon, jack_nframes_t nfra
     memset(bufOut3, 0, sizeof(float)*nframes);
     memset(bufOut4, 0, sizeof(float)*nframes);
 }
+#endif
 
 static void PortConnectMonitor(jack_port_id_t a, jack_port_id_t b, int connect, void* arg)
 {
