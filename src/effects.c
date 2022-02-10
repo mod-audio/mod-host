@@ -661,9 +661,9 @@ static pthread_mutex_t  g_raw_midi_port_mutex;
 
 /* Jack */
 static jack_client_t *g_jack_global_client;
-static jack_nframes_t g_sample_rate, g_block_length, g_max_allowed_midi_delta;
+static jack_nframes_t g_sample_rate, g_max_allowed_midi_delta;
 static const char **g_capture_ports, **g_playback_ports;
-static size_t g_midi_buffer_size;
+static int32_t g_midi_buffer_size, g_block_length;
 static int32_t g_thread_policy, g_thread_priority;
 #ifdef __MOD_DEVICES__
 #ifdef _MOD_DEVICE_DWARF
@@ -772,7 +772,7 @@ static const char* const g_rolling_port_symbol = ROLLING_PORT_SYMBOL;
 
 static void InstanceDelete(int effect_id);
 static int InstanceExist(int effect_id);
-static void AllocatePortBuffers(effect_t* effect);
+static void AllocatePortBuffers(effect_t* effect, int in_size, int out_size);
 static int BufferSize(jack_nframes_t nframes, void* data);
 static void FreeWheelMode(int starting, void* data);
 static void PortRegistration(jack_port_id_t port_id, int reg, void* data);
@@ -883,15 +883,18 @@ static int InstanceExist(int effect_id)
     return 0;
 }
 
-static void AllocatePortBuffers(effect_t* effect)
+static void AllocatePortBuffers(effect_t* effect, int in_size, int out_size)
 {
     uint32_t i;
 
     for (i = 0; i < effect->event_ports_count; i++)
     {
+        const int size = effect->event_ports[i]->flow == FLOW_INPUT ? in_size : out_size;
+        if (size == 0)
+            continue;
         lv2_evbuf_free(effect->event_ports[i]->evbuf);
         effect->event_ports[i]->evbuf = lv2_evbuf_new(
-            g_midi_buffer_size,
+            size,
             (effect->event_ports[i]->hints & HINT_OLD_EVENT_API) ? LV2_EVBUF_EVENT : LV2_EVBUF_ATOM,
             g_urid_map.map(g_urid_map.handle, LV2_ATOM__Chunk),
             g_urid_map.map(g_urid_map.handle, LV2_ATOM__Sequence));
@@ -910,7 +913,10 @@ static int BufferSize(jack_nframes_t nframes, void* data)
     if (data)
     {
         effect_t *effect = data;
-        AllocatePortBuffers(effect);
+        // if ringbuffers exist, keep their existing size
+        const int in_size = effect->events_in_buffer ? 0 : (g_midi_buffer_size * 16);
+        const int out_size = effect->events_out_buffer ? 0 : (g_midi_buffer_size * 16);
+        AllocatePortBuffers(effect, in_size, out_size);
     }
 #ifdef HAVE_HYLIA
     else if (g_hylia_instance)
@@ -1277,7 +1283,22 @@ static void RunPostPonedEvents(int ignored_effect_id)
                     }
                     else if (atom.type == g_urids.atom_String)
                     {
-                        snprintf(buf + wrtn, FEEDBACK_BUF_SIZE - wrtn, "s %s", body);
+                        if (atom.size > FEEDBACK_BUF_SIZE - (uint)wrtn)
+                        {
+                            char* rbuf = malloc(wrtn + atom.size + 3);
+                            strcpy(rbuf, buf);
+                            strcpy(rbuf + wrtn, "s ");
+                            strncpy(rbuf + (wrtn + 2), body, atom.size);
+                            rbuf[wrtn + atom.size + 2] = '\0';
+
+                            supported = false;
+                            socket_send_feedback_debug(rbuf);
+                            free(rbuf);
+                        }
+                        else
+                        {
+                            snprintf(buf + wrtn, FEEDBACK_BUF_SIZE - wrtn, "s %s", body);
+                        }
                     }
                     else if (atom.type == g_urids.atom_Path)
                     {
@@ -1301,7 +1322,7 @@ static void RunPostPonedEvents(int ignored_effect_id)
                         }
                         else
                         {
-                            rbuf = malloc(strlen(buf) + (n_elems * 16 + 1) + 3);
+                            rbuf = malloc(wrtn + (n_elems * 16 + 1) + 3);
                             strcpy(rbuf, buf);
                         }
 
@@ -1359,7 +1380,6 @@ static void RunPostPonedEvents(int ignored_effect_id)
                             free(rbuf);
                         }
                     }
-
                     /*
                     else if (atom.type == g_urids.atom_Tuple)
                     {
@@ -1367,7 +1387,6 @@ static void RunPostPonedEvents(int ignored_effect_id)
                         // TODO
                     }
                     */
-
                     else
                     {
                         supported = false;
@@ -5077,7 +5096,7 @@ int effects_add(const char *uri, int instance)
         }
     }
 
-    AllocatePortBuffers(effect);
+    AllocatePortBuffers(effect, control_in_size, control_out_size);
 
     {
         // Index readable and writable properties
