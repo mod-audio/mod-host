@@ -1285,7 +1285,7 @@ static void RunPostPonedEvents(int ignored_effect_id)
                     }
                     else if (atom.type == g_urids.atom_String)
                     {
-                        if (atom.size > FEEDBACK_BUF_SIZE - (uint)wrtn)
+                        if (atom.size + 2 > FEEDBACK_BUF_SIZE - (uint)wrtn)
                         {
                             char* rbuf = malloc(wrtn + atom.size + 3);
                             strcpy(rbuf, buf);
