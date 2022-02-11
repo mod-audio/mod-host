@@ -386,6 +386,7 @@ typedef struct EFFECT_T {
 
     jack_ringbuffer_t *events_in_buffer;
     jack_ringbuffer_t *events_out_buffer;
+    char *events_in_buffer_helper;
 
     // previous transport state
     bool transport_rolling;
@@ -1765,21 +1766,18 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
         lv2_evbuf_reset(effect->output_event_ports[i]->evbuf, false);
 
     /* control in events */
-    if (effect->events_in_buffer && effect->control_index >= 0)
+    if (effect->events_in_buffer && effect->events_in_buffer_helper && effect->control_index >= 0)
     {
-        const size_t space = jack_ringbuffer_read_space(effect->events_in_buffer);
         LV2_Atom atom;
-        size_t j;
-        for (j = 0; j < space; j += sizeof(atom) + atom.size)
+        const size_t space = jack_ringbuffer_read_space(effect->events_in_buffer);
+        for (size_t j = 0; j < space; j += sizeof(atom) + atom.size)
         {
             jack_ringbuffer_read(effect->events_in_buffer, (char*)&atom, sizeof(atom));
-            char fatom[sizeof(atom)+atom.size];
-            memcpy(&fatom, (char*)&atom, sizeof(atom));
-            char *body = &fatom[sizeof(atom)];
-            jack_ringbuffer_read(effect->events_in_buffer, body, atom.size);
+            memcpy(effect->events_in_buffer_helper, &atom, sizeof(atom));
+            jack_ringbuffer_read(effect->events_in_buffer, effect->events_in_buffer_helper + sizeof(atom), atom.size);
             port = effect->ports[effect->control_index];
             LV2_Evbuf_Iterator e = lv2_evbuf_end(port->evbuf);
-            const LV2_Atom* const ratom = (const LV2_Atom*)fatom;
+            const LV2_Atom* const ratom = (const LV2_Atom*)effect->events_in_buffer_helper;
             lv2_evbuf_write(&e, nframes - 1, 0, ratom->type, ratom->size,
                                 LV2_ATOM_BODY_CONST(ratom));
         }
@@ -5143,6 +5141,7 @@ int effects_add(const char *uri, int instance)
     {
         effect->events_in_buffer = jack_ringbuffer_create(control_in_size);
         jack_ringbuffer_mlock(effect->events_in_buffer);
+        effect->events_in_buffer_helper = malloc(control_in_size);
     }
     if (control_out_size != 0)
     {
@@ -5693,6 +5692,8 @@ int effects_remove(int effect_id)
             free(effect->control_ports);
             if (effect->events_in_buffer)
                 jack_ringbuffer_free(effect->events_in_buffer);
+            if (effect->events_in_buffer_helper)
+                free(effect->events_in_buffer_helper);
             if (effect->events_out_buffer)
                 jack_ringbuffer_free(effect->events_out_buffer);
 
@@ -6075,7 +6076,7 @@ int effects_set_property(int effect_id, const char *uri, const char *value)
     {
         effect_t *effect = &g_effects[effect_id];
 
-        if (effect->events_in_buffer == NULL) {
+        if (effect->events_in_buffer == NULL || effect->events_in_buffer_helper == NULL) {
             return ERR_INVALID_OPERATION;
         }
 
