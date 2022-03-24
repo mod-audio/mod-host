@@ -178,6 +178,7 @@ int effects_state_load(const char *dir);
 int effects_state_save(const char *dir);
 int effects_state_set_tmpdir(const char *dir);
 int effects_aggregated_midi_enable(int enable);
+int effects_freewheeling_enable(int enable);
 int effects_processing_enable(int enable);
 int effects_monitor_midi_program(int channel, int enable);
 void effects_transport(int rolling, double beats_per_bar, double beats_per_minute);

@@ -7767,6 +7767,14 @@ int effects_aggregated_midi_enable(int enable)
     return SUCCESS;
 }
 
+int effects_freewheeling_enable(int enable)
+{
+    if (g_jack_global_client == NULL)
+        return ERR_INVALID_OPERATION;
+
+    return jack_set_freewheel(g_jack_global_client, enable);
+}
+
 int effects_processing_enable(int enable)
 {
     g_processing_enabled = enable;
