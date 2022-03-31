@@ -84,19 +84,20 @@
 
 static void parse_quote(char *str)
 {
-    char *pquote, *pstr = str;
+    char *pstr = str;
 
     while (*pstr)
     {
-        if (*pstr == '"')
+        // shift the string to left as needed
+        if (*pstr == '\\' && *(pstr+1) == '"')
         {
-            // shift the string to left
-            pquote = pstr;
-            while (*pquote)
-            {
-                *pquote = *(pquote+1);
-                pquote++;
-            }
+            memmove(pstr, pstr+1, strlen(pstr));
+            // special case for escaped quotes
+            pstr++;
+        }
+        else if (*pstr == '"')
+        {
+            memmove(pstr, pstr+1, strlen(pstr));
         }
         pstr++;
     }
@@ -116,7 +117,6 @@ static void trim_spaces(char *str)
     }
 }
 
-
 /*
 ************************************************************************************************************************
 *           GLOBAL FUNCTIONS
@@ -128,7 +128,7 @@ char** strarr_split(char *str)
     uint32_t count;
     char *pstr, **list = NULL;
     const char token = ' ';
-    uint8_t quote = 0;
+    uint8_t quote;
 
     if (!str) return list;
 
@@ -136,6 +136,7 @@ char** strarr_split(char *str)
 
     // count the tokens
     pstr = str;
+    quote = 0;
     count = 1;
     while (*pstr)
     {
@@ -147,7 +148,7 @@ char** strarr_split(char *str)
         else if (*pstr == '\\' && *(pstr+1) == '"')
         {
             // special case for escaped quotes
-            *pstr++ = '"';
+            pstr++;
         }
         else if (*pstr == '"')
         {
@@ -173,6 +174,7 @@ char** strarr_split(char *str)
 
     // fill the list pointers
     pstr = str;
+    quote = 0;
     list[0] = pstr;
     count = 0;
     while (*pstr)
@@ -186,7 +188,7 @@ char** strarr_split(char *str)
         else if (*pstr == '\\' && *(pstr+1) == '"')
         {
             // special case for escaped quotes
-            *pstr++ = '"';
+            pstr++;
         }
         else if (*pstr == '"')
         {
