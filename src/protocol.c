@@ -126,11 +126,17 @@ void protocol_parse(msg_t *msg)
     int32_t index;
     proto_t proto;
 
-    if (g_verbose) printf("PROTOCOL: received '%s'\n", msg->data);
-
     proto.list = strarr_split(msg->data);
     proto.list_count = strarr_length(proto.list);
     proto.response = NULL;
+
+    if (g_verbose)
+    {
+        printf("PROTOCOL: received '%s'", msg->data);
+        for (i = 1; i < proto.list_count; i++)
+            printf(" '%s'", proto.list[i]);
+        printf("\n");
+    }
 
     // TODO: check invalid argumets (wildcards)
 
