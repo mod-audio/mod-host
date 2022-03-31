@@ -250,6 +250,7 @@ void socket_run(int exit_on_failure)
     struct sockaddr_in cli_addr;
     socklen_t clilen;
     char *buffer;
+    char *msgbuffer;
     msg_t msg;
 
     /* Allocates memory to receive buffer */
@@ -307,10 +308,62 @@ void socket_run(int exit_on_failure)
 
         if (count > 0) /* Data received */
         {
+            if (count == g_buffer_size)
+            {
+                /* if message is bigger than our buffer, dynamically allocate more data until we receive it all */
+                int new_count, new_buffer_size;
+
+                msgbuffer = NULL;
+                new_count = g_buffer_size;
+                new_buffer_size = g_buffer_size;
+
+                while (new_count == g_buffer_size)
+                {
+                    new_buffer_size += g_buffer_size;
+
+                    if (msgbuffer == NULL)
+                    {
+                        msgbuffer = malloc(new_buffer_size);
+                        memcpy(msgbuffer, buffer, g_buffer_size);
+                    }
+                    else
+                    {
+                        msgbuffer = realloc(msgbuffer, new_buffer_size);
+                    }
+
+                    memset(msgbuffer + count, 0, g_buffer_size);
+                    new_count = read(clientfd, msgbuffer + count, g_buffer_size);
+
+                    if (new_count > 0) /* Data received */
+                    {
+                        count += new_count;
+                    }
+                    else if (new_count < 0) /* Error */
+                    {
+                        if (! exit_on_failure)
+                            goto outside_loop;
+
+                        perror("read error");
+                        exit(EXIT_FAILURE);
+                    }
+                    else if (new_count == 0) /* Client disconnected */
+                    {
+                        goto outside_loop;
+                    }
+                }
+            }
+            else
+            {
+                msgbuffer = buffer;
+            }
+
             msg.sender_id = clientfd;
-            msg.data = buffer;
+            msg.data = msgbuffer;
             msg.data_size = count;
             if (g_receive_cb) g_receive_cb(&msg);
+
+            if (msgbuffer != buffer)
+                free(msgbuffer);
         }
         else if (count < 0) /* Error */
         {
@@ -326,6 +379,7 @@ void socket_run(int exit_on_failure)
         }
     }
 
+outside_loop:
     if (fbclientfd != -1)
     {
         g_fbclientfd = -1;
