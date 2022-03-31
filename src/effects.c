@@ -6102,11 +6102,11 @@ int effects_set_property(int effect_id, const char *uri, const char *value)
                 size = strlen(value)+1;
 
             // size as used by the forge (can overshoot for string->number conversion)
-            size_t bufsize = lv2_atom_pad_size(sizeof(LV2_Atom_Object))
-                           + 3U * lv2_atom_pad_size(2U * sizeof(uint32_t)) /* keys */
-                           + lv2_atom_pad_size(sizeof(LV2_Atom_URID))
-                           + lv2_atom_pad_size(sizeof(LV2_Atom_Int))
-                           + lv2_atom_pad_size(sizeof(LV2_Atom) + size) + 8U;
+            const size_t bufsize = lv2_atom_pad_size(sizeof(LV2_Atom_Object))
+                                 + 3U * lv2_atom_pad_size(2U * sizeof(uint32_t)) /* keys */
+                                 + lv2_atom_pad_size(sizeof(LV2_Atom_URID))
+                                 + lv2_atom_pad_size(sizeof(LV2_Atom_Int))
+                                 + lv2_atom_pad_size(sizeof(LV2_Atom) + size) + 8U;
             uint8_t *buf = malloc(bufsize);
 
             if (!buf) {
@@ -6117,10 +6117,16 @@ int effects_set_property(int effect_id, const char *uri, const char *value)
 
             if (lv2_atom_forge_property_set(&forge, urid, value, type))
             {
-                const LV2_Atom* atom = (LV2_Atom*)buf;
-                jack_ringbuffer_write(effect->events_in_buffer,
-                                      (const char*)atom,
-                                      lv2_atom_total_size(atom));
+                const LV2_Atom *atom = (LV2_Atom*)buf;
+                const size_t atomsize = lv2_atom_total_size(atom);
+
+                if (atomsize > jack_ringbuffer_write_space(effect->events_in_buffer))
+                {
+                    free(buf);
+                    return ERR_MEMORY_ALLOCATION;
+                }
+
+                jack_ringbuffer_write(effect->events_in_buffer, (const char*)atom, atomsize);
                 free(buf);
                 return SUCCESS;
             }
