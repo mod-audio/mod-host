@@ -88,17 +88,8 @@ static void parse_quote(char *str)
 
     while (*pstr)
     {
-        // shift the string to left as needed
-        if (*pstr == '\\' && *(pstr+1) == '"')
-        {
+        if (*pstr == '"')
             memmove(pstr, pstr+1, strlen(pstr));
-            // special case for escaped quotes
-            pstr++;
-        }
-        else if (*pstr == '"')
-        {
-            memmove(pstr, pstr+1, strlen(pstr));
-        }
         pstr++;
     }
 }
@@ -188,7 +179,7 @@ char** strarr_split(char *str)
         else if (*pstr == '\\' && *(pstr+1) == '"')
         {
             // special case for escaped quotes
-            pstr++;
+            *pstr++ = '"';
         }
         else if (*pstr == '"')
         {
