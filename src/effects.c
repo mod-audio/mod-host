@@ -7772,6 +7772,9 @@ int effects_freewheeling_enable(int enable)
     if (g_jack_global_client == NULL)
         return ERR_INVALID_OPERATION;
 
+    if (enable == 2)
+        effects_transport(1, g_transport_bpb, g_transport_bpm);
+
     return jack_set_freewheel(g_jack_global_client, enable);
 }
 
