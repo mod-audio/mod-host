@@ -179,6 +179,16 @@ typedef struct {
 } LV2_HMI_PluginNotification;
 
 /**
+ * Compatibility size for LV2_HMI_WidgetControl.
+ */
+#define LV2_HMI_WIDGETCONTROL_SIZE_BASE (sizeof(size_t) + sizeof(void*) * 7)
+
+/**
+ * Size check for LV2_HMI_WidgetControl::popup_message call.
+ */
+#define LV2_HMI_WIDGETCONTROL_SIZE_POPUP_MESSAGE (LV2_HMI_WIDGETCONTROL_SIZE_BASE + sizeof(void*))
+
+/**
  * On instantiation, host must supply LV2_HMI__WidgetControl feature.
  * LV2_Feature::data must be pointer to LV2_HMI_WidgetControl.
  */
@@ -245,6 +255,15 @@ typedef struct {
     void (*set_indicator)(LV2_HMI_WidgetControl_Handle handle,
                           LV2_HMI_Addressing addressing,
                           const float indicator_pos);
+
+    /**
+     * Open a popup with a custom text message.
+     * @note This function must only be used if size >= LV2_HMI_WIDGETCONTROL_SIZE_POPUP_MESSAGE
+     */
+    void (*popup_message)(LV2_HMI_WidgetControl_Handle handle,
+                          LV2_HMI_Addressing addressing,
+                          const char* title,
+                          const char* message);
 
 } LV2_HMI_WidgetControl;
 
