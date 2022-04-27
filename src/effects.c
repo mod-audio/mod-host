@@ -828,6 +828,7 @@ static void HMIWidgetsSetIndicator(LV2_HMI_WidgetControl_Handle handle,
                                    float indicator_poss);
 static void HMIWidgetsPopupMessage(LV2_HMI_WidgetControl_Handle handle,
                                    LV2_HMI_Addressing addressing,
+                                   int style,
                                    const char* title,
                                    const char* text);
 #endif
@@ -3323,6 +3324,7 @@ static void HMIWidgetsSetIndicator(LV2_HMI_WidgetControl_Handle handle,
 
 static void HMIWidgetsPopupMessage(LV2_HMI_WidgetControl_Handle handle,
                                 LV2_HMI_Addressing addressing_ptr,
+                                int style,
                                 const char* title,
                                 const char* text)
 {
@@ -3337,12 +3339,12 @@ static void HMIWidgetsPopupMessage(LV2_HMI_WidgetControl_Handle handle,
     const uint8_t subpage = addressing->subpage;
 
     if (g_verbose_debug) {
-        printf("DEBUG: HMIWidgetsSetPopup %i: '%s' '%s'\n", assignment_id, title, text);
+        printf("DEBUG: HMIWidgetsSetPopup %i: %i '%s' '%s'\n", assignment_id, style, title, text);
         fflush(stdout);
     }
 
     char msg[256];
-    snprintf(msg, sizeof(msg), "%i \"%s\" \"%s\"", assignment_id, title, text);
+    snprintf(msg, sizeof(msg), "%i %i \"%s\" \"%s\"", assignment_id, style, title, text);
     msg[sizeof(msg)-1] = '\0';
 
     pthread_mutex_lock(&g_hmi_mutex);
