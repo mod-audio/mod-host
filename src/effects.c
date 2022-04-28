@@ -828,7 +828,7 @@ static void HMIWidgetsSetIndicator(LV2_HMI_WidgetControl_Handle handle,
                                    float indicator_poss);
 static void HMIWidgetsPopupMessage(LV2_HMI_WidgetControl_Handle handle,
                                    LV2_HMI_Addressing addressing,
-                                   int style,
+                                   LV2_HMI_Popup_Style style,
                                    const char* title,
                                    const char* text);
 #endif
@@ -3323,10 +3323,10 @@ static void HMIWidgetsSetIndicator(LV2_HMI_WidgetControl_Handle handle,
 }
 
 static void HMIWidgetsPopupMessage(LV2_HMI_WidgetControl_Handle handle,
-                                LV2_HMI_Addressing addressing_ptr,
-                                int style,
-                                const char* title,
-                                const char* text)
+                                   LV2_HMI_Addressing addressing_ptr,
+                                   LV2_HMI_Popup_Style style,
+                                   const char* title,
+                                   const char* text)
 {
     if (handle == NULL || addressing_ptr == NULL || g_hmi_data == NULL) {
         return;
@@ -3339,7 +3339,7 @@ static void HMIWidgetsPopupMessage(LV2_HMI_WidgetControl_Handle handle,
     const uint8_t subpage = addressing->subpage;
 
     if (g_verbose_debug) {
-        printf("DEBUG: HMIWidgetsSetPopup %i: %i '%s' '%s'\n", assignment_id, style, title, text);
+        printf("DEBUG: HMIWidgetsPopupMessage %i: %i '%s' '%s'\n", assignment_id, style, title, text);
         fflush(stdout);
     }
 

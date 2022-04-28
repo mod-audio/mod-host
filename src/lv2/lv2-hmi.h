@@ -271,7 +271,7 @@ typedef struct {
      */
     void (*popup_message)(LV2_HMI_WidgetControl_Handle handle,
                           LV2_HMI_Addressing addressing,
-                          int style,
+                          LV2_HMI_Popup_Style style,
                           const char* title,
                           const char* message);
 
