@@ -129,6 +129,15 @@ typedef enum {
 } LV2_HMI_LED_Colour;
 
 /**
+ *  The color values of the screen popup.
+ *  Conveniently defined as an enum to ensure consistency between plugins.
+ */
+typedef enum {
+    LV2_HMI_Popup_Style_Normal = 0,
+    LV2_HMI_Popup_Style_Inverted = 1
+} LV2_HMI_Popup_Style;
+
+/**
  *  Parameter addressing information passed to the plugin, as triggered by the host (via user input).
  */
 typedef struct {
@@ -262,6 +271,7 @@ typedef struct {
      */
     void (*popup_message)(LV2_HMI_WidgetControl_Handle handle,
                           LV2_HMI_Addressing addressing,
+                          LV2_HMI_Popup_Style style,
                           const char* title,
                           const char* message);
 

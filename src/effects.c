@@ -826,6 +826,11 @@ static void HMIWidgetsSetUnit(LV2_HMI_WidgetControl_Handle handle,
 static void HMIWidgetsSetIndicator(LV2_HMI_WidgetControl_Handle handle,
                                    LV2_HMI_Addressing addressing,
                                    float indicator_poss);
+static void HMIWidgetsPopupMessage(LV2_HMI_WidgetControl_Handle handle,
+                                   LV2_HMI_Addressing addressing,
+                                   LV2_HMI_Popup_Style style,
+                                   const char* title,
+                                   const char* text);
 #endif
 static char *GetLicenseFile(MOD_License_Handle handle, const char *license_uri);
 static int LogPrintf(LV2_Log_Handle handle, LV2_URID type, const char *fmt, ...);
@@ -3316,6 +3321,37 @@ static void HMIWidgetsSetIndicator(LV2_HMI_WidgetControl_Handle handle,
     sys_serial_write(&g_hmi_data->server, sys_serial_event_type_widget_indicator, page, subpage, msg);
     pthread_mutex_unlock(&g_hmi_mutex);
 }
+
+static void HMIWidgetsPopupMessage(LV2_HMI_WidgetControl_Handle handle,
+                                   LV2_HMI_Addressing addressing_ptr,
+                                   LV2_HMI_Popup_Style style,
+                                   const char* title,
+                                   const char* text)
+{
+    if (handle == NULL || addressing_ptr == NULL || g_hmi_data == NULL) {
+        return;
+    }
+
+    const hmi_addressing_t *addressing = (const hmi_addressing_t*)addressing_ptr;
+
+    const int assignment_id = addressing->actuator_id;
+    const uint8_t page = addressing->page;
+    const uint8_t subpage = addressing->subpage;
+
+    if (g_verbose_debug) {
+        printf("DEBUG: HMIWidgetsPopupMessage %i: %i '%s' '%s'\n", assignment_id, style, title, text);
+        fflush(stdout);
+    }
+
+    char msg[256];
+    snprintf(msg, sizeof(msg), "%i %i \"%s\" \"%s\"", assignment_id, style, title, text);
+    msg[sizeof(msg)-1] = '\0';
+
+    pthread_mutex_lock(&g_hmi_mutex);
+    sys_serial_write(&g_hmi_data->server, sys_serial_event_type_popup, page, subpage, msg);
+    pthread_mutex_unlock(&g_hmi_mutex);
+}
+
 #endif
 
 static char* GetLicenseFile(MOD_License_Handle handle, const char *license_uri)
@@ -4086,6 +4122,7 @@ int effects_init(void* client)
     g_hmi_wc.set_value               = HMIWidgetsSetValue;
     g_hmi_wc.set_unit                = HMIWidgetsSetUnit;
     g_hmi_wc.set_indicator           = HMIWidgetsSetIndicator;
+    g_hmi_wc.popup_message           = HMIWidgetsPopupMessage;
 
     if (client != NULL)
     {
