@@ -685,7 +685,6 @@ static volatile double g_transport_bpb;
 static volatile double g_transport_bpm;
 static volatile bool g_transport_reset;
 static volatile enum TransportSyncMode g_transport_sync_mode;
-static double g_transport_tick;
 static bool g_aggregated_midi_enabled;
 static bool g_processing_enabled;
 static bool g_verbose_debug;
@@ -1714,11 +1713,11 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
                 lv2_atom_forge_long(&forge, pos.bar - 1);
 
                 lv2_atom_forge_key(&forge, g_urids.time_barBeat);
-#ifdef __MOD_DEVICES__
-                lv2_atom_forge_float(&forge, pos.beat - 1 + (pos.tick_double / pos.ticks_per_beat));
-#else
-                lv2_atom_forge_float(&forge, pos.beat - 1 + (pos.tick / pos.ticks_per_beat));
-#endif
+
+                if (pos.valid & JackTickDouble)
+                    lv2_atom_forge_float(&forge, pos.beat - 1 + (pos.tick_double / pos.ticks_per_beat));
+                else
+                    lv2_atom_forge_float(&forge, pos.beat - 1 + (pos.tick / pos.ticks_per_beat));
 
                 lv2_atom_forge_key(&forge, g_urids.time_beat);
                 lv2_atom_forge_double(&forge, pos.beat - 1);
@@ -2750,7 +2749,7 @@ static void JackTimebase(jack_transport_state_t state, jack_nframes_t nframes,
     if (new_pos || g_transport_reset) // Is caching involved? No.
     {
         // Do we have to set every "constant" data field every time?
-        pos->valid = JackPositionBBT;
+        pos->valid = JackPositionBBT | JackTickDouble;
         pos->beat_type = 4.0f;
         pos->ticks_per_beat = TRANSPORT_TICKS_PER_BEAT;
 
@@ -2761,9 +2760,8 @@ static void JackTimebase(jack_transport_state_t state, jack_nframes_t nframes,
         {
             if (g_hylia_timeinfo.beat >= 0.0)
             {
-                const double beat = g_hylia_timeinfo.beat;
-                abs_beat = floor(beat);
-                abs_tick = beat * TRANSPORT_TICKS_PER_BEAT;
+                abs_beat = g_hylia_timeinfo.beat;
+                abs_tick = abs_beat * TRANSPORT_TICKS_PER_BEAT;
             }
             else
             {
@@ -2780,24 +2778,25 @@ static void JackTimebase(jack_transport_state_t state, jack_nframes_t nframes,
 
             // What is min? why 60?
             const double min = (double)pos->frame / (double)(g_sample_rate * 60);
-            abs_tick = min * pos->beats_per_minute * TRANSPORT_TICKS_PER_BEAT;
-            abs_beat = abs_tick / TRANSPORT_TICKS_PER_BEAT;
+            abs_beat = min * pos->beats_per_minute;
+            abs_tick = abs_beat * TRANSPORT_TICKS_PER_BEAT;
             g_transport_reset = false;
         }
 
-        pos->bar  = (int32_t)(floor(abs_beat / pos->beats_per_bar) + 0.5);
-        pos->beat = (int32_t)(abs_beat - (double)(pos->bar * beats_per_bar_int) + 1.5);
-        pos->bar_start_tick = pos->bar * pos->beats_per_bar * TRANSPORT_TICKS_PER_BEAT;
-        ++pos->bar;
+        const double bar  = floor(abs_beat / pos->beats_per_bar);
+        const double beat = floor(fmod(abs_beat, pos->beats_per_bar));
+
+        pos->bar  = (int32_t)(bar) + 1;
+        pos->beat = (int32_t)(beat) + 1;
+        pos->bar_start_tick = ((bar * pos->beats_per_bar) + beat) * TRANSPORT_TICKS_PER_BEAT;
 
         tick = abs_tick - (abs_beat * pos->ticks_per_beat);
     }
     else // not new_pos nor g_transport_reset
     {
         // update the current tick with the beat.
-        tick = g_transport_tick +
-              (nframes * TRANSPORT_TICKS_PER_BEAT *
-           pos->beats_per_minute / (double)(g_sample_rate * 60));
+        tick = pos->tick_double +
+              (nframes * TRANSPORT_TICKS_PER_BEAT * pos->beats_per_minute / (double)(g_sample_rate * 60));
 
         // why adjust? why can overflow happen?
         while (tick >= TRANSPORT_TICKS_PER_BEAT)
@@ -2814,10 +2813,7 @@ static void JackTimebase(jack_transport_state_t state, jack_nframes_t nframes,
     }
 
     pos->tick = (int32_t)(tick + 0.5);
-#ifdef __MOD_DEVICES__
     pos->tick_double = tick;
-#endif
-    g_transport_tick = tick;
     return;
 
     UNUSED_PARAM(state);
@@ -3865,7 +3861,6 @@ int effects_init(void* client)
     g_transport_reset = true;
     g_transport_bpb = 4.0;
     g_transport_bpm = 120.0;
-    g_transport_tick = 0.0;
     g_transport_sync_mode = TRANSPORT_SYNC_NONE;
 
     /* check verbose mode */
