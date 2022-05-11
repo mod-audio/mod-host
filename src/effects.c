@@ -379,6 +379,7 @@ typedef struct EFFECT_T {
 
     worker_t worker;
     const MOD_License_Interface *license_iface;
+    const LV2_Options_Interface *options_interface;
     const LV2_State_Interface *state_iface;
 #ifdef __MOD_DEVICES__
     const LV2_HMI_PluginNotification *hmi_notif;
@@ -438,6 +439,7 @@ typedef struct LILV_NODES_T {
     LilvNode *mod_default_custom;
     LilvNode *mod_maximum;
     LilvNode *mod_minimum;
+    LilvNode *options_interface;
     LilvNode *output;
     LilvNode *patch_readable;
     LilvNode *patch_writable;
@@ -914,10 +916,53 @@ static int BufferSize(jack_nframes_t nframes, void* data)
     if (data)
     {
         effect_t *effect = data;
+
         // if ringbuffers exist, keep their existing size
         const int in_size = effect->events_in_buffer ? 0 : (g_midi_buffer_size * 16);
         const int out_size = effect->events_out_buffer ? 0 : (g_midi_buffer_size * 16);
         AllocatePortBuffers(effect, in_size, out_size);
+
+        // notify plugin of the change
+        if (effect->options_interface != NULL) {
+            LV2_Options_Option options[5];
+
+            options[0].context = LV2_OPTIONS_INSTANCE;
+            options[0].subject = 0;
+            options[0].key = g_urids.bufsz_nomimalBlockLength;
+            options[0].size = sizeof(int32_t);
+            options[0].type = g_urids.atom_Int;
+            options[0].value = &g_block_length;
+
+            options[1].context = LV2_OPTIONS_INSTANCE;
+            options[1].subject = 0;
+            options[1].key = g_urids.bufsz_minBlockLength;
+            options[1].size = sizeof(int32_t);
+            options[1].type = g_urids.atom_Int;
+            options[1].value = &g_block_length;
+
+            options[2].context = LV2_OPTIONS_INSTANCE;
+            options[2].subject = 0;
+            options[2].key = g_urids.bufsz_maxBlockLength;
+            options[2].size = sizeof(int32_t);
+            options[2].type = g_urids.atom_Int;
+            options[2].value = &g_block_length;
+
+            options[3].context = LV2_OPTIONS_INSTANCE;
+            options[3].subject = 0;
+            options[3].key = g_urids.bufsz_sequenceSize;
+            options[3].size = sizeof(int32_t);
+            options[3].type = g_urids.atom_Int;
+            options[3].value = &g_midi_buffer_size;
+
+            options[4].context = LV2_OPTIONS_INSTANCE;
+            options[4].subject = 0;
+            options[4].key = 0;
+            options[4].size = 0;
+            options[4].type = 0;
+            options[4].value = NULL;
+
+            effect->options_interface->set(effect->lilv_instance->lv2_handle, options);
+        }
     }
 #ifdef HAVE_HYLIA
     else if (g_hylia_instance)
@@ -3945,6 +3990,7 @@ int effects_init(void* client)
 #endif
     g_lilv_nodes.mod_maximum = lilv_new_uri(g_lv2_data, LILV_NS_MOD "maximum");
     g_lilv_nodes.mod_minimum = lilv_new_uri(g_lv2_data, LILV_NS_MOD "minimum");
+    g_lilv_nodes.options_interface = lilv_new_uri(g_lv2_data, LV2_OPTIONS__interface);
     g_lilv_nodes.output = lilv_new_uri(g_lv2_data, LILV_URI_OUTPUT_PORT);
     g_lilv_nodes.patch_writable = lilv_new_uri(g_lv2_data, LV2_PATCH__writable);
     g_lilv_nodes.patch_readable = lilv_new_uri(g_lv2_data, LV2_PATCH__readable);
@@ -4438,7 +4484,7 @@ int effects_add(const char *uri, int instance)
     }
     effect->lilv_instance = lilv_instance;
 
-    /* Worker */
+    /* Query plugin extensions/interfaces */
     if (lilv_plugin_has_extension_data(effect->lilv_plugin, g_lilv_nodes.worker_interface))
     {
         const LV2_Worker_Interface *worker_interface =
@@ -4446,6 +4492,13 @@ int effects_add(const char *uri, int instance)
                                                                            LV2_WORKER__interface);
 
         worker_init(&effect->worker, lilv_instance, worker_interface);
+    }
+
+    if (lilv_plugin_has_extension_data(effect->lilv_plugin, g_lilv_nodes.options_interface))
+    {
+        effect->options_interface =
+            (const LV2_Options_Interface*) lilv_instance_get_extension_data(effect->lilv_instance,
+                                                                            LV2_OPTIONS__interface);
     }
 
     if (lilv_plugin_has_extension_data(effect->lilv_plugin, g_lilv_nodes.license_interface))
