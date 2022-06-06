@@ -70,6 +70,7 @@ enum {
     ERR_CONTROL_CHAIN_UNAVAILABLE = -401,
     ERR_ABLETON_LINK_UNAVAILABLE = -402,
     ERR_HMI_UNAVAILABLE = -403,
+    ERR_EXTERNAL_UI_UNAVAILABLE = -404,
 
     ERR_MEMORY_ALLOCATION = -901,
     ERR_INVALID_OPERATION = -902
@@ -184,6 +185,8 @@ int effects_monitor_midi_program(int channel, int enable);
 void effects_transport(int rolling, double beats_per_bar, double beats_per_minute);
 int effects_transport_sync_mode(const char *mode);
 void effects_output_data_ready(void);
+int effects_show_external_ui(int effect_id);
+void effects_idle_external_uis(void);
 
 /*
 ************************************************************************************************************************

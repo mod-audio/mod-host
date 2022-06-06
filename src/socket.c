@@ -30,6 +30,7 @@
 #include <netinet/in.h>
 
 #include "socket.h"
+#include "effects.h"
 
 
 /*
@@ -364,6 +365,8 @@ void socket_run(int exit_on_failure)
 
             if (msgbuffer != buffer)
                 free(msgbuffer);
+
+            effects_idle_external_uis();
         }
         else if (count < 0) /* Error */
         {
