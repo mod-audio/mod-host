@@ -173,7 +173,7 @@ int effects_hmi_unmap(int effect_id, const char *control_symbol);
 
 float effects_jack_cpu_load(void);
 void effects_bundle_add(const char *bundlepath);
-void effects_bundle_remove(const char *bundlepath);
+void effects_bundle_remove(const char *bundlepath, const char *resource);
 int effects_state_load(const char *dir);
 int effects_state_save(const char *dir);
 int effects_state_set_tmpdir(const char *dir);

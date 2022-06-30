@@ -84,7 +84,7 @@
 #define LOAD_COMMANDS        "load %s"
 #define SAVE_COMMANDS        "save %s"
 #define BUNDLE_ADD           "bundle_add %s"
-#define BUNDLE_REMOVE        "bundle_remove %s"
+#define BUNDLE_REMOVE        "bundle_remove %s %s"
 #define STATE_LOAD           "state_load %s"
 #define STATE_SAVE           "state_save %s"
 #define STATE_TMPDIR         "state_tmpdir %s"

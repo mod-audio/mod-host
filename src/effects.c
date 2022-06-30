@@ -7506,7 +7506,7 @@ void effects_bundle_add(const char* bpath)
 #endif
 }
 
-void effects_bundle_remove(const char* bpath)
+void effects_bundle_remove(const char *bpath, const char *resource)
 {
 #ifdef HAVE_NEW_LILV
     // lilv wants the last character as the separator
@@ -7525,6 +7525,17 @@ void effects_bundle_remove(const char* bpath)
         {
             bundlepath[size  ] = OS_SEP;
             bundlepath[size+1] = '\0';
+        }
+    }
+
+    // unload resource if requested
+    if (resource != NULL && resource[0] != '\0')
+    {
+        LilvNode *resourcenode = lilv_new_uri(g_lv2_data, resource);
+        if (resourcenode)
+        {
+            lilv_world_unload_resource(g_lv2_data, resourcenode);
+            lilv_node_free(resourcenode);
         }
     }
 

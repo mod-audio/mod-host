@@ -507,7 +507,7 @@ static void bundle_add(proto_t *proto)
 
 static void bundle_remove(proto_t *proto)
 {
-    effects_bundle_remove(proto->list[1]);
+    effects_bundle_remove(proto->list[1], proto->list[2]);
     protocol_response("resp 0", proto);
 }
 
