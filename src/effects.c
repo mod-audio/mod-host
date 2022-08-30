@@ -511,6 +511,7 @@ typedef struct MIDI_CC_T {
     int effect_id;
     const char* symbol;
     port_t* port;
+    int8_t midiOutValue;
 } midi_cc_t;
 
 typedef struct ASSIGNMENT_T {
@@ -677,6 +678,7 @@ static jack_port_t *g_audio_out2_port;
 #endif
 #endif
 static jack_port_t *g_midi_in_port;
+static jack_port_t *g_midi_out_port;
 static jack_position_t g_jack_pos;
 static bool g_jack_rolling;
 static volatile double g_transport_bpb;
@@ -2452,6 +2454,28 @@ static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
     }
 #endif
 
+    void *buf = jack_port_get_buffer(g_midi_out_port, nframes);
+    if (buf != NULL)
+    {
+        jack_midi_clear_buffer(buf);
+        for (int j = 0; j < MAX_MIDI_CC_ASSIGN; j++)
+        {
+            if (g_midi_cc_list[j].effect_id == ASSIGNMENT_NULL)
+                break;
+            if (g_midi_cc_list[j].effect_id == ASSIGNMENT_UNUSED)
+                continue;
+            if (g_midi_cc_list[j].midiOutValue >= 0)
+            {
+                jack_midi_data_t buffer[3];
+                buffer [0] = 0xb0 + g_midi_cc_list[j].channel;
+                buffer [1] = g_midi_cc_list[j].controller;
+                buffer [2] = g_midi_cc_list[j].midiOutValue;
+                g_midi_cc_list[j].midiOutValue = -1;
+                if(jack_midi_event_write(buf, 0, buffer,3))
+                    break;
+            }
+        }
+    }
     // Handle input MIDI events
     void *const port_buf = jack_port_get_buffer(g_midi_in_port, nframes);
     const jack_nframes_t event_count = jack_midi_get_event_count(port_buf);
@@ -3741,6 +3765,16 @@ int effects_init(void* client)
             jack_client_close(g_jack_global_client);
         return ERR_JACK_PORT_REGISTER;
     }
+	
+	g_midi_out_port = jack_port_register(g_jack_global_client, "midi_out", JACK_DEFAULT_MIDI_TYPE, JackPortIsOutput, 0);
+
+    if (! g_midi_out_port)
+    {
+        fprintf(stderr, "can't register global jack midi-out port\n");
+        if (client == NULL)
+            jack_client_close(g_jack_global_client);
+        return ERR_JACK_PORT_REGISTER;
+    }
 
 #ifdef __MOD_DEVICES__
 #ifdef _MOD_DEVICE_DWARF
@@ -4184,6 +4218,7 @@ int effects_init(void* client)
         g_midi_cc_list[i].effect_id = ASSIGNMENT_NULL;
         g_midi_cc_list[i].symbol = NULL;
         g_midi_cc_list[i].port = NULL;
+        g_midi_cc_list[i].midiOutValue = -1;
     }
     g_midi_learning = NULL;
 
@@ -5829,6 +5864,20 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
 
     if (InstanceExist(effect_id))
     {
+        for (int j = 0; j < MAX_MIDI_CC_ASSIGN; j++)
+        {
+            if (g_midi_cc_list[j].effect_id == ASSIGNMENT_NULL)
+                break;
+            if (g_midi_cc_list[j].effect_id == ASSIGNMENT_UNUSED)
+                continue;
+            if (g_midi_cc_list[j].effect_id  == effect_id &&
+                strcmp(g_midi_cc_list[j].symbol, control_symbol) == 0)
+            {
+                float fRange = g_midi_cc_list[j].maximum - g_midi_cc_list[j].minimum;
+                float fNormal = (value - g_midi_cc_list[j].minimum) / fRange;
+                g_midi_cc_list[j].midiOutValue = fNormal * 127;
+            }
+        }
         // check whether is setting the same parameter
         if (last_effect_id == effect_id)
         {
