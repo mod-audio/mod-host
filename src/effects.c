@@ -774,7 +774,7 @@ static const char* const g_rolling_port_symbol = ROLLING_PORT_SYMBOL;
 *           LOCAL FUNCTION PROTOTYPES
 ************************************************************************************************************************
 */
-
+static void SetMidiOutValue(midi_cc_t *midiCC);
 static void InstanceDelete(int effect_id);
 static int InstanceExist(int effect_id);
 static void AllocatePortBuffers(effect_t* effect, int in_size, int out_size);
@@ -871,6 +871,16 @@ static char* strchrnul(const char *s, int c)
     return r;
 }
 #endif
+
+static void SetMidiOutValue(midi_cc_t *midiCC)
+{
+    float value = *(midiCC->port->buffer);
+
+    float fRange = midiCC->maximum - midiCC->minimum;
+    float fNormal = (value - midiCC->minimum) / fRange;
+
+    midiCC->midiOutValue = fNormal * 127;
+}
 
 static void InstanceDelete(int effect_id)
 {
@@ -5864,20 +5874,6 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
 
     if (InstanceExist(effect_id))
     {
-        for (int j = 0; j < MAX_MIDI_CC_ASSIGN; j++)
-        {
-            if (g_midi_cc_list[j].effect_id == ASSIGNMENT_NULL)
-                break;
-            if (g_midi_cc_list[j].effect_id == ASSIGNMENT_UNUSED)
-                continue;
-            if (g_midi_cc_list[j].effect_id  == effect_id &&
-                strcmp(g_midi_cc_list[j].symbol, control_symbol) == 0)
-            {
-                float fRange = g_midi_cc_list[j].maximum - g_midi_cc_list[j].minimum;
-                float fNormal = (value - g_midi_cc_list[j].minimum) / fRange;
-                g_midi_cc_list[j].midiOutValue = fNormal * 127;
-            }
-        }
         // check whether is setting the same parameter
         if (last_effect_id == effect_id)
         {
@@ -5909,6 +5905,19 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
                 value = last_max;
 
             *last_prev = *last_buffer = value;
+
+            for (int j = 0; j < MAX_MIDI_CC_ASSIGN; j++)
+            {
+                if (g_midi_cc_list[j].effect_id == ASSIGNMENT_NULL)
+                    break;
+                if (g_midi_cc_list[j].effect_id == ASSIGNMENT_UNUSED)
+                    continue;
+                if (g_midi_cc_list[j].effect_id  == effect_id &&
+                    strcmp(g_midi_cc_list[j].symbol, control_symbol) == 0)
+                {
+                    SetMidiOutValue(&(g_midi_cc_list[j]));
+                }
+            }
             return SUCCESS;
         }
 
@@ -6616,6 +6625,8 @@ int effects_midi_map(int effect_id, const char *control_symbol, int channel, int
         {
             g_midi_cc_list[i].minimum = minimum;
             g_midi_cc_list[i].maximum = maximum;
+        
+            SetMidiOutValue(&(g_midi_cc_list[i]));
         }
 
         return SUCCESS;
@@ -6639,10 +6650,13 @@ int effects_midi_map(int effect_id, const char *control_symbol, int channel, int
             if (port == NULL)
                 return ERR_LV2_INVALID_PARAM_SYMBOL;
 
+
             g_midi_cc_list[i].minimum = minimum;
             g_midi_cc_list[i].maximum = maximum;
             g_midi_cc_list[i].symbol = port->symbol;
             g_midi_cc_list[i].port = port;
+
+            SetMidiOutValue(&(g_midi_cc_list[i]));
         }
 
         g_midi_cc_list[i].channel = channel;
