@@ -242,7 +242,8 @@ enum PostPonedEventType {
     POSTPONED_MIDI_PROGRAM_CHANGE,
     POSTPONED_MIDI_MAP,
     POSTPONED_TRANSPORT,
-    POSTPONED_JACK_MIDI_CONNECT,
+    POSTPONED_JACK_MIDI_CONNECT_IN,
+    POSTPONED_JACK_MIDI_CONNECT_OUT,
     POSTPONED_LOG_TRACE, // stack allocated, rt-safe
     POSTPONED_LOG_MESSAGE, // heap allocated
     POSTPONED_PROCESS_OUTPUT_BUFFER
@@ -1003,13 +1004,20 @@ static void PortRegistration(jack_port_id_t port_id, int reg, void* data)
         return;
 
     /* port flags to connect to */
-    static const int target_port_flags = JackPortIsTerminal|JackPortIsPhysical|JackPortIsOutput;
+    static const int target_port_flags_out = JackPortIsTerminal|JackPortIsPhysical|JackPortIsOutput;
+    static const int target_port_flags_in  = JackPortIsTerminal|JackPortIsPhysical|JackPortIsInput;
 
     const jack_port_t* const port = jack_port_by_id(g_jack_global_client, port_id);
 
-    if ((jack_port_flags(port) & target_port_flags) != target_port_flags)
-        return;
     if (strcmp(jack_port_type(port), JACK_DEFAULT_MIDI_TYPE) != 0)
+        return;
+
+    enum PostPonedEventType eventType;
+    if ((jack_port_flags(port) & target_port_flags_out) == target_port_flags_out)
+        eventType = POSTPONED_JACK_MIDI_CONNECT_OUT;
+    else if ((jack_port_flags(port) & target_port_flags_in) == target_port_flags_in)
+        eventType = POSTPONED_JACK_MIDI_CONNECT_IN;
+    else
         return;
 
     postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
@@ -1017,7 +1025,7 @@ static void PortRegistration(jack_port_id_t port_id, int reg, void* data)
     if (posteventptr == NULL)
         return;
 
-    posteventptr->event.type = POSTPONED_JACK_MIDI_CONNECT;
+    posteventptr->event.type = eventType;
     posteventptr->event.jack_midi_connect.port = port_id;
 
     pthread_mutex_lock(&g_rtsafe_mutex);
@@ -1189,7 +1197,7 @@ static void RunPostPonedEvents(int ignored_effect_id)
         }
 #endif
 
-        if (got_only_jack_midi_requests && eventptr->event.type != POSTPONED_JACK_MIDI_CONNECT)
+        if (got_only_jack_midi_requests && !(eventptr->event.type == POSTPONED_JACK_MIDI_CONNECT_OUT || eventptr->event.type == POSTPONED_JACK_MIDI_CONNECT_IN))
             got_only_jack_midi_requests = false;
 
         switch (eventptr->event.type)
@@ -1271,7 +1279,7 @@ static void RunPostPonedEvents(int ignored_effect_id)
             got_transport = true;
             break;
 
-        case POSTPONED_JACK_MIDI_CONNECT:
+        case POSTPONED_JACK_MIDI_CONNECT_OUT:
             if (g_jack_global_client != NULL) {
                 const jack_port_id_t port_id = eventptr->event.jack_midi_connect.port;
                 const jack_port_t *const port = jack_port_by_id(g_jack_global_client, port_id);
@@ -1294,6 +1302,21 @@ static void RunPostPonedEvents(int ignored_effect_id)
                 }
             }
             break;
+
+        case POSTPONED_JACK_MIDI_CONNECT_IN:
+            if(g_enable_midi_feedback && g_jack_global_client != NULL) {
+                const jack_port_id_t port_id = eventptr->event.jack_midi_connect.port;
+                const jack_port_t *const port = jack_port_by_id(g_jack_global_client, port_id);
+
+                if (port != NULL) {
+                    if(g_midi_out_port != NULL)
+                    {
+                        jack_connect(g_jack_global_client,  jack_port_name(g_midi_out_port), jack_port_name(port));
+                    }
+                }
+            }
+            break;
+
 
         case POSTPONED_PROCESS_OUTPUT_BUFFER:
             if (eventptr->event.process_out_buf.effect_id == ignored_effect_id)
@@ -3168,6 +3191,39 @@ static void ConnectToAllHardwareMIDIPorts(void)
 
         jack_free(midihwports);
     }
+
+    if(g_enable_midi_feedback)
+    {
+        const char** const midihwports = jack_get_ports(g_jack_global_client, "",
+                                                        JACK_DEFAULT_MIDI_TYPE,
+                                                        JackPortIsTerminal|JackPortIsPhysical|JackPortIsInput);
+        if (midihwports != NULL)
+        {
+            const char *ourportname = jack_port_name(g_midi_out_port);
+
+            char  aliases[2][320];
+            char* aliasesptr[2] = {
+                aliases[0],
+                aliases[1]
+            };
+
+            for (int i=0; midihwports[i] != NULL; ++i)
+            {
+                jack_port_t* const port = jack_port_by_name(g_jack_global_client, midihwports[i]);
+
+                if (port == NULL)
+                    continue;
+                if (jack_port_get_aliases(port, aliasesptr) <= 0)
+                    continue;
+                if (strncmp(aliases[0], "alsa_pcm:Midi-Through/", 22) == 0)
+                    continue;
+
+                jack_connect(g_jack_global_client, ourportname, midihwports[i]);
+            }
+
+            jack_free(midihwports);
+        }
+    }
 }
 
 static void ConnectToMIDIThroughPorts(void)
@@ -4292,8 +4348,15 @@ int effects_init(void* client)
 
     if (g_aggregated_midi_enabled)
     {
-        const char *ourportname = jack_port_name(g_midi_in_port);
-        jack_connect(g_jack_global_client, "mod-midi-merger:out", ourportname);
+        const char *ourportnamein = jack_port_name(g_midi_in_port);
+        jack_connect(g_jack_global_client, "mod-midi-merger:out", ourportnamein);
+
+        if(g_enable_midi_feedback)
+        {
+            const char *ourportnameout = jack_port_name(g_midi_out_port);
+            jack_connect(g_jack_global_client, ourportnameout, "mod-midi-broadcaster:in");
+        }
+
         ConnectToMIDIThroughPorts();
     }
     /* Else connect to all good hw ports (system, ttymidi and nooice) */
@@ -7910,6 +7973,12 @@ int effects_aggregated_midi_enable(int enable)
             pthread_mutex_unlock(&g_raw_midi_port_mutex);
         }
 
+        // step7. If midi feedback enabled then connect to mod-midi-broadcaster
+        if(g_enable_midi_feedback)
+        {
+            const char *ourportnameout = jack_port_name(g_midi_out_port);
+            jack_connect(g_jack_global_client, ourportnameout, "mod-midi-broadcaster:in");
+        }
     } else {
         // step 1. remove aggregated midi clients
         jack_intclient_t merger = jack_internal_client_handle(g_jack_global_client, "mod-midi-merger", NULL);
