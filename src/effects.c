@@ -689,6 +689,8 @@ static double g_transport_tick;
 static bool g_aggregated_midi_enabled;
 static bool g_processing_enabled;
 static bool g_verbose_debug;
+static bool g_enable_midi_feedback;
+static bool g_enable_midi_feedback_sync;
 
 // Wall clock time since program startup
 static uint64_t g_monotonic_frame_count = 0;
@@ -2463,26 +2465,29 @@ static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
         }
     }
 #endif
-
-    void *buf = jack_port_get_buffer(g_midi_out_port, nframes);
-    if (buf != NULL)
+    // If midi feedback is enabled send any cc messages out to midi
+    if(g_enable_midi_feedback)
     {
-        jack_midi_clear_buffer(buf);
-        for (int j = 0; j < MAX_MIDI_CC_ASSIGN; j++)
+        void *buf = jack_port_get_buffer(g_midi_out_port, nframes);
+        if (buf != NULL)
         {
-            if (g_midi_cc_list[j].effect_id == ASSIGNMENT_NULL)
-                break;
-            if (g_midi_cc_list[j].effect_id == ASSIGNMENT_UNUSED)
-                continue;
-            if (g_midi_cc_list[j].midiOutValue >= 0)
+            jack_midi_clear_buffer(buf);
+            for (int j = 0; j < MAX_MIDI_CC_ASSIGN; j++)
             {
-                jack_midi_data_t buffer[3];
-                buffer [0] = 0xb0 + g_midi_cc_list[j].channel;
-                buffer [1] = g_midi_cc_list[j].controller;
-                buffer [2] = g_midi_cc_list[j].midiOutValue;
-                g_midi_cc_list[j].midiOutValue = -1;
-                if(jack_midi_event_write(buf, 0, buffer,3))
+                if (g_midi_cc_list[j].effect_id == ASSIGNMENT_NULL)
                     break;
+                if (g_midi_cc_list[j].effect_id == ASSIGNMENT_UNUSED)
+                    continue;
+                if (g_midi_cc_list[j].midiOutValue >= 0)
+                {
+                    jack_midi_data_t buffer[3];
+                    buffer [0] = 0xb0 + g_midi_cc_list[j].channel;
+                    buffer [1] = g_midi_cc_list[j].controller;
+                    buffer [2] = g_midi_cc_list[j].midiOutValue;
+                    g_midi_cc_list[j].midiOutValue = -1;
+                    if(jack_midi_event_write(buf, 0, buffer,3))
+                        break;
+                }
             }
         }
     }
@@ -2626,6 +2631,11 @@ static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
             {
                 handled = true;
                 value = UpdateValueFromMidi(&g_midi_cc_list[j], mvalue, highres);
+
+                // if midi feedback sync is enabled set the output CC to send back out over midi
+                // this will keep any other devices synced.
+                if(g_enable_midi_feedback_sync)
+                    SetMidiOutValue(&(g_midi_cc_list[j]));
 
                 postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
 
@@ -3776,16 +3786,27 @@ int effects_init(void* client)
         return ERR_JACK_PORT_REGISTER;
     }
 	
-	g_midi_out_port = jack_port_register(g_jack_global_client, "midi_out", JACK_DEFAULT_MIDI_TYPE, JackPortIsOutput, 0);
+    /* check midi feedback mode 
+       ENABLE_MIDI_FEEDBACK = 1 : Enable midi CC feedback
+       ENABLE_MIDI_FEEDBACK = 2 : Enable midi CC feedback and also sync devices on input */
 
-    if (! g_midi_out_port)
+    const char* const enable_midi_feedback = getenv("ENABLE_MIDI_FEEDBACK");
+    g_enable_midi_feedback      = enable_midi_feedback != NULL && atoi(enable_midi_feedback) != 0;
+    g_enable_midi_feedback_sync = enable_midi_feedback != NULL && atoi(enable_midi_feedback) == 2;
+
+    // if midi feedback is enable create output midi port
+    if(g_enable_midi_feedback)
     {
-        fprintf(stderr, "can't register global jack midi-out port\n");
-        if (client == NULL)
-            jack_client_close(g_jack_global_client);
-        return ERR_JACK_PORT_REGISTER;
-    }
+        g_midi_out_port = jack_port_register(g_jack_global_client, "midi_out", JACK_DEFAULT_MIDI_TYPE, JackPortIsOutput, 0);
 
+        if (! g_midi_out_port)
+        {
+            fprintf(stderr, "can't register global jack midi-out port\n");
+            if (client == NULL)
+                jack_client_close(g_jack_global_client);
+            return ERR_JACK_PORT_REGISTER;
+        }
+    }
 #ifdef __MOD_DEVICES__
 #ifdef _MOD_DEVICE_DWARF
     g_audio_in1_port = jack_port_register(g_jack_global_client, "in1", JACK_DEFAULT_AUDIO_TYPE, JackPortIsInput, 0);
@@ -3881,6 +3902,7 @@ int effects_init(void* client)
     /* check verbose mode */
     const char* const mod_log = getenv("MOD_LOG");
     g_verbose_debug = mod_log != NULL && atoi(mod_log) != 0;
+
 
     /* this fails to build if GLOBAL_EFFECT_ID >= MAX_INSTANCES */
     char global_effect_id_static_check1[GLOBAL_EFFECT_ID >= MAX_PLUGIN_INSTANCES?1:-1];
@@ -5906,16 +5928,20 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
 
             *last_prev = *last_buffer = value;
 
-            for (int j = 0; j < MAX_MIDI_CC_ASSIGN; j++)
+            // if midi feedback is enabled find the correct CC and set it to be output
+            if(g_enable_midi_feedback)
             {
-                if (g_midi_cc_list[j].effect_id == ASSIGNMENT_NULL)
-                    break;
-                if (g_midi_cc_list[j].effect_id == ASSIGNMENT_UNUSED)
-                    continue;
-                if (g_midi_cc_list[j].effect_id  == effect_id &&
-                    strcmp(g_midi_cc_list[j].symbol, control_symbol) == 0)
+                for (int j = 0; j < MAX_MIDI_CC_ASSIGN; j++)
                 {
-                    SetMidiOutValue(&(g_midi_cc_list[j]));
+                    if (g_midi_cc_list[j].effect_id == ASSIGNMENT_NULL)
+                        break;
+                    if (g_midi_cc_list[j].effect_id == ASSIGNMENT_UNUSED)
+                        continue;
+                    if (g_midi_cc_list[j].effect_id  == effect_id &&
+                        strcmp(g_midi_cc_list[j].symbol, control_symbol) == 0)
+                    {
+                        SetMidiOutValue(&(g_midi_cc_list[j]));
+                    }
                 }
             }
             return SUCCESS;
@@ -6626,7 +6652,9 @@ int effects_midi_map(int effect_id, const char *control_symbol, int channel, int
             g_midi_cc_list[i].minimum = minimum;
             g_midi_cc_list[i].maximum = maximum;
         
-            SetMidiOutValue(&(g_midi_cc_list[i]));
+            // if midi feedback is enabled set this cc to be sent
+            if(g_enable_midi_feedback)
+                SetMidiOutValue(&(g_midi_cc_list[i]));
         }
 
         return SUCCESS;
@@ -6656,7 +6684,9 @@ int effects_midi_map(int effect_id, const char *control_symbol, int channel, int
             g_midi_cc_list[i].symbol = port->symbol;
             g_midi_cc_list[i].port = port;
 
-            SetMidiOutValue(&(g_midi_cc_list[i]));
+            // if midi feedback is enabled set this cc to be sent
+            if(g_enable_midi_feedback)
+                SetMidiOutValue(&(g_midi_cc_list[i]));
         }
 
         g_midi_cc_list[i].channel = channel;
