@@ -5937,11 +5937,17 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
                         break;
                     if (g_midi_cc_list[j].effect_id == ASSIGNMENT_UNUSED)
                         continue;
-                    if (g_midi_cc_list[j].effect_id  == effect_id &&
-                        strcmp(g_midi_cc_list[j].symbol, control_symbol) == 0)
-                    {
-                        SetMidiOutValue(&(g_midi_cc_list[j]));
+                    if (g_midi_cc_list[j].effect_id  == effect_id)
+                    { 
+                        // avoid call to strcmp and compare strings ourselves
+                        bool bEqual = false;
+                        for(const char *s1 = control_symbol, *s2 = g_midi_cc_list[j].symbol; (bEqual = *s1 == *s2) && *s1; s1++, s2++)
+                            /* empty loop*/;
+
+                        if(bEqual)
+                            SetMidiOutValue(&(g_midi_cc_list[j]));
                     }
+                    
                 }
             }
             return SUCCESS;
