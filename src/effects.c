@@ -875,6 +875,28 @@ static char* strchrnul(const char *s, int c)
 }
 #endif
 
+#ifdef ENABLE_TMP_LOG
+static void Log(const char *psFormatString, ...)
+{
+    static FILE *pFile = NULL;
+    static char logStr[2048];
+
+    if(pFile == NULL)
+    {
+        pFile = fopen("/tmp/mod.log", "a");
+    }
+    
+	va_list args;
+	va_start(args, psFormatString);
+
+    vsnprintf(logStr, 2048, psFormatString, args);
+
+    fputs(logStr, pFile);
+
+    fflush(pFile);
+}
+#endif
+
 static void SetMidiOutValue(midi_cc_t *midiCC)
 {
     float value = *(midiCC->port->buffer);
@@ -3213,10 +3235,12 @@ static void ConnectToAllHardwareMIDIPorts(void)
 
                 if (port == NULL)
                     continue;
-                if (jack_port_get_aliases(port, aliasesptr) <= 0)
-                    continue;
-                if (strncmp(aliases[0], "alsa_pcm:Midi-Through/", 22) == 0)
-                    continue;
+
+                if (jack_port_get_aliases(port, aliasesptr) > 0)
+                {
+                    if (strncmp(aliases[0], "alsa_pcm:Midi-Through/", 22) == 0)
+                        continue;
+                }
 
                 jack_connect(g_jack_global_client, ourportname, midihwports[i]);
             }
