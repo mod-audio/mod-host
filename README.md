@@ -49,7 +49,7 @@ Dependencies:
 
 On Debian-based Linux distributions (Ubuntu, Mint, etc) most of these can be installed with:
 
-   sudo apt install libreadline-dev liblilv-dev lilv-utils libfftw3-dev libjack-jackd2-dev
+    sudo apt install libreadline-dev liblilv-dev lilv-utils libfftw3-dev libjack-jackd2-dev
 
 For Hylia, please go to https://github.com/falkTX/Hylia to install from source.
 
