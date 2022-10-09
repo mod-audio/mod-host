@@ -510,13 +510,13 @@ typedef struct URIDS_T {
 
 typedef struct MIDI_CC_T {
     int8_t channel;
-    uint8_t controller;
+    uint16_t controller;    // if high bit set then controller is an nrpn
     float minimum;
     float maximum;
     int effect_id;
     const char* symbol;
     port_t* port;
-    int8_t midiOutValue;
+    int16_t midiOutValue;
 } midi_cc_t;
 
 typedef struct ASSIGNMENT_T {
@@ -693,6 +693,10 @@ static bool g_processing_enabled;
 static bool g_verbose_debug;
 static bool g_enable_midi_feedback;
 static bool g_enable_midi_feedback_sync;
+static bool g_enable_nrpn;
+
+static uint16_t  g_nrpn_param_num;
+static uint16_t  g_nrpn_param_value;
 
 // Wall clock time since program startup
 static uint64_t g_monotonic_frame_count = 0;
@@ -910,7 +914,11 @@ static void SetMidiOutValue(midi_cc_t *midiCC)
     float fRange = midiCC->maximum - midiCC->minimum;
     float fNormal = (value - midiCC->minimum) / fRange;
 
-    midiCC->midiOutValue = fNormal * 127;
+    // if high bit is set controller is an nrpn with 14 bit value
+    if(midiCC->controller & 0x8000)
+        midiCC->midiOutValue = fNormal * 16383;
+    else
+        midiCC->midiOutValue = fNormal * 127;
 }
 
 static void InstanceDelete(int effect_id)
@@ -2489,12 +2497,13 @@ static bool UpdateGlobalJackPosition(enum UpdatePositionFlag flag, bool do_post)
 static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
 {
     jack_midi_event_t event;
-    uint8_t channel, controller;
+    uint8_t channel;
+    uint16_t controller;
     uint8_t status_nibble, channel_nibble;
     uint16_t mvalue;
     float value;
     double dvalue;
-    bool handled, highres, needs_post = false;
+    bool handled, highres, needs_post, nrpn = false;
     enum UpdatePositionFlag pos_flag = UPDATE_POSITION_IF_CHANGED;
 
 #ifdef HAVE_HYLIA
@@ -2528,6 +2537,8 @@ static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
         if (buf != NULL)
         {
             jack_midi_clear_buffer(buf);
+            bool error_sending = false;
+
             for (int j = 0; j < MAX_MIDI_CC_ASSIGN; j++)
             {
                 if (g_midi_cc_list[j].effect_id == ASSIGNMENT_NULL)
@@ -2536,14 +2547,41 @@ static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
                     continue;
                 if (g_midi_cc_list[j].midiOutValue >= 0)
                 {
-                    jack_midi_data_t buffer[3];
-                    buffer [0] = 0xb0 + g_midi_cc_list[j].channel;
-                    buffer [1] = g_midi_cc_list[j].controller;
-                    buffer [2] = g_midi_cc_list[j].midiOutValue;
-                    g_midi_cc_list[j].midiOutValue = -1;
-                    if(jack_midi_event_write(buf, 0, buffer,3))
-                        break;
+                    if(g_midi_cc_list[j].controller & 0x8000)
+                    {
+                        if(g_enable_nrpn)
+                        {
+                            // the controller is an nrpn, send 4 events for the nrpn
+                            uint16_t controller = g_midi_cc_list[j].controller & 0x7FFF;
+
+                            jack_midi_data_t ccs[4] = {99, 98, 6, 38};
+                            jack_midi_data_t data[4] = {controller >> 7, controller & 0x007F, g_midi_cc_list[j].midiOutValue >> 7, g_midi_cc_list[j].midiOutValue & 0x007F};
+
+                            jack_midi_data_t buffer[3];
+                            
+                            buffer [0] = 0xb0 + g_midi_cc_list[j].channel;
+
+                            for(uint_fast8_t b = 0; b < 4; b++)
+                            {
+                                buffer [1] = ccs[b];
+                                buffer [2] = data[b];
+                                error_sending = jack_midi_event_write(buf, 0, buffer, 3);
+                            }
+                        }
+                    }
+                    else
+                    {
+                        jack_midi_data_t buffer[3];
+                        buffer [0] = 0xb0 + g_midi_cc_list[j].channel;
+                        buffer [1] = g_midi_cc_list[j].controller;
+                        buffer [2] = g_midi_cc_list[j].midiOutValue;
+                        g_midi_cc_list[j].midiOutValue = -1;
+                        error_sending = jack_midi_event_write(buf, 0, buffer, 3);
+                    }
                 }
+
+                if(error_sending)
+                    break;
             }
         }
     }
@@ -2659,6 +2697,66 @@ static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
             controller = event.buffer[1];
             mvalue     = event.buffer[2];
             highres    = false;
+            nrpn       = false;
+
+            if(g_enable_nrpn)
+            {
+                switch(controller)
+                {
+                    // nrpn param num msb
+                    case 99 :
+                    {
+                        // bit 16 = 0 indicates that msb is set.
+                        // bit 15 = 1 indicates that lsb is not set.
+                        g_nrpn_param_num = 0x4000 | (mvalue << 7);
+
+                        continue;
+                    }
+                    break;
+
+                    // nrpn param num lsb
+                    case 98 :
+                    {
+                        // if msb has already been set
+                        if((g_nrpn_param_num & 0x8000) == 0)
+                            g_nrpn_param_num = (g_nrpn_param_num & 0x3F80) | mvalue;
+
+                        continue;
+                    }
+                    break;
+
+                    // nrpn param value msb
+                    case 6 :
+                    {
+                        // bit 16 = 0 indicates that msb is set.
+                        // bit 15 = 1 indicates that lsb is not set.
+                        g_nrpn_param_value = 0x4000 | (mvalue << 7);
+
+                        continue;
+                    }
+                    break;
+
+                    // nrpn param num lsb
+                    case 38 :
+                    {
+                        // if msb has already been set
+                        if((g_nrpn_param_value & 0x8000) == 0)
+                        {
+                            g_nrpn_param_value = (g_nrpn_param_value & 0x3F80) | mvalue;
+                            nrpn    = true;
+                            highres = true;
+                            controller = 0x8000 | g_nrpn_param_num;
+                            mvalue = g_nrpn_param_value;
+                        }
+                        else
+                            continue;
+                    }
+                    break;
+
+                    default:
+                    break;
+                }
+            }
         }
         else if (status_nibble == 0xE0)
         {
@@ -3903,13 +4001,20 @@ int effects_init(void* client)
         return ERR_JACK_PORT_REGISTER;
     }
 	
-    /* check midi feedback mode 
-       ENABLE_MIDI_FEEDBACK = 1 : Enable midi CC feedback
-       ENABLE_MIDI_FEEDBACK = 2 : Enable midi CC feedback and also sync devices on input */
+    // check midi feedback mode 
+    //   ENABLE_MIDI_FEEDBACK = 1 : Enable midi CC feedback
+    //   ENABLE_MIDI_FEEDBACK = 2 : Enable midi CC feedback and also sync devices on input 
 
     const char* const enable_midi_feedback = getenv("ENABLE_MIDI_FEEDBACK");
     g_enable_midi_feedback      = enable_midi_feedback != NULL && atoi(enable_midi_feedback) != 0;
     g_enable_midi_feedback_sync = enable_midi_feedback != NULL && atoi(enable_midi_feedback) == 2;
+
+    // setup nrpn
+    //   ENABLE_MIDI_NRPN = 1 : Enable midi nrpn
+    const char* const enable_nrpn = getenv("ENABLE_MIDI_NRPN");
+    g_enable_nrpn = enable_nrpn != NULL && atoi(enable_nrpn) != 0;
+    g_nrpn_param_num   = 0xC000; // top two bits signify that msb and lsb need setting
+    g_nrpn_param_value = 0xC000; // top two bits signify that msb and lsb need setting
 
     // if midi feedback is enable create output midi port
     if(g_enable_midi_feedback)
