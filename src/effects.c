@@ -2503,7 +2503,7 @@ static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
     uint16_t mvalue;
     float value;
     double dvalue;
-    bool handled, highres, needs_post, nrpn = false;
+    bool handled, highres, needs_post = false;
     enum UpdatePositionFlag pos_flag = UPDATE_POSITION_IF_CHANGED;
 
 #ifdef HAVE_HYLIA
@@ -2568,6 +2568,7 @@ static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
                                 error_sending = jack_midi_event_write(buf, 0, buffer, 3);
                             }
                         }
+                        g_midi_cc_list[j].midiOutValue = -1;
                     }
                     else
                     {
@@ -2697,7 +2698,6 @@ static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
             controller = event.buffer[1];
             mvalue     = event.buffer[2];
             highres    = false;
-            nrpn       = false;
 
             if(g_enable_nrpn)
             {
@@ -2743,7 +2743,6 @@ static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
                         if((g_nrpn_param_value & 0x8000) == 0)
                         {
                             g_nrpn_param_value = (g_nrpn_param_value & 0x3F80) | mvalue;
-                            nrpn    = true;
                             highres = true;
                             controller = 0x8000 | g_nrpn_param_num;
                             mvalue = g_nrpn_param_value;
