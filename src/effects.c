@@ -2736,16 +2736,17 @@ static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
                     }
                     break;
 
-                    // nrpn param num lsb
+                    // nrpn param value lsb
                     case 38 :
                     {
                         // if msb has already been set
                         if((g_nrpn_param_value & 0x8000) == 0)
                         {
-                            g_nrpn_param_value = (g_nrpn_param_value & 0x3F80) | mvalue;
                             highres = true;
                             controller = 0x8000 | g_nrpn_param_num;
-                            mvalue = g_nrpn_param_value;
+                            mvalue = (g_nrpn_param_value & 0x3F80) | mvalue;
+                            g_nrpn_param_value = 0xC000;   // Set so we need MSB and LSB again
+
                         }
                         else
                             continue;
