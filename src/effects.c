@@ -5770,7 +5770,19 @@ int effects_remove(int effect_id)
             free(effect->audio_ports);
             free(effect->input_audio_ports);
             free(effect->output_audio_ports);
+
             free(effect->control_ports);
+            free(effect->input_control_ports);
+            free(effect->output_control_ports);
+
+            free(effect->cv_ports);
+            free(effect->input_cv_ports);
+            free(effect->output_cv_ports);
+
+            free(effect->event_ports);
+            free(effect->input_event_ports);
+            free(effect->output_event_ports);
+
             if (effect->events_in_buffer)
                 jack_ringbuffer_free(effect->events_in_buffer);
             if (effect->events_in_buffer_helper)
