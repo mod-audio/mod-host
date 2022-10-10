@@ -21,6 +21,8 @@
 static LV2_Worker_Status worker_respond(LV2_Worker_Respond_Handle handle, uint32_t size, const void* data)
 {
     worker_t* worker = (worker_t*)handle;
+    if (sizeof(size) + size > jack_ringbuffer_write_space(worker->responses))
+        return LV2_WORKER_ERR_NO_SPACE;
     jack_ringbuffer_write(worker->responses, (const char*)&size, sizeof(size));
     jack_ringbuffer_write(worker->responses, (const char*)data, size);
     return LV2_WORKER_SUCCESS;
@@ -82,6 +84,8 @@ void worker_finish(worker_t *worker)
 LV2_Worker_Status worker_schedule(LV2_Worker_Schedule_Handle handle, uint32_t size, const void *data)
 {
     worker_t* worker = (worker_t*) handle;
+    if (sizeof(size) + size > jack_ringbuffer_write_space(worker->requests))
+        return LV2_WORKER_ERR_NO_SPACE;
     jack_ringbuffer_write(worker->requests, (const char*)&size, sizeof(size));
     jack_ringbuffer_write(worker->requests, (const char*)data, size);
     sem_post(&worker->sem);
