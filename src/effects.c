@@ -4437,7 +4437,7 @@ int effects_add(const char *uri, int instance)
     const LilvPort *control_in_port;
     const LilvPort *lilv_port;
     const LilvNode *symbol_node;
-    uint32_t control_in_size, control_out_size;
+    uint32_t control_in_size, control_out_size, worker_buf_size;
 
     if (!uri) return ERR_LV2_INVALID_URI;
     if (!INSTANCE_IS_VALID(instance)) return ERR_INSTANCE_INVALID;
@@ -4512,6 +4512,29 @@ int effects_add(const char *uri, int instance)
     }
     effect->lilv_instance = lilv_instance;
 
+    /* query control_in port and its minimum size */
+    control_out_size = 0;
+    worker_buf_size = 4096;
+    control_in_port = lilv_plugin_get_port_by_designation(plugin, g_lilv_nodes.input, g_lilv_nodes.control_in);
+    if (control_in_port)
+    {
+        control_in_size = g_midi_buffer_size * 16; // 16 taken from jalv source code
+        effect->control_index = lilv_port_get_index(plugin, control_in_port);
+
+        LilvNodes *lilvminsize = lilv_port_get_value(plugin, control_in_port, g_lilv_nodes.minimumSize);
+        if (lilvminsize != NULL)
+        {
+            const int minsize = lilv_node_as_int(lilvminsize);
+            if (minsize > 0 && (uint)minsize > worker_buf_size)
+                worker_buf_size = minsize;
+        }
+    }
+    else
+    {
+        control_in_size = 0;
+        effect->control_index = -1;
+    }
+
     /* Query plugin extensions/interfaces */
     if (lilv_plugin_has_extension_data(effect->lilv_plugin, g_lilv_nodes.worker_interface))
     {
@@ -4519,7 +4542,7 @@ int effects_add(const char *uri, int instance)
             (const LV2_Worker_Interface*) lilv_instance_get_extension_data(effect->lilv_instance,
                                                                            LV2_WORKER__interface);
 
-        worker_init(&effect->worker, lilv_instance, worker_interface);
+        worker_init(&effect->worker, lilv_instance, worker_interface, worker_buf_size);
     }
 
     if (lilv_plugin_has_extension_data(effect->lilv_plugin, g_lilv_nodes.options_interface))
@@ -4586,25 +4609,13 @@ int effects_add(const char *uri, int instance)
     event_ports_count = 0;
     input_event_ports_count = 0;
     output_event_ports_count = 0;
+    worker_buf_size = 0;
     effect->presets_count = 0;
     effect->presets = NULL;
     effect->monitors_count = 0;
     effect->monitors = NULL;
     effect->ports_count = ports_count;
     effect->ports = (port_t **) calloc(ports_count, sizeof(port_t *));
-
-    control_in_port = lilv_plugin_get_port_by_designation(plugin, g_lilv_nodes.input, g_lilv_nodes.control_in);
-    if (control_in_port)
-    {
-        control_in_size = g_midi_buffer_size * 16; // 16 taken from jalv source code
-        effect->control_index = lilv_port_get_index(plugin, control_in_port);
-    }
-    else
-    {
-        control_in_size = 0;
-        effect->control_index = -1;
-    }
-    control_out_size = 0;
 
     for (unsigned int i = 0; i < ports_count; i++)
     {

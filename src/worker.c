@@ -31,7 +31,7 @@ static LV2_Worker_Status worker_respond(LV2_Worker_Respond_Handle handle, uint32
 static void* worker_func(void* data)
 {
     worker_t* worker = (worker_t*)data;
-    void* buf  = NULL;
+    void* buf = NULL;
     while (true) {
         sem_wait(&worker->sem);
         if (worker->exit) break;
@@ -55,16 +55,16 @@ static void* worker_func(void* data)
     return NULL;
 }
 
-void worker_init(worker_t *worker, LilvInstance *instance, const LV2_Worker_Interface *iface)
+void worker_init(worker_t *worker, LilvInstance *instance, const LV2_Worker_Interface *iface, uint32_t size)
 {
     worker->exit = false;
     worker->iface = iface;
     worker->instance = instance;
     sem_init(&worker->sem, 0, 0);
-    zix_thread_create(&worker->thread, 4096, worker_func, worker);
-    worker->requests  = jack_ringbuffer_create(4096);
-    worker->responses = jack_ringbuffer_create(4096);
-    worker->response  = malloc(4096);
+    zix_thread_create(&worker->thread, size + sizeof(void*) * 4, worker_func, worker);
+    worker->requests  = jack_ringbuffer_create(size);
+    worker->responses = jack_ringbuffer_create(size);
+    worker->response  = malloc(size);
     jack_ringbuffer_mlock(worker->requests);
     jack_ringbuffer_mlock(worker->responses);
 }
