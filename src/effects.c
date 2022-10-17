@@ -4103,7 +4103,7 @@ int effects_init(void* client)
     g_options[0].subject = 0;
     g_options[0].key = g_urids.param_sampleRate;
     g_options[0].size = sizeof(float);
-    g_options[0].type = g_urids.atom_Int;
+    g_options[0].type = g_urids.atom_Float;
     g_options[0].value = &g_block_length;
 
     g_options[1].context = LV2_OPTIONS_INSTANCE;
