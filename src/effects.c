@@ -669,6 +669,7 @@ static pthread_mutex_t  g_raw_midi_port_mutex;
 /* Jack */
 static jack_client_t *g_jack_global_client;
 static jack_nframes_t g_sample_rate, g_max_allowed_midi_delta;
+static float g_sample_rate_f;
 static const char **g_capture_ports, **g_playback_ports;
 static int32_t g_midi_buffer_size, g_block_length;
 static int32_t g_thread_policy, g_thread_priority;
@@ -3830,6 +3831,7 @@ int effects_init(void* client)
     /* Get buffers size */
     g_block_length = jack_get_buffer_size(g_jack_global_client);
     g_sample_rate = jack_get_sample_rate(g_jack_global_client);
+    g_sample_rate_f = g_sample_rate;
     g_midi_buffer_size = jack_port_type_get_buffer_size(g_jack_global_client, JACK_DEFAULT_MIDI_TYPE);
     g_max_allowed_midi_delta = (jack_nframes_t)(g_sample_rate * 0.2); // max 200ms of allowed delta
 
@@ -4104,7 +4106,7 @@ int effects_init(void* client)
     g_options[0].key = g_urids.param_sampleRate;
     g_options[0].size = sizeof(float);
     g_options[0].type = g_urids.atom_Float;
-    g_options[0].value = &g_block_length;
+    g_options[0].value = &g_sample_rate_f;
 
     g_options[1].context = LV2_OPTIONS_INSTANCE;
     g_options[1].subject = 0;
