@@ -4525,7 +4525,7 @@ int effects_add(const char *uri, int instance)
         LilvNodes *lilvminsize = lilv_port_get_value(plugin, control_in_port, g_lilv_nodes.minimumSize);
         if (lilvminsize != NULL)
         {
-            const int minsize = lilv_node_as_int(lilvminsize);
+            const int minsize = lilv_node_as_int(lilv_nodes_get_first(lilvminsize));
             if (minsize > 0 && (uint)minsize > worker_buf_size)
                 worker_buf_size = minsize;
         }
