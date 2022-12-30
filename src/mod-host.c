@@ -586,6 +586,23 @@ static void quit_cb(proto_t *proto)
     exit(EXIT_SUCCESS);
 }
 
+static void self_test_effects_set_property_cb(proto_t *proto)
+{
+    char ok = '1';
+    if (atoi(proto->list[1]) != 1337)
+        ok = '0';
+    if (strcmp(proto->list[2], "urn:test"))
+        ok = '0';
+    if (strncmp(proto->list[3], "{\n  \"version\":", 14))
+        ok = '0';
+
+    FILE* f = fopen("tests/self-test-result.json", "w");
+    fwrite(proto->list[3], strlen(proto->list[3]), 1, f);
+    fclose(f);
+
+    printf("tests ok? %c\n", ok);
+}
+
 #ifndef SKIP_READLINE
 static void interactive_mode(void)
 {
@@ -738,6 +755,7 @@ int main(int argc, char **argv)
         {"socket-port", required_argument, 0, 'p'},
         {"feedback-port", required_argument, 0, 'f'},
         {"interactive", no_argument, 0, 'i'},
+        {"self-test", no_argument, 0, 't'},
         {"version", no_argument, 0, 'V'},
         {"help", no_argument, 0, 'h'},
         {0, 0, 0, 0}
@@ -746,7 +764,7 @@ int main(int argc, char **argv)
     int opt, opt_index = 0;
 
     /* parse command line options */
-    int nofork = 0, verbose = 0,  interactive = 0;
+    int nofork = 0, verbose = 0,  interactive = 0, selftest = 0;
     int socket_port = SOCKET_DEFAULT_PORT, feedback_port = 0;
     while ((opt = getopt_long(argc, argv, "nvp:f:iVh", long_options, &opt_index)) != -1)
     {
@@ -774,6 +792,10 @@ int main(int argc, char **argv)
                 nofork = 1;
                 break;
 
+            case 't':
+                selftest = 1;
+                break;
+
             case 'V':
                 printf(
                     "%s version: %s\n"
@@ -799,6 +821,25 @@ int main(int argc, char **argv)
 
                 exit(EXIT_SUCCESS);
         }
+    }
+
+    if (selftest)
+    {
+        protocol_verbose(1);
+        protocol_add_command(EFFECT_PATCH_SET, self_test_effects_set_property_cb);
+
+        msg_t msg = { 0, NULL, 0 };
+        FILE *f = fopen("tests/self-test.json", "r");
+        fseek(f, 0, SEEK_END);
+        msg.data_size = ftell(f);
+        msg.data = malloc(msg.data_size + 24);
+        fseek(f, 0, SEEK_SET);
+        strcpy(msg.data, "patch_set 1337 urn:test ");
+        fread(msg.data + 24, msg.data_size, 1, f);
+        fclose(f);
+        protocol_parse(&msg);
+        free(msg.data);
+        exit(EXIT_SUCCESS);
     }
 
     if (! nofork)
