@@ -1820,18 +1820,17 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
     /* control in events */
     if (effect->events_in_buffer && effect->events_in_buffer_helper && effect->control_index >= 0)
     {
-        LV2_Atom atom;
         const size_t space = jack_ringbuffer_read_space(effect->events_in_buffer);
-        for (size_t j = 0; j < space; j += sizeof(atom) + atom.size)
+        LV2_Atom *atom = (LV2_Atom*)effect->events_in_buffer_helper;
+        port = effect->ports[effect->control_index];
+
+        for (size_t j = 0; j < space; j += sizeof(LV2_Atom) + atom->size)
         {
-            jack_ringbuffer_read(effect->events_in_buffer, (char*)&atom, sizeof(atom));
-            memcpy(effect->events_in_buffer_helper, &atom, sizeof(atom));
-            jack_ringbuffer_read(effect->events_in_buffer, effect->events_in_buffer_helper + sizeof(atom), atom.size);
-            port = effect->ports[effect->control_index];
+            jack_ringbuffer_read(effect->events_in_buffer, (char*)atom, sizeof(LV2_Atom));
+            jack_ringbuffer_read(effect->events_in_buffer, (char*)(atom + 1), atom->size);
+
             LV2_Evbuf_Iterator e = lv2_evbuf_end(port->evbuf);
-            const LV2_Atom* const ratom = (const LV2_Atom*)effect->events_in_buffer_helper;
-            lv2_evbuf_write(&e, nframes - 1, 0, ratom->type, ratom->size,
-                                LV2_ATOM_BODY_CONST(ratom));
+            lv2_evbuf_write(&e, nframes - 1, 0, atom->type, atom->size, (uint8_t*)(atom + 1));
         }
     }
 
