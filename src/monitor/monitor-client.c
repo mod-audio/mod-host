@@ -651,6 +651,13 @@ bool monitor_client_setup_volume(float volume)
 void monitor_client_stop(void)
 {
     monitor_client_t *const mon = g_monitor_handle;
+
+    if (!mon)
+    {
+        fprintf(stderr, "failed to close mod-monitor client\n");
+        return;
+    }
+
     jack_client_t *const client = mon->client;
 
     jack_finish(mon);
