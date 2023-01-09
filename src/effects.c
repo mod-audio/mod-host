@@ -69,6 +69,17 @@
 #include "lv2/lv2-hmi.h"
 #include "lv2/mod-license.h"
 
+// do not enable external-ui support in embed targets
+#if !(defined(_MOD_DEVICE_DUO) || defined(_MOD_DEVICE_DUOX) || defined(_MOD_DEVICE_DWARF))
+#define WITH_EXTERNAL_UI_SUPPORT
+#endif
+
+#ifdef WITH_EXTERNAL_UI_SUPPORT
+#include <lv2/lv2plug.in/ns/extensions/ui/ui.h>
+#include <lv2/lv2plug.in/ns/ext/data-access/data-access.h>
+#include <lv2/lv2plug.in/ns/ext/instance-access/instance-access.h>
+#endif
+
 #ifdef HAVE_CONTROLCHAIN
 /* Control Chain */
 #include <cc_client.h>
@@ -196,6 +207,7 @@ enum PortHints {
     HINT_TRIGGER       = 1 << 3,
     HINT_LOGARITHMIC   = 1 << 4,
     HINT_MONITORED     = 1 << 5, // outputs only
+    HINT_SHOULD_UPDATE = 1 << 6, // inputs only, for external UIs
     // cv
     HINT_CV_MOD        = 1 << 0, // uses mod cvport
     HINT_CV_RANGES     = 1 << 0, // port info includes ranges
@@ -237,6 +249,10 @@ enum {
     STATE_MAKE_PATH_FEATURE,
     CTRLPORT_REQUEST_FEATURE,
     WORKER_FEATURE,
+#ifdef WITH_EXTERNAL_UI_SUPPORT
+    UI_DATA_ACCESS,
+    UI_INSTANCE_ACCESS,
+#endif
     FEATURE_TERMINATOR
 };
 
@@ -416,6 +432,14 @@ typedef struct EFFECT_T {
 
     // state save/restore custom directory
     const char* state_dir;
+
+#ifdef WITH_EXTERNAL_UI_SUPPORT
+    // UI related objects
+    void *ui_libhandle;
+    LV2UI_Handle *ui_handle;
+    const LV2UI_Descriptor *ui_desc;
+    const LV2UI_Idle_Interface *ui_idle_iface;
+#endif
 } effect_t;
 
 typedef struct LILV_NODES_T {
@@ -787,7 +811,7 @@ static void* PostPonedEventsThread(void* arg);
 static void* HMIClientThread(void* arg);
 #endif
 static int ProcessPlugin(jack_nframes_t nframes, void *arg);
-static bool SetPortValue(port_t *port, float value, int effect_id, bool is_bypass);
+static bool SetPortValue(port_t *port, float value, int effect_id, bool is_bypass, bool from_ui);
 static float UpdateValueFromMidi(midi_cc_t* mcc, uint16_t mvalue, bool highres);
 static bool UpdateGlobalJackPosition(enum UpdatePositionFlag flag, bool do_post);
 static int ProcessGlobalClient(jack_nframes_t nframes, void *arg);
@@ -848,6 +872,13 @@ static bool CheckCCDeviceProtocolVersion(int device_id, int major, int minor);
 #endif
 #ifdef HAVE_HYLIA
 static uint32_t GetHyliaOutputLatency(void);
+#endif
+#ifdef WITH_EXTERNAL_UI_SUPPORT
+static void ExternalControllerWriteFunction(LV2UI_Controller controller,
+                                            uint32_t port_index,
+                                            uint32_t buffer_size,
+                                            uint32_t port_protocol,
+                                            const void *buffer);
 #endif
 
 /*
@@ -1883,7 +1914,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
                 continue;
             }
 
-            if (SetPortValue(port, value, effect->instance, false)) {
+            if (SetPortValue(port, value, effect->instance, false, false)) {
                 needs_post = true;
                 cv_source->prev_value = value;
             }
@@ -1919,7 +1950,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
 
                 // ignore requests for same value
                 if (floats_differ_enough(cv_source->prev_value, value)) {
-                    if (SetPortValue(port, value, effect->instance, true)) {
+                    if (SetPortValue(port, value, effect->instance, true, false)) {
                         needs_post = true;
                         cv_source->prev_value = value;
                     }
@@ -2218,7 +2249,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
     return 0;
 }
 
-static bool SetPortValue(port_t *port, float value, int effect_id, bool is_bypass)
+static bool SetPortValue(port_t *port, float value, int effect_id, bool is_bypass, bool from_ui)
 {
     bool update_transport = false;
 
@@ -2254,6 +2285,12 @@ static bool SetPortValue(port_t *port, float value, int effect_id, bool is_bypas
             g_transport_reset = true;
             update_transport = true;
         }
+    }
+    else if (!from_ui)
+    {
+#ifdef WITH_EXTERNAL_UI_SUPPORT
+        port->hints |= HINT_SHOULD_UPDATE;
+#endif
     }
 
     port->prev_value = *(port->buffer) = value;
@@ -2914,6 +2951,10 @@ static void GetFeatures(effect_t *effect)
     features[STATE_MAKE_PATH_FEATURE]   = state_make_path_feature;
     features[CTRLPORT_REQUEST_FEATURE]  = ctrlportReqChange_feature;
     features[WORKER_FEATURE]            = work_schedule_feature;
+#ifdef WITH_EXTERNAL_UI_SUPPORT
+    features[UI_DATA_ACCESS]            = NULL;
+    features[UI_INSTANCE_ACCESS]        = NULL;
+#endif
     features[FEATURE_TERMINATOR]        = NULL;
 
     effect->features = features;
@@ -3598,7 +3639,7 @@ static LV2_ControlInputPort_Change_Status RequestControlPortChange(LV2_ControlIn
     if (!floats_differ_enough(port->prev_value, value))
         return LV2_CONTROL_INPUT_PORT_CHANGE_SUCCESS;
 
-    if (SetPortValue(port, value, effect->instance, false))
+    if (SetPortValue(port, value, effect->instance, false, false))
         sem_post(&g_postevents_semaphore);
 
     return LV2_CONTROL_INPUT_PORT_CHANGE_SUCCESS;
@@ -3653,7 +3694,7 @@ static void CCDataUpdate(void* arg)
             continue;
         }
 
-        if (SetPortValue(assignment->port, data->value, assignment->effect_id, is_bypass))
+        if (SetPortValue(assignment->port, data->value, assignment->effect_id, is_bypass, false))
             needs_post = true;
     }
 
@@ -3737,6 +3778,39 @@ static uint32_t GetHyliaOutputLatency(void)
         return (uint32_t)latency;
 
     return 0;
+}
+#endif
+
+#ifdef WITH_EXTERNAL_UI_SUPPORT
+static void ExternalControllerWriteFunction(LV2UI_Controller controller,
+                                            uint32_t port_index,
+                                            uint32_t buffer_size,
+                                            uint32_t port_protocol,
+                                            const void *buffer)
+{
+    if (port_protocol != 0)
+    {
+        printf("ExternalControllerWriteFunction %p %u %u %u %p\n", controller, port_index, buffer_size, port_protocol, buffer);
+        return;
+    }
+
+    effect_t *effect = (effect_t*)controller;
+
+    if (port_index >= effect->ports_count)
+        return;
+
+    port_t *port = effect->ports[port_index];
+    const float value = *((const float*)buffer);
+
+    if (port->type != TYPE_CONTROL || port->flow != FLOW_INPUT)
+        return;
+
+    // ignore requests for same value
+    if (!floats_differ_enough(port->prev_value, value))
+        return;
+
+    if (SetPortValue(port, value, effect->instance, false, true))
+        sem_post(&g_postevents_semaphore);
 }
 #endif
 
@@ -5712,6 +5786,16 @@ int effects_remove(int effect_id)
         {
             effect = &g_effects[j];
 
+#ifdef WITH_EXTERNAL_UI_SUPPORT
+            if (effect->ui_libhandle != NULL)
+            {
+                if (effect->ui_desc != NULL && effect->ui_handle != NULL && effect->ui_desc->cleanup != NULL)
+                    effect->ui_desc->cleanup(effect->ui_handle);
+
+                dlclose(effect->ui_libhandle);
+            }
+#endif
+
             FreeFeatures(effect);
 
             if (effect->event_ports)
@@ -5878,6 +5962,9 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
     static int last_effect_id = -1;
     static const char *last_symbol = NULL;
     static float *last_buffer, *last_prev, last_min, last_max;
+#ifdef WITH_EXTERNAL_UI_SUPPORT
+    static enum PortHints *last_hints;
+#endif
 
     if (InstanceExist(effect_id))
     {
@@ -5892,6 +5979,9 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
                     value = last_max;
 
                 *last_buffer = *last_prev = value;
+#ifdef WITH_EXTERNAL_UI_SUPPORT
+                *last_hints |= HINT_SHOULD_UPDATE;
+#endif
                 return SUCCESS;
             }
         }
@@ -5912,6 +6002,11 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
                 value = last_max;
 
             *last_prev = *last_buffer = value;
+
+#ifdef WITH_EXTERNAL_UI_SUPPORT
+            last_hints = &port->hints;
+            port->hints |= HINT_SHOULD_UPDATE;
+#endif
             return SUCCESS;
         }
 
@@ -8045,4 +8140,161 @@ void effects_output_data_ready(void)
         g_postevents_ready = true;
         sem_post(&g_postevents_semaphore);
     }
+}
+
+int effects_show_external_ui(int effect_id)
+{
+#ifdef WITH_EXTERNAL_UI_SUPPORT
+    if (!InstanceExist(effect_id))
+        return ERR_INSTANCE_NON_EXISTS;
+    if (effect_id >= MAX_PLUGIN_INSTANCES)
+        return ERR_ASSIGNMENT_INVALID_OP;
+
+    effect_t *effect = &g_effects[effect_id];
+    LilvUIs *uis = lilv_plugin_get_uis(effect->lilv_plugin);
+
+    if (uis == NULL)
+        return ERR_ASSIGNMENT_INVALID_OP;
+
+    LILV_FOREACH(nodes, i, uis)
+    {
+        const LilvUI *ui = lilv_uis_get(uis, i);
+        lilv_world_load_resource(g_lv2_data, lilv_ui_get_uri(ui));
+
+        const LilvNode *binary_node = lilv_ui_get_binary_uri(ui);
+        const LilvNode *bundle_node = lilv_ui_get_bundle_uri(ui);
+
+        void *libhandle = dlopen(lilv_uri_to_path(lilv_node_as_string(binary_node)), RTLD_NOW|RTLD_LOCAL);
+        if (libhandle == NULL)
+            continue;
+
+        // stuff that could need cleanup
+        LV2UI_Handle *handle = NULL;
+        const LV2UI_Descriptor *desc = NULL;
+        const LV2UI_Idle_Interface *idle_iface;
+        const LV2UI_Show_Interface *show_iface;
+        uint32_t index = 0;
+
+        LV2UI_DescriptorFunction descfn;
+        if ((descfn = dlsym(libhandle, "lv2ui_descriptor")) == NULL)
+            goto cleanup;
+
+        while ((desc = descfn(index++)) != NULL)
+        {
+            if (desc->extension_data == NULL)
+                continue;
+            if ((idle_iface = desc->extension_data(LV2_UI__idleInterface)) == NULL)
+                continue;
+            if ((show_iface = desc->extension_data(LV2_UI__showInterface)) == NULL)
+                continue;
+
+            // if we got this far, we have everything needed
+            LV2_Extension_Data_Feature extension_data = {
+                effect->lilv_instance->lv2_descriptor->extension_data
+            };
+            const LV2_Feature feature_dataAccess = { LV2_DATA_ACCESS_URI, &extension_data };
+            const LV2_Feature feature_instAccess = { LV2_INSTANCE_ACCESS_URI, effect->lilv_instance->lv2_handle };
+            const LV2_Feature* features[] = {
+                &g_uri_map_feature,
+                &g_urid_map_feature,
+                &g_urid_unmap_feature,
+                &g_options_feature,
+                &g_buf_size_features[0],
+                &g_buf_size_features[1],
+                &g_buf_size_features[2],
+                &g_lv2_log_feature,
+                &feature_dataAccess,
+                &feature_instAccess,
+                NULL
+            };
+
+            LV2UI_Widget widget;
+            handle = desc->instantiate(desc,
+                                       lilv_node_as_uri(lilv_plugin_get_uri(effect->lilv_plugin)),
+                                       lilv_uri_to_path(lilv_node_as_string(bundle_node)),
+                                       ExternalControllerWriteFunction,
+                                       effect, &widget, features);
+
+            if (handle == NULL)
+                continue;
+
+            // notify UI of current state
+            if (desc->port_event != NULL)
+            {
+                for (uint32_t j = 0; j < effect->control_ports_count; j++)
+                    desc->port_event(handle,
+                                     effect->control_ports[j]->index,
+                                     sizeof(float), 0,
+                                     effect->control_ports[j]->buffer);
+            }
+
+            show_iface->show(handle);
+
+            effect->ui_desc = desc;
+            effect->ui_handle = handle;
+            effect->ui_idle_iface = idle_iface;
+            effect->ui_libhandle = libhandle;
+
+            lilv_uis_free(uis);
+            return SUCCESS;
+        }
+
+cleanup:
+        if (desc != NULL && handle != NULL && desc->cleanup != NULL)
+            desc->cleanup(handle);
+
+        dlclose(libhandle);
+    }
+
+    lilv_uis_free(uis);
+    return ERR_INVALID_OPERATION;
+#else
+    return ERR_EXTERNAL_UI_UNAVAILABLE;
+
+    UNUSED_PARAM(effect_id);
+#endif
+}
+
+void effects_idle_external_uis(void)
+{
+#ifdef WITH_EXTERNAL_UI_SUPPORT
+    for (int i = 0; i < MAX_PLUGIN_INSTANCES; ++i)
+    {
+        effect_t *effect = &g_effects[i];
+
+        if (effect->lilv_instance == NULL)
+            continue;
+        if (effect->lilv_plugin == NULL)
+            continue;
+
+        if (effect->ui_handle && effect->ui_idle_iface)
+        {
+            if (effect->ui_desc->port_event != NULL)
+            {
+                port_t *port;
+                for (uint32_t j = 0; j < effect->input_control_ports_count; j++)
+                {
+                    port = effect->input_control_ports[j];
+                    if (port->hints & HINT_SHOULD_UPDATE)
+                    {
+                        port->hints &= ~HINT_SHOULD_UPDATE;
+                        effect->ui_desc->port_event(effect->ui_handle,
+                                                    port->index,
+                                                    sizeof(float), 0,
+                                                    port->buffer);
+                    }
+                }
+                for (uint32_t j = 0; j < effect->output_control_ports_count; j++)
+                {
+                    effect->ui_desc->port_event(effect->ui_handle,
+                                                effect->output_control_ports[j]->index,
+                                                sizeof(float), 0,
+                                                effect->output_control_ports[j]->buffer);
+                }
+            }
+
+            effect->ui_idle_iface->idle(effect->ui_handle);
+        }
+    }
+#endif
 }
