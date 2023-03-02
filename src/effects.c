@@ -153,6 +153,7 @@ typedef struct {
 #include "rtmempool/list.h"
 #include "rtmempool/rtmempool.h"
 #include "filter.h"
+#include "mod-memset.h"
 
 /*
 ************************************************************************************************************************
@@ -1339,7 +1340,7 @@ static void RunPostPonedEvents(int ignored_effect_id)
                     jack_ringbuffer_read(effect->events_out_buffer, (char*)&key, sizeof(uint32_t));
                     jack_ringbuffer_read(effect->events_out_buffer, (char*)&atom, sizeof(LV2_Atom));
 
-                    char *body = calloc(1, atom.size);
+                    char *body = mod_calloc(1, atom.size);
                     jack_ringbuffer_read(effect->events_out_buffer, body, atom.size);
 
                     supported = true;
@@ -2893,7 +2894,7 @@ static void JackThreadInit(void* arg)
 
 static void GetFeatures(effect_t *effect)
 {
-    const LV2_Feature **features = (const LV2_Feature**) calloc(FEATURE_TERMINATOR+1, sizeof(LV2_Feature*));
+    const LV2_Feature **features = (const LV2_Feature**) mod_calloc(FEATURE_TERMINATOR+1, sizeof(LV2_Feature*));
 
     /* URI and URID Features are the same for all instances (global declaration) */
 
@@ -3074,7 +3075,7 @@ static int LoadPresets(effect_t *effect)
     uint32_t presets_count = lilv_nodes_size(presets);
     effect->presets_count = presets_count;
     // allocate for presets
-    effect->presets = (preset_t **) calloc(presets_count, sizeof(preset_t *));
+    effect->presets = (preset_t **) mod_calloc(presets_count, sizeof(preset_t *));
     uint32_t j = 0;
     for (j = 0; j < presets_count; j++) effect->presets[j] = NULL;
     j = 0;
@@ -3498,7 +3499,7 @@ static char* GetLicenseFile(MOD_License_Handle handle, const char *license_uri)
         goto end;
 
     // allocate file buffer
-    filebuffer = (char*)calloc(1, filesize+1);
+    filebuffer = (char*)mod_calloc(1, filesize+1);
     if (! filebuffer)
         goto end;
 
@@ -3736,8 +3737,8 @@ static bool CheckCCDeviceProtocolVersion(int device_id, int major, int minor)
     if (! vend)
         goto free;
 
-    memset(buf_major, 0, sizeof(buf_major));
-    memset(buf_minor, 0, sizeof(buf_minor));
+    mod_memset(buf_major, 0, sizeof(buf_major));
+    mod_memset(buf_minor, 0, sizeof(buf_minor));
 
     for (int i=0; i<7; ++vstart)
     {
@@ -4521,7 +4522,7 @@ int effects_add(const char *uri, int instance)
     effect = &g_effects[instance];
 
     /* Init the struct */
-    memset(effect, 0, sizeof(effect_t));
+    mod_memset(effect, 0, sizeof(effect_t));
     effect->instance = instance;
 
     /* Init the pointers */
@@ -4690,12 +4691,12 @@ int effects_add(const char *uri, int instance)
     effect->monitors_count = 0;
     effect->monitors = NULL;
     effect->ports_count = ports_count;
-    effect->ports = (port_t **) calloc(ports_count, sizeof(port_t *));
+    effect->ports = (port_t **) mod_calloc(ports_count, sizeof(port_t *));
 
     for (unsigned int i = 0; i < ports_count; i++)
     {
         /* Allocate memory to current port */
-        effect->ports[i] = port = (port_t *) calloc(1, sizeof(port_t));
+        effect->ports[i] = port = (port_t *) mod_calloc(1, sizeof(port_t));
 
         pthread_mutex_init(&port->cv_source_mutex, &mutex_atts);
 
@@ -4728,7 +4729,7 @@ int effects_add(const char *uri, int instance)
             port->type = TYPE_AUDIO;
 
             /* Allocate memory to audio buffer */
-            audio_buffer = (float *) calloc(g_sample_rate, sizeof(float));
+            audio_buffer = (float *) mod_calloc(g_sample_rate, sizeof(float));
             if (!audio_buffer)
             {
                 fprintf(stderr, "can't get audio buffer\n");
@@ -4881,7 +4882,7 @@ int effects_add(const char *uri, int instance)
             port->type = TYPE_CV;
 
             /* Allocate memory to cv buffer */
-            cv_buffer = (float *) calloc(g_sample_rate, sizeof(float));
+            cv_buffer = (float *) mod_calloc(g_sample_rate, sizeof(float));
             if (!cv_buffer)
             {
                 fprintf(stderr, "can't get cv buffer\n");
@@ -4941,7 +4942,7 @@ int effects_add(const char *uri, int instance)
                 jack_uuid_t uuid = jack_port_uuid(jack_port);
                 if (!jack_uuid_empty(uuid)) {
                     char str_value[32];
-                    memset(str_value, 0, sizeof(str_value));
+                    mod_memset(str_value, 0, sizeof(str_value));
 
                     snprintf(str_value, 31, "%f", min_value);
                     jack_set_property(jack_client, uuid, LV2_CORE__minimum, str_value, NULL);
@@ -5105,17 +5106,17 @@ int effects_add(const char *uri, int instance)
     if (audio_ports_count > 0)
     {
         effect->audio_ports_count = audio_ports_count;
-        effect->audio_ports = (port_t **) calloc(audio_ports_count, sizeof(port_t *));
+        effect->audio_ports = (port_t **) mod_calloc(audio_ports_count, sizeof(port_t *));
 
         if (input_audio_ports_count > 0)
         {
             effect->input_audio_ports_count = input_audio_ports_count;
-            effect->input_audio_ports = (port_t **) calloc(input_audio_ports_count, sizeof(port_t *));
+            effect->input_audio_ports = (port_t **) mod_calloc(input_audio_ports_count, sizeof(port_t *));
         }
         if (output_audio_ports_count > 0)
         {
             effect->output_audio_ports_count = output_audio_ports_count;
-            effect->output_audio_ports = (port_t **) calloc(output_audio_ports_count, sizeof(port_t *));
+            effect->output_audio_ports = (port_t **) mod_calloc(output_audio_ports_count, sizeof(port_t *));
         }
     }
 
@@ -5123,17 +5124,17 @@ int effects_add(const char *uri, int instance)
     if (control_ports_count > 0)
     {
         effect->control_ports_count = control_ports_count;
-        effect->control_ports = (port_t **) calloc(control_ports_count, sizeof(port_t *));
+        effect->control_ports = (port_t **) mod_calloc(control_ports_count, sizeof(port_t *));
 
         if (input_control_ports_count > 0)
         {
             effect->input_control_ports_count = input_control_ports_count;
-            effect->input_control_ports = (port_t **) calloc(input_control_ports_count, sizeof(port_t *));
+            effect->input_control_ports = (port_t **) mod_calloc(input_control_ports_count, sizeof(port_t *));
         }
         if (output_control_ports_count > 0)
         {
             effect->output_control_ports_count = output_control_ports_count;
-            effect->output_control_ports = (port_t **) calloc(output_control_ports_count, sizeof(port_t *));
+            effect->output_control_ports = (port_t **) mod_calloc(output_control_ports_count, sizeof(port_t *));
         }
     }
 
@@ -5141,17 +5142,17 @@ int effects_add(const char *uri, int instance)
     if (cv_ports_count > 0)
     {
         effect->cv_ports_count = cv_ports_count;
-        effect->cv_ports = (port_t **) calloc(cv_ports_count, sizeof(port_t *));
+        effect->cv_ports = (port_t **) mod_calloc(cv_ports_count, sizeof(port_t *));
 
         if (input_cv_ports_count > 0)
         {
             effect->input_cv_ports_count = input_cv_ports_count;
-            effect->input_cv_ports = (port_t **) calloc(input_cv_ports_count, sizeof(port_t *));
+            effect->input_cv_ports = (port_t **) mod_calloc(input_cv_ports_count, sizeof(port_t *));
         }
         if (output_cv_ports_count > 0)
         {
             effect->output_cv_ports_count = output_cv_ports_count;
-            effect->output_cv_ports = (port_t **) calloc(output_cv_ports_count, sizeof(port_t *));
+            effect->output_cv_ports = (port_t **) mod_calloc(output_cv_ports_count, sizeof(port_t *));
         }
     }
 
@@ -5159,17 +5160,17 @@ int effects_add(const char *uri, int instance)
     if (event_ports_count > 0)
     {
         effect->event_ports_count = event_ports_count;
-        effect->event_ports = (port_t **) calloc(event_ports_count, sizeof(port_t *));
+        effect->event_ports = (port_t **) mod_calloc(event_ports_count, sizeof(port_t *));
 
         if (input_event_ports_count > 0)
         {
             effect->input_event_ports_count = input_event_ports_count;
-            effect->input_event_ports = (port_t **) calloc(input_event_ports_count, sizeof(port_t *));
+            effect->input_event_ports = (port_t **) mod_calloc(input_event_ports_count, sizeof(port_t *));
         }
         if (output_event_ports_count > 0)
         {
             effect->output_event_ports_count = output_event_ports_count;
-            effect->output_event_ports = (port_t **) calloc(output_event_ports_count, sizeof(port_t *));
+            effect->output_event_ports = (port_t **) mod_calloc(output_event_ports_count, sizeof(port_t *));
         }
     }
 
@@ -5276,7 +5277,7 @@ int effects_add(const char *uri, int instance)
             g_lilv_nodes.patch_readable,
             NULL);
         effect->properties_count = lilv_nodes_size(writable_properties) + lilv_nodes_size(readable_properties);
-        effect->properties = (property_t **) calloc(effect->properties_count, sizeof(property_t *));
+        effect->properties = (property_t **) mod_calloc(effect->properties_count, sizeof(property_t *));
 
         // TODO mix readable and writable
         uint32_t j = 0;
@@ -5646,7 +5647,7 @@ int effects_remove(int effect_id)
             }
         }
 
-        memset(&g_assignments_list, 0, sizeof(g_assignments_list));
+        mod_memset(&g_assignments_list, 0, sizeof(g_assignments_list));
 
         for (int i = 0; i < CC_MAX_DEVICES; i++)
         {
@@ -5768,7 +5769,7 @@ int effects_remove(int effect_id)
                     cc_client_unassignment(g_cc_client, &key);
                 }
 
-                memset(assignment, 0, sizeof(assignment_t));
+                mod_memset(assignment, 0, sizeof(assignment_t));
                 assignment->effect_id = ASSIGNMENT_UNUSED;
                 assignment->assignment_pair_id = -1;
             }
@@ -6874,7 +6875,7 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
         return ERR_LV2_INVALID_PARAM_SYMBOL;
 
     cc_assignment_t assignment;
-    memset(&assignment, 0, sizeof(assignment));
+    mod_memset(&assignment, 0, sizeof(assignment));
     assignment.device_id = device_id;
     assignment.actuator_id = actuator_id;
     assignment.label = label;
@@ -7124,14 +7125,14 @@ int effects_cc_unmap(int effect_id, const char *control_symbol)
                 key.id = assignment->assignment_id;
                 key.pair_id = assignment->assignment_pair_id;
 
-                memset(assignment, 0, sizeof(assignment_t));
+                mod_memset(assignment, 0, sizeof(assignment_t));
                 assignment->effect_id = ASSIGNMENT_UNUSED;
                 assignment->assignment_pair_id = -1;
 
                 if (key.pair_id != -1)
                 {
                     assignment = &g_assignments_list[i][key.pair_id];
-                    memset(assignment, 0, sizeof(assignment_t));
+                    mod_memset(assignment, 0, sizeof(assignment_t));
                     assignment->effect_id = ASSIGNMENT_UNUSED;
                     assignment->assignment_pair_id = -1;
                 }
@@ -7275,7 +7276,7 @@ int effects_cv_map(int effect_id, const char *control_symbol, const char *source
                 const char *source_symbol = NULL;
                 int source_effect_id = -1;
 
-                memset(effect_str, 0, sizeof(effect_str));
+                mod_memset(effect_str, 0, sizeof(effect_str));
                 strncpy(effect_str, source_port_name+7, 5);
 
                 for (int i=1; i<6; ++i) {
