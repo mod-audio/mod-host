@@ -1,7 +1,9 @@
 
 #pragma once
 
+#if defined(__MOD_DEVICES__) && (__GNUC__ * 100 + __GNUC_MINOR__) < 900
 #define MOD_SEMAPHORE_USE_FUTEX
+#endif
 
 #ifdef __APPLE__
 #include <mach/mach.h>
