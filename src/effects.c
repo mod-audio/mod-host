@@ -8063,6 +8063,7 @@ void effects_transport(int rolling, double beats_per_bar, double beats_per_minut
         else
         {
             jack_transport_stop(g_jack_global_client);
+            jack_transport_locate(g_jack_global_client, 0);
             if (g_verbose_debug) {
                 puts("DEBUG: effects_transport stopped rolling and relocated to frame 0");
             }
