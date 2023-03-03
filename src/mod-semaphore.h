@@ -16,6 +16,8 @@
 #include <unistd.h>
 #else
 #include <semaphore.h>
+#include <time.h>
+#include <sys/time.h>
 #endif
 
 #ifdef __APPLE__
@@ -140,9 +142,16 @@ int sem_timedwait_secs(sem_t* sem, int secs)
 static inline
 int sem_timedwait_secs(sem_t* sem, int secs)
 {
+#ifdef __MOD_DEVICES__
+      // verified to be faster vs `clock_gettime`
+      struct timeval tv;
+      gettimeofday(&tv, NULL);
+      struct timespec timeout = { tv.tv_sec + secs, tv.tv_usec * 1000 };
+#else
       struct timespec timeout;
       clock_gettime(CLOCK_REALTIME, &timeout);
       timeout.tv_sec += secs;
+#endif
       return sem_timedwait(sem, &timeout);
 }
 #endif
