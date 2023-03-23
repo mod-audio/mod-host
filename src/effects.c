@@ -1928,33 +1928,30 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
     {
         port = &effect->bypass_port;
 
-        if (pthread_mutex_trylock(&port->cv_source_mutex) == 0)
+        if (port->cv_source && pthread_mutex_trylock(&port->cv_source_mutex) == 0)
         {
-            if (port->cv_source)
-            {
-                cv_source_t *cv_source = port->cv_source;
+            cv_source_t *cv_source = port->cv_source;
 
-                value = ((float*)jack_port_get_buffer(cv_source->jack_port, 1))[0];
+            value = ((float*)jack_port_get_buffer(cv_source->jack_port, 1))[0];
 
-                // NOTE: values are reversed as this is bypass special behaviour
-                if (value <= cv_source->source_min_value) {
-                    value = cv_source->max_value;
+            // NOTE: values are reversed as this is bypass special behaviour
+            if (value <= cv_source->source_min_value) {
+                value = cv_source->max_value;
 
-                } else if (value >= cv_source->source_max_value) {
-                    value = cv_source->min_value;
+            } else if (value >= cv_source->source_max_value) {
+                value = cv_source->min_value;
 
-                } else {
-                    value = ((value - cv_source->source_min_value) / cv_source->source_diff_value) > 0.5f
-                          ? cv_source->min_value
-                          : cv_source->max_value;
-                }
+            } else {
+                value = ((value - cv_source->source_min_value) / cv_source->source_diff_value) > 0.5f
+                        ? cv_source->min_value
+                        : cv_source->max_value;
+            }
 
-                // ignore requests for same value
-                if (floats_differ_enough(cv_source->prev_value, value)) {
-                    if (SetPortValue(port, value, effect->instance, true, false)) {
-                        needs_post = true;
-                        cv_source->prev_value = value;
-                    }
+            // ignore requests for same value
+            if (floats_differ_enough(cv_source->prev_value, value)) {
+                if (SetPortValue(port, value, effect->instance, true, false)) {
+                    needs_post = true;
+                    cv_source->prev_value = value;
                 }
             }
 
