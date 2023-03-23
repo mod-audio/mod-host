@@ -2200,7 +2200,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
         {
             port = effect->input_control_ports[i];
 
-            if (port->hints & HINT_TRIGGER)
+            if ((port->hints & HINT_TRIGGER) && floats_differ_enough(port->prev_value, port->def_value))
                 port->prev_value = *(port->buffer) = port->def_value;
         }
     }
