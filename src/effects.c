@@ -5635,9 +5635,9 @@ int effects_remove(int effect_id)
                     if (assignment->effect_id == ASSIGNMENT_UNUSED)
                         continue;
 
-                    cc_assignment_key_t key;
-                    key.device_id = assignment->device_id;
+                    cc_assignment_key_t key = {0};
                     key.id = assignment->assignment_id;
+                    key.device_id = assignment->device_id;
                     key.pair_id = assignment->assignment_pair_id;
                     cc_client_unassignment(g_cc_client, &key);
                 }
@@ -5759,9 +5759,9 @@ int effects_remove(int effect_id)
 
                 if (g_cc_client)
                 {
-                    cc_assignment_key_t key;
-                    key.device_id = assignment->device_id;
+                    cc_assignment_key_t key = {0};
                     key.id = assignment->assignment_id;
+                    key.device_id = assignment->device_id;
                     key.pair_id = assignment->assignment_pair_id;
                     cc_client_unassignment(g_cc_client, &key);
                 }
@@ -6877,8 +6877,7 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
     if (port == NULL)
         return ERR_LV2_INVALID_PARAM_SYMBOL;
 
-    cc_assignment_t assignment;
-    mod_memset(&assignment, 0, sizeof(assignment));
+    cc_assignment_t assignment = {0};
     assignment.device_id = device_id;
     assignment.actuator_id = actuator_id;
     assignment.label = label;
@@ -7076,7 +7075,7 @@ int effects_cc_value_set(int effect_id, const char *control_symbol, float value)
                     fflush(stdout);
                 }
 
-                cc_set_value_t update;
+                cc_set_value_t update = {0};
                 update.device_id = assignment->device_id;
                 update.assignment_id = assignment->assignment_id;
                 update.actuator_id = assignment->actuator_id;
@@ -7123,9 +7122,9 @@ int effects_cc_unmap(int effect_id, const char *control_symbol)
             if (assignment->effect_id == effect_id && assignment->port != NULL &&
                 strcmp(assignment->port->symbol, control_symbol) == 0)
             {
-                cc_assignment_key_t key;
-                key.device_id = assignment->device_id;
+                cc_assignment_key_t key = {0};
                 key.id = assignment->assignment_id;
+                key.device_id = assignment->device_id;
                 key.pair_id = assignment->assignment_pair_id;
 
                 mod_memset(assignment, 0, sizeof(assignment_t));
