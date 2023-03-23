@@ -5916,6 +5916,9 @@ int effects_remove(int effect_id)
         }
     }
 
+    // clear param_set cache
+    effects_set_parameter(-1, NULL, 0.f);
+
     // start thread again
     if (g_postevents_running == 0)
     {
@@ -5991,6 +5994,7 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
         if (port)
         {
             // stores the data of the current control
+            last_effect_id = effect_id;
             last_min = port->min_value;
             last_max = port->max_value;
             last_buffer = port->buffer;
@@ -6011,9 +6015,11 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
             return SUCCESS;
         }
 
+        last_effect_id = -1;
         return ERR_LV2_INVALID_PARAM_SYMBOL;
     }
 
+    last_effect_id = -1;
     return ERR_INSTANCE_NON_EXISTS;
 }
 
