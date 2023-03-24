@@ -3714,28 +3714,39 @@ static bool CheckCCDeviceProtocolVersion(int device_id, int major, int minor)
     char *descriptor = cc_client_device_descriptor(g_cc_client, device_id);
 
     if (!descriptor)
+    {
+        printf("CheckCCDeviceProtocolVersion error: failed to get device descriptor with id %i\n", device_id);
         return false;
+    }
 
     // we quickly parse the json ourselves in order to prevent adding more dependencies into mod-host
     const char *vsplit, *vstart, *vend;
-    char buf_major[8], buf_minor[8], *buf = buf_major;
-    int device_major, device_minor;
 
     vsplit = strstr(descriptor, "\"protocol\":");
-    if (! vsplit)
+    if (!vsplit)
+    {
+        puts("CheckCCDeviceProtocolVersion error: failed to find protocol field");
         goto free;
+    }
 
     vstart = strstr(vsplit+10, "\"");
-    if (! vstart)
+    if (!vstart)
+    {
+        puts("CheckCCDeviceProtocolVersion error: failed to find protocol field start");
         goto free;
+    }
     ++vstart;
 
     vend = strstr(vstart, "\"");
-    if (! vend)
+    if (!vend)
+    {
+        puts("CheckCCDeviceProtocolVersion error: failed to find protocol field end");
         goto free;
+    }
 
-    mod_memset(buf_major, 0, sizeof(buf_major));
-    mod_memset(buf_minor, 0, sizeof(buf_minor));
+    char buf_major[8] = {0};
+    char buf_minor[8] = {0};
+    char *buf = buf_major;
 
     for (int i=0; i<7; ++vstart)
     {
@@ -3755,8 +3766,8 @@ static bool CheckCCDeviceProtocolVersion(int device_id, int major, int minor)
         break;
     }
 
-    device_major = atoi(buf_major);
-    device_minor = atoi(buf_minor);
+    const int device_major = atoi(buf_major);
+    const int device_minor = atoi(buf_minor);
 
     free(descriptor);
     return device_major >= major && device_minor >= minor;
