@@ -1,5 +1,6 @@
 /*
   Copyright 2008-2012 David Robillard <http://drobilla.net>
+  Copyright 2023 MOD Audio UG
 
   Permission to use, copy, modify, and/or distribute this software for any
   purpose with or without fee is hereby granted, provided that the above
@@ -18,8 +19,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "lv2/lv2plug.in/ns/ext/atom/atom.h"
-#include "lv2/lv2plug.in/ns/ext/event/event.h"
+#include <lv2/atom/atom.h>
+#include <lv2/event/event.h>
 
 #include "lv2_evbuf.h"
 

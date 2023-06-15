@@ -15,7 +15,7 @@
 */
 
 #include <lilv/lilv.h>
-#include <lv2/lv2plug.in/ns/ext/worker/worker.h>
+#include <lv2/worker/worker.h>
 #include <jack/ringbuffer.h>
 
 #include "mod-semaphore.h"

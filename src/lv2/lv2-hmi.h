@@ -1,6 +1,6 @@
 /*
   LV2 HMI integration extension
-  Copyright 2021 Filipe Coelho <falktx@falktx.com>
+  Copyright 2021-2023 Filipe Coelho <falktx@falktx.com>
 
   Permission to use, copy, modify, and/or distribute this software for any
   purpose with or without fee is hereby granted, provided that the above
@@ -23,7 +23,7 @@
 #ifndef LV2_HMI_H_INCLUDED
 #define LV2_HMI_H_INCLUDED
 
-#include "lv2/lv2plug.in/ns/lv2core/lv2.h"
+#include <lv2/core/lv2.h>
 
 #define LV2_HMI_URI                 "http://moddevices.com/ns/hmi"
 #define LV2_HMI_PREFIX              LV2_HMI_URI "#"

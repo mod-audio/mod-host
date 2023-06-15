@@ -1,7 +1,7 @@
 /*
   Copyright 2016 Robin Gareus <robin@gareus.org>
   Copyright 2016 Filipe Coelho <falktx@falktx.com>
-  Copyright 2016 MOD Duo GbR
+  Copyright 2016-2023 MOD Audio UG
 
   Permission to use, copy, modify, and/or distribute this software for any
   purpose with or without fee is hereby granted, provided that the above
@@ -28,7 +28,7 @@
 #ifndef MOD_LICENSE_H
 #define MOD_LICENSE_H
 
-#include "lv2/lv2plug.in/ns/lv2core/lv2.h"
+#include <lv2/core/lv2.h>
 
 #define MOD_LICENSE_URI    "http://moddevices.com/ns/ext/license"
 #define MOD_LICENSE_PREFIX MOD_LICENSE_URI "#"

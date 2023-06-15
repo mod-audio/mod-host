@@ -19,8 +19,8 @@
 #ifndef URID_H
 #define URID_H
 
-#include <lv2/lv2plug.in/ns/ext/urid/urid.h>
-#include <lv2/lv2plug.in/ns/ext/uri-map/uri-map.h>
+#include <lv2/urid/urid.h>
+#include <lv2/uri-map/uri-map.h>
 
 void urid_sem_init(void);
 
