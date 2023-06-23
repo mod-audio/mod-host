@@ -82,7 +82,7 @@ INCS += -DHAVE_NE10
 endif
 
 # control chain support
-ifeq ($(shell pkg-config --atleast-version=0.7.0 cc_client && echo true), true)
+ifeq ($(shell pkg-config --atleast-version=0.6.0 cc_client && echo true), true)
 LIBS += $(shell pkg-config --libs cc_client)
 INCS += $(shell pkg-config --cflags cc_client) -DHAVE_CONTROLCHAIN
 endif
