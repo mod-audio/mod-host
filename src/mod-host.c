@@ -938,7 +938,21 @@ int jack_initialize(jack_client_t* client, const char* load_init)
         return 1;
 
     running = 1;
-    pthread_create(&intclient_socket_thread, NULL, intclient_socket_run, NULL);
+#ifdef _MOD_DEVICE_DWARF
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET(0, &cpuset);
+    pthread_attr_setaffinity_np(&attr, sizeof(cpu_set_t), &cpuset);
+    pthread_attr_t* const attrptr = &attr;
+#else
+    pthread_attr_t* const attrptr = NULL;
+#endif
+    pthread_create(&intclient_socket_thread, attrptr, intclient_socket_run, NULL);
+#ifdef _MOD_DEVICE_DWARF
+    pthread_attr_destroy(&attr);
+#endif
 
     return 0;
 }
