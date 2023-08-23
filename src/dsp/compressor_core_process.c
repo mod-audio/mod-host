@@ -2,7 +2,7 @@
 #ifdef STEREO
 void compressor_process(sf_compressor_state_st *state, int size, float *bufferL, float *bufferR)
 #else
-void compressor_process_mono(sf_compressor_state_st *state, int size, float *input, float *buffer)
+void compressor_process_mono(sf_compressor_state_st *state, int size, float *buffer)
 #endif
 {
 	// pull out the state into local variables

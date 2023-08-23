@@ -337,7 +337,7 @@ static void ProcessMonitorExtra(monitor_client_t *const mon, jack_nframes_t nfra
 
         if (apply_compressor)
         {
-            compressor_process_mono(&mon->compressor2, nframes, bufInR, bufOutR);
+            compressor_process_mono(&mon->compressor2, nframes, bufC);
 
             if (apply_volume)
             {
