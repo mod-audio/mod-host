@@ -2705,33 +2705,27 @@ static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
 
 #ifdef MOD_IO_PROCESSING_ENABLED
     // Handle audio
-    const float *const audio_in1_buf = (float*)jack_port_get_buffer(g_audio_in1_port, nframes);
-    const float *const audio_in2_buf = (float*)jack_port_get_buffer(g_audio_in2_port, nframes);
-    /* */ float *const audio_out1_buf = (float*)jack_port_get_buffer(g_audio_out1_port, nframes);
-    /* */ float *const audio_out2_buf = (float*)jack_port_get_buffer(g_audio_out2_port, nframes);
+    float *const audio_out1_buf = (float*)jack_port_get_buffer(g_audio_out1_port, nframes);
+    float *const audio_out2_buf = (float*)jack_port_get_buffer(g_audio_out2_port, nframes);
 
     switch (g_noisegate_channel)
     {
     case 0: // no gate
-        memcpy(audio_out1_buf, audio_in1_buf, sizeof(float)*nframes);
-        memcpy(audio_out2_buf, audio_in2_buf, sizeof(float)*nframes);
         break;
     case 1: // left channel only
-        memcpy(audio_out2_buf, audio_in2_buf, sizeof(float)*nframes);
         for (uint32_t i=0; i<nframes; ++i)
-            audio_out1_buf[i] = gate_push_sample_and_apply(&g_noisegate, audio_in1_buf[i]);
+            audio_out1_buf[i] = gate_push_sample_and_apply(&g_noisegate, audio_out1_buf[i]);
         break;
     case 2: // right channel only
-        memcpy(audio_out1_buf, audio_in1_buf, sizeof(float)*nframes);
         for (uint32_t i=0; i<nframes; ++i)
-            audio_out2_buf[i] = gate_push_sample_and_apply(&g_noisegate, audio_in2_buf[i]);
+            audio_out2_buf[i] = gate_push_sample_and_apply(&g_noisegate, audio_out2_buf[i]);
         break;
     case 3: // left & right channels
         for (uint32_t i=0; i<nframes; ++i)
         {
-            gate_push_samples_and_run(&g_noisegate, audio_in1_buf[i], audio_in2_buf[i]);
-            audio_out1_buf[i] = gate_apply(&g_noisegate, audio_in1_buf[i]);
-            audio_out2_buf[i] = gate_apply(&g_noisegate, audio_in2_buf[i]);
+            gate_push_samples_and_run(&g_noisegate, audio_out1_buf[i], audio_out2_buf[i]);
+            audio_out1_buf[i] = gate_apply(&g_noisegate, audio_out1_buf[i]);
+            audio_out2_buf[i] = gate_apply(&g_noisegate, audio_out2_buf[i]);
         }
         break;
     }
@@ -3870,6 +3864,9 @@ int effects_init(void* client)
             jack_client_close(g_jack_global_client);
         return ERR_JACK_PORT_REGISTER;
     }
+
+    jack_port_tie(g_audio_in1_port, g_audio_out1_port);
+    jack_port_tie(g_audio_in2_port, g_audio_out2_port);
 #endif
 
     if (g_jack_global_client != NULL && strcmp(jack_get_client_name(g_jack_global_client), "mod-host") == 0 && ! monitor_client_init())

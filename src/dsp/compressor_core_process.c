@@ -1,8 +1,8 @@
 /* this file is meant to be imported by compressor_core.c, with STEREO macro to define function target */
 #ifdef STEREO
-void compressor_process(sf_compressor_state_st *state, int size, float *input_L, float *input_R, float *output_L, float *output_R)
+void compressor_process(sf_compressor_state_st *state, int size, float *bufferL, float *bufferR)
 #else
-void compressor_process_mono(sf_compressor_state_st *state, int size, float *input, float *output)
+void compressor_process_mono(sf_compressor_state_st *state, int size, float *input, float *buffer)
 #endif
 {
 	// pull out the state into local variables
@@ -58,9 +58,9 @@ void compressor_process_mono(sf_compressor_state_st *state, int size, float *inp
 		for (int chi = 0; chi < SF_COMPRESSOR_SPU; chi++, samplepos++)
 		{
 #ifdef STEREO
-			const float inputmax = maxf(fabs(input_L[samplepos]), fabs(input_R[samplepos]));
+			const float inputmax = maxf(fabs(bufferL[samplepos]), fabs(bufferR[samplepos]));
 #else
-			const float inputmax = fabs(input[samplepos]);
+			const float inputmax = fabs(buffer[samplepos]);
 #endif
 
 			float attenuation;
@@ -99,10 +99,10 @@ void compressor_process_mono(sf_compressor_state_st *state, int size, float *inp
 			// apply the gain
 			const float gain = mastergain * sinf(state->ang90 * compgain);
 #ifdef STEREO
-			output_L[samplepos] = input_L[samplepos] * gain;
-			output_R[samplepos] = input_R[samplepos] * gain;
+			bufferL[samplepos] *= gain;
+			bufferR[samplepos] *= gain;
 #else
-			output[samplepos] = input[samplepos] * gain;
+			buffer[samplepos] *= gain;
 #endif
 		}
 	}

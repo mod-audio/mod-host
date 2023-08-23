@@ -96,7 +96,7 @@ zix_thread_create(ZixThread* thread,
     pthread_attr_init(&attr);
     pthread_attr_setstacksize(&attr, stack_size);
 
-    const int ret = pthread_create(thread, NULL, function, arg);
+    const int ret = pthread_create(thread, &attr, function, arg);
     pthread_attr_destroy(&attr);
 
     if (ret == EAGAIN) {
