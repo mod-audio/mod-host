@@ -211,7 +211,7 @@ enum PortHints {
     HINT_SHOULD_UPDATE = 1 << 6, // inputs only, for external UIs
     // cv
     HINT_CV_MOD        = 1 << 0, // uses mod cvport
-    HINT_CV_RANGES     = 1 << 0, // port info includes ranges
+    HINT_CV_RANGES     = 1 << 1, // port info includes ranges
     // events
     HINT_TRANSPORT     = 1 << 0,
     HINT_MIDI_EVENT    = 1 << 1,
