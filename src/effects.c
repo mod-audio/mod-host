@@ -5472,34 +5472,7 @@ int effects_preset_save(int effect_id, const char *dir, const char *file_name, c
     }
 
     effect = &g_effects[effect_id];
-
-    LV2_State_Make_Path makePath = {
-        effect, MakePluginStatePathDuringLoadSave
-    };
-    const LV2_Feature feature_makePath = { LV2_STATE__makePath, &makePath };
-
-    const LV2_Feature* features[] = {
-        &g_uri_map_feature,
-        &g_urid_map_feature,
-        &g_urid_unmap_feature,
-        &g_options_feature,
-#ifdef __MOD_DEVICES__
-        &g_hmi_wc_feature,
-#endif
-        &g_license_feature,
-        &g_buf_size_features[0],
-        &g_buf_size_features[1],
-        &g_buf_size_features[2],
-        &g_lv2_log_feature,
-        &g_state_freePath_feature,
-        &feature_makePath,
-        effect->features[CTRLPORT_REQUEST_FEATURE],
-        effect->features[WORKER_FEATURE],
-        NULL
-    };
-
     scratch_dir = GetPluginStateDir(effect->instance, g_lv2_scratch_dir);
-    effect->state_dir = dir;
 
     LilvState* const state = lilv_state_new_from_instance(
         g_effects[effect_id].lilv_plugin,
@@ -5511,9 +5484,7 @@ int effects_preset_save(int effect_id, const char *dir, const char *file_name, c
         dir,
         GetPortValueForState, &g_effects[effect_id],
         LV2_STATE_IS_POD|LV2_STATE_IS_PORTABLE,
-        features);
-
-    effect->state_dir = NULL;
+        effect->features);
 
     if (label) {
         lilv_state_set_label(state, label);
