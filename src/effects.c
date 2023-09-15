@@ -5475,14 +5475,14 @@ int effects_preset_save(int effect_id, const char *dir, const char *file_name, c
     scratch_dir = GetPluginStateDir(effect->instance, g_lv2_scratch_dir);
 
     LilvState* const state = lilv_state_new_from_instance(
-        g_effects[effect_id].lilv_plugin,
-        g_effects[effect_id].lilv_instance,
+        effect->lilv_plugin,
+        effect->lilv_instance,
         &g_urid_map,
         scratch_dir,
         dir,
         dir,
         dir,
-        GetPortValueForState, &g_effects[effect_id],
+        GetPortValueForState, effect,
         LV2_STATE_IS_POD|LV2_STATE_IS_PORTABLE,
         effect->features);
 
