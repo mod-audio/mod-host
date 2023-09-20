@@ -36,6 +36,7 @@
 #include <unistd.h>
 #include <getopt.h>
 #include <jack/jack.h>
+#include <pthread.h>
 #include <signal.h>
 
 #ifndef SKIP_READLINE
@@ -757,7 +758,9 @@ int main(int argc, char **argv)
 {
     /* Command line options */
     static struct option long_options[] = {
+#ifndef _WIN32
         {"nofork", no_argument, 0, 'n'},
+#endif
         {"verbose", no_argument, 0, 'v'},
         {"socket-port", required_argument, 0, 'p'},
         {"feedback-port", required_argument, 0, 'f'},
@@ -821,7 +824,9 @@ int main(int argc, char **argv)
 #ifndef SKIP_READLINE
                     "  -i, --interactive              interactive mode\n"
 #endif
+#ifndef _WIN32
                     "  -n, --nofork                   run in nonforking mode\n"
+#endif
                     "  -V, --version                  print program version and exit\n"
                     "  -h, --help                     print this help and exit\n",
                 argv[0]);
@@ -851,6 +856,7 @@ int main(int argc, char **argv)
 
     if (! nofork)
     {
+#ifndef _WIN32
         int pid;
         pid = fork();
         if (pid != 0)
@@ -870,6 +876,7 @@ int main(int argc, char **argv)
             }
             exit(EXIT_SUCCESS);
         }
+#endif
     }
 
     if (mod_host_init(NULL, socket_port, feedback_port) != 0)
@@ -889,6 +896,8 @@ int main(int argc, char **argv)
     else
 #endif
     {
+#ifdef _WIN32
+#else
         struct sigaction sig;
         memset(&sig, 0, sizeof(sig));
 
@@ -897,6 +906,7 @@ int main(int argc, char **argv)
         sigemptyset(&sig.sa_mask);
         sigaction(SIGTERM, &sig, NULL);
         sigaction(SIGINT, &sig, NULL);
+#endif
     }
 
     /* Verbose */
