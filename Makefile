@@ -93,10 +93,17 @@ LIBS += $(shell pkg-config --libs hylia)
 INCS += $(shell pkg-config --cflags hylia) -DHAVE_HYLIA
 endif
 
-# macOS incompatible flags
-ifeq (,$(findstring apple,$(shell $(CC) -dumpmachine)))
+# incompatible flags
+MACHINE = $(shell $(CC) -dumpmachine)
+ifneq (,$(findstring mingw,$(MACHINE)))
+LDFLAGS += -lws2_32
+endif
+
+ifeq (,$(findstring apple,$(MACHINE)))
 LDFLAGS += -Wl,--no-undefined
+ifeq (,$(findstring mingw,$(MACHINE)))
 LIBS += -lrt
+endif
 endif
 
 # source and object files

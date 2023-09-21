@@ -34,6 +34,10 @@
 #include <unistd.h>
 #include <sys/stat.h>
 
+#ifdef _WIN32
+#include <direct.h>
+#endif
+
 #include "state-paths.h"
 #include "utils.h"
 
@@ -199,7 +203,11 @@ char* MakePluginStatePath(int instance, const char *dir, const char *path)
             if (duppath[i] == '/' || duppath[i] == '\0')
             {
                 duppath[i] = '\0';
+#ifdef _WIN32
+                if (_access(duppath, 4) == 0 || _mkdir(duppath))
+#else
                 if (mkdir(duppath, 0755) && errno != EEXIST)
+#endif
                 {
                     free(duppath);
                     free(newpath);

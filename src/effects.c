@@ -30,12 +30,30 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <dlfcn.h>
 #include <errno.h>
 #include <limits.h>
 #include <math.h>
 #include <pthread.h>
 #include <sys/stat.h>
+
+#ifdef _WIN32
+#include <direct.h>
+#include <io.h>
+#include <winsock2.h>
+#include <windows.h>
+typedef unsigned int uint;
+#define PRIi64 "lld"
+#define PRId64 "llu"
+#define RTLD_LOCAL 0
+#define RTLD_NOW 0
+#define dlopen(path, flags)  LoadLibrary(path)
+#define dlsym(lib, funcname) GetProcAddress((HMODULE)lib, funcname)
+#define dlclose(lib)         FreeLibrary((HMODULE)lib)
+#define setenv(...)
+#define unsetenv(...)
+#else
+#include <dlfcn.h>
+#endif
 
 /* Jack */
 #include <jack/jack.h>
@@ -896,8 +914,8 @@ static void ExternalControllerWriteFunction(LV2UI_Controller controller,
 */
 
 
-#ifdef __APPLE__
-// FIXME missing on macOS
+#if defined(__APPLE__) || defined(_WIN32)
+// FIXME missing on macOS and Windows
 static char* strchrnul(const char *s, int c)
 {
     char *r = strchr(s, c);
@@ -909,10 +927,32 @@ static char* strchrnul(const char *s, int c)
 }
 #endif
 
+#ifdef _WIN32
+// missing on Windows
+static char* realpath(const char *name, char *resolved)
+{
+    if (name == NULL)
+        return NULL;
+
+    if (_access(name, 4) != 0)
+        return NULL;
+
+    char *retname = NULL;
+
+    if ((retname = resolved) == NULL)
+        retname = malloc(PATH_MAX + 2);
+
+    if (retname == NULL)
+        return NULL;
+
+    return _fullpath(retname, name, PATH_MAX);
+}
+#endif
+
 static void InstanceDelete(int effect_id)
 {
     if (INSTANCE_IS_VALID(effect_id))
-        bzero(&g_effects[effect_id], sizeof(effect_t));
+        memset(&g_effects[effect_id], 0, sizeof(effect_t));
 }
 
 static int InstanceExist(int effect_id)
@@ -5878,7 +5918,7 @@ int effects_remove(int effect_id)
                 if (g_lv2_scratch_dir != NULL)
                 {
                     // recursively delete state folder
-                    bzero(state_filename, sizeof(state_filename));
+                    memset(state_filename, 0, sizeof(state_filename));
                     snprintf(state_filename, PATH_MAX-1, "%s/effect-%d",
                              g_lv2_scratch_dir, effect->instance);
                     RecursivelyRemovePluginPath(state_filename);
@@ -7664,7 +7704,7 @@ int effects_state_load(const char *dir)
     LilvState *state;
 
     char state_filename[PATH_MAX];
-    bzero(state_filename, sizeof(state_filename));
+    memset(state_filename, 0, sizeof(state_filename));
 
     LV2_State_Make_Path makePath = {
         NULL, MakePluginStatePathDuringLoadSave
@@ -7742,7 +7782,11 @@ int effects_state_load(const char *dir)
 
 int effects_state_save(const char *dir)
 {
+#ifdef _WIN32
+    if (_access(dir, 4) != 0 && _mkdir(dir) != 0)
+#else
     if (access(dir, F_OK) != 0 && mkdir(dir, 0755) != 0)
+#endif
     {
         fprintf(stderr, "failed to get access to project folder %s\n", dir);
         return ERR_INVALID_OPERATION;
@@ -7753,7 +7797,7 @@ int effects_state_save(const char *dir)
     char *scratch_dir, *plugin_dir;
 
     char state_dir[PATH_MAX];
-    bzero(state_dir, sizeof(state_dir));
+    memset(state_dir, 0, sizeof(state_dir));
 
     LV2_State_Make_Path makePath = {
         NULL, MakePluginStatePathDuringLoadSave

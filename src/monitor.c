@@ -26,10 +26,18 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netdb.h>
 #include <fcntl.h>
+
+#ifdef _WIN32
+#include <winsock2.h>
+#else
+#include <netdb.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#define closesocket close
+#define INVALID_SOCKET -1
+typedef int SOCKET;
+#endif
 
 #include "monitor.h"
 #include "utils.h"
@@ -71,7 +79,8 @@
 ************************************************************************************************************************
 */
 
-static int g_status, g_sockfd;
+static int g_status;
+static SOCKET g_sockfd;
 
 /*
 ************************************************************************************************************************
@@ -110,7 +119,7 @@ int monitor_start(char *addr, int port)
     struct hostent *server;
 
     g_sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (g_sockfd < 0)
+    if (g_sockfd == INVALID_SOCKET)
     {
         perror("ERROR opening socket");
         return 1;
@@ -124,14 +133,12 @@ int monitor_start(char *addr, int port)
         return 1;
     }
 
-    bzero((char *) &serv_addr, sizeof(serv_addr));
+    memset(&serv_addr, 0, sizeof(serv_addr));
     serv_addr.sin_family = AF_INET;
-    bcopy((char *)server->h_addr,
-          (char *)&serv_addr.sin_addr.s_addr,
-          server->h_length);
+    memcpy(server->h_addr, &serv_addr.sin_addr.s_addr, server->h_length);
     serv_addr.sin_port = htons(port);
 
-    if (connect(g_sockfd,(struct sockaddr*)&serv_addr,sizeof(serv_addr)) < 0)
+    if (connect(g_sockfd,(struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0)
     {
         perror("ERROR connecting");
         return 1;
@@ -139,8 +146,13 @@ int monitor_start(char *addr, int port)
 
     g_status = ON;
 
+#ifdef _WIN32
+    unsigned long mode = 1;
+    if (ioctlsocket(g_sockfd, FIONBIO, &mode) != 0)
+#else
     int flags = fcntl(g_sockfd, F_GETFL, 0);
     if (fcntl(g_sockfd, F_SETFL, flags | O_NONBLOCK) != 0)
+#endif
     {
         perror("ERROR setting socket to nonblocking");
         return 1;
@@ -157,7 +169,7 @@ int monitor_status(void)
 
 int monitor_stop(void)
 {
-    close(g_sockfd);
+    closesocket(g_sockfd);
     g_status = OFF;
     return 0;
 }
@@ -169,7 +181,7 @@ int monitor_send(int instance, const char *symbol, float value)
     char msg[255];
     sprintf(msg, "monitor %d %s %f", instance, symbol, value);
 
-    ret = write(g_sockfd, msg, strlen(msg) + 1);
+    ret = send(g_sockfd, msg, strlen(msg) + 1, 0);
     if (ret < 0)
     {
         perror("send error");
