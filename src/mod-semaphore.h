@@ -25,6 +25,7 @@
 // macOS semaphore
 
 typedef struct _sem_t {
+    mach_port_t t;
     semaphore_t s;
 } sem_t;
 
@@ -35,13 +36,14 @@ int sem_init(sem_t* sem, int pshared, int value)
     if (pshared)
         return 1;
 
-    return semaphore_create(mach_task_self(), &sem->s, SYNC_POLICY_FIFO, value) != KERN_SUCCESS;
+    sem->t = mach_task_self();
+    return semaphore_create(sem->t, &sem->s, SYNC_POLICY_FIFO, value) != KERN_SUCCESS;
 }
 
 static inline
 void sem_destroy(sem_t* sem)
 {
-    semaphore_destroy(mach_task_self(), sem->s);
+    semaphore_destroy(sem->t, sem->s);
 }
 
 static inline
@@ -53,10 +55,9 @@ void sem_post(sem_t* sem)
 static inline
 int sem_wait(sem_t* sem)
 {
-    return semaphore_wait(sem->s) != KERN_SUCCESS;
+    return semaphore_wait(sem->s) == KERN_SUCCESS ? 0 : 1;
 }
 
-// 0 = ok
 static inline
 int sem_timedwait_secs(sem_t* sem, int secs)
 {
@@ -64,7 +65,7 @@ int sem_timedwait_secs(sem_t* sem, int secs)
     time.tv_sec = secs;
     time.tv_nsec = 0;
 
-    return semaphore_timedwait(sem->s, time) != KERN_SUCCESS;
+    return semaphore_timedwait(sem->s, time) == KERN_SUCCESS ? 0 : 1;
 }
 #elif defined(MOD_SEMAPHORE_USE_FUTEX)
 /* --------------------------------------------------------------------- */
