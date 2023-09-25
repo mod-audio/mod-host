@@ -96,7 +96,7 @@ endif
 # incompatible flags
 MACHINE = $(shell $(CC) -dumpmachine)
 ifneq (,$(findstring mingw,$(MACHINE)))
-LDFLAGS += -lws2_32
+LIBS += -liphlpapi -lws2_32
 endif
 
 ifeq (,$(findstring apple,$(MACHINE)))
