@@ -171,7 +171,7 @@ int socket_start(int socket_port, int feedback_port, int buffer_size)
     struct sockaddr_in serv_addr;
     memset(&serv_addr, 0, sizeof(serv_addr));
     serv_addr.sin_family = AF_INET;
-#ifdef __MOD_DEVICES__
+#if defined(__MOD_DEVICES__) || defined(_WIN32)
     serv_addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 #else
     serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
