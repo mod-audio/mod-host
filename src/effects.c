@@ -51,11 +51,15 @@ typedef unsigned int uint;
 #define dlclose(lib)         FreeLibrary((HMODULE)lib)
 #define setenv(...)
 #define unsetenv(...)
-// FIXME implement these on jackserver side
-#define jack_get_property(c,p,v,t) true
-#define jack_set_property(...)
 #else
 #include <dlfcn.h>
+#endif
+
+#if defined(__APPLE__) || defined(_WIN32)
+// FIXME implement these on jackserver side
+static int jack_get_property_not(void) { return -1; }
+#define jack_get_property(c,p,v,t) jack_get_property_not()
+#define jack_set_property(...)
 #endif
 
 /* Jack */
