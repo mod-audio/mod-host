@@ -55,13 +55,6 @@ typedef unsigned int uint;
 #include <dlfcn.h>
 #endif
 
-#if defined(__APPLE__) || defined(_WIN32)
-// FIXME implement these on jackserver side
-static int jack_get_property_not(void) { return -1; }
-#define jack_get_property(c,p,v,t) jack_get_property_not()
-#define jack_set_property(...)
-#endif
-
 /* Jack */
 #include <jack/jack.h>
 #include <jack/intclient.h>
