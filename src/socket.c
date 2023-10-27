@@ -255,12 +255,17 @@ void socket_set_receive_cb(void (*receive_cb)(msg_t *msg))
 
 int socket_send(int destination, const char *buffer, int size)
 {
-    int ret;
+    int ret = -1;
 
-    ret = send(destination, buffer, size, 0);
-    if (ret < 0)
+    while (size > 0)
     {
-        perror("send error");
+        ret = send(destination, buffer, size, 0);
+        if (ret < 0)
+        {
+            perror("send error");
+        }
+        size -= ret;
+        buffer += ret;
     }
 
     return ret;

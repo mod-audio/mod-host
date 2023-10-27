@@ -176,15 +176,21 @@ int monitor_stop(void)
 
 int monitor_send(int instance, const char *symbol, float value)
 {
-    int ret;
+    int size, ret = -1;
 
     char msg[255];
-    sprintf(msg, "monitor %d %s %f", instance, symbol, value);
+    char *buffer = msg;
+    size = sprintf(msg, "monitor %d %s %f", instance, symbol, value);
 
-    ret = send(g_sockfd, msg, strlen(msg) + 1, 0);
-    if (ret < 0)
+    while (size > 0)
     {
-        perror("send error");
+        ret = send(g_sockfd, buffer, size + 1, 0);
+        if (ret < 0)
+        {
+            perror("send error");
+        }
+        size -= ret;
+        buffer += ret;
     }
 
     return ret;
