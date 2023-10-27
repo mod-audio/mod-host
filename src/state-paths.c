@@ -204,7 +204,7 @@ char* MakePluginStatePath(int instance, const char *dir, const char *path)
             {
                 duppath[i] = '\0';
 #ifdef _WIN32
-                if (_access(duppath, 4) == 0 || _mkdir(duppath))
+                if (_mkdir(duppath) && errno != EEXIST)
 #else
                 if (mkdir(duppath, 0755) && errno != EEXIST)
 #endif
