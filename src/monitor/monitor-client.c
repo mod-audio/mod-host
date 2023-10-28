@@ -268,7 +268,7 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
         if (mon->mono_copy)
             memcpy(bufOutC, bufInR, sizeof(float)*nframes);
         else
-            memset(bufOutC, 0, nframes);
+            memset(bufOutC, 0, sizeof(float)*nframes);
 
         mon->apply_volume = floats_differ_enough(smooth_volume, 1.0f);
         mon->smooth_volume = smooth_volume;
@@ -392,10 +392,15 @@ static void PortConnectMonitor(jack_port_id_t a, jack_port_id_t b, int connect, 
     jack_port_t *const port_a = jack_port_by_id(mon->client, a);
     jack_port_t *const port_b = jack_port_by_id(mon->client, b);
 
+#ifdef _WIN32
+    // FIXME unexpected bad mixdown
+    mon->in1_connected = mon->in2_connected = true;
+#else
     if (port_a == mon->ports[PORT_IN1] || port_b == mon->ports[PORT_IN1])
         mon->in1_connected = jack_port_connected(mon->ports[PORT_IN1]) > 0;
     else if (port_a == mon->ports[PORT_IN2] || port_b == mon->ports[PORT_IN2])
         mon->in2_connected = jack_port_connected(mon->ports[PORT_IN2]) > 0;
+#endif
 
 #ifdef _MOD_DEVICE_DUOX
     if (mon->extra_active)
