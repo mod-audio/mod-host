@@ -2745,27 +2745,37 @@ static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
 
 #ifdef MOD_IO_PROCESSING_ENABLED
     // Handle audio
-    float *const audio_out1_buf = (float*)jack_port_get_buffer(g_audio_out1_port, nframes);
-    float *const audio_out2_buf = (float*)jack_port_get_buffer(g_audio_out2_port, nframes);
+    const float *const audio_in1_buf = (float*)jack_port_get_buffer(g_audio_in1_port, nframes);
+    const float *const audio_in2_buf = (float*)jack_port_get_buffer(g_audio_in2_port, nframes);
+    /* */ float *const audio_out1_buf = (float*)jack_port_get_buffer(g_audio_out1_port, nframes);
+    /* */ float *const audio_out2_buf = (float*)jack_port_get_buffer(g_audio_out2_port, nframes);
 
     switch (g_noisegate_channel)
     {
     case 0: // no gate
+        if (audio_out1_buf != audio_in1_buf)
+            memcpy(audio_out1_buf, audio_in1_buf, sizeof(float)*nframes);
+        if (audio_out2_buf != audio_in2_buf)
+            memcpy(audio_out2_buf, audio_in2_buf, sizeof(float)*nframes);
         break;
     case 1: // left channel only
+        if (audio_out2_buf != audio_in2_buf)
+            memcpy(audio_out2_buf, audio_in2_buf, sizeof(float)*nframes);
         for (uint32_t i=0; i<nframes; ++i)
-            audio_out1_buf[i] = gate_push_sample_and_apply(&g_noisegate, audio_out1_buf[i]);
+            audio_out1_buf[i] = gate_push_sample_and_apply(&g_noisegate, audio_in1_buf[i]);
         break;
     case 2: // right channel only
+        if (audio_out1_buf != audio_in1_buf)
+            memcpy(audio_out1_buf, audio_in1_buf, sizeof(float)*nframes);
         for (uint32_t i=0; i<nframes; ++i)
-            audio_out2_buf[i] = gate_push_sample_and_apply(&g_noisegate, audio_out2_buf[i]);
+            audio_out2_buf[i] = gate_push_sample_and_apply(&g_noisegate, audio_in2_buf[i]);
         break;
     case 3: // left & right channels
         for (uint32_t i=0; i<nframes; ++i)
         {
-            gate_push_samples_and_run(&g_noisegate, audio_out1_buf[i], audio_out2_buf[i]);
-            audio_out1_buf[i] = gate_apply(&g_noisegate, audio_out1_buf[i]);
-            audio_out2_buf[i] = gate_apply(&g_noisegate, audio_out2_buf[i]);
+            gate_push_samples_and_run(&g_noisegate, audio_in1_buf[i], audio_in2_buf[i]);
+            audio_out1_buf[i] = gate_apply(&g_noisegate, audio_in1_buf[i]);
+            audio_out2_buf[i] = gate_apply(&g_noisegate, audio_in2_buf[i]);
         }
         break;
     }
