@@ -122,7 +122,11 @@ $(PROG): $(OBJ)
 	$(CC) $(OBJ) $(LDFLAGS) $(LIBS) -o $@
 
 $(PROG).so: $(OBJ)
+ifeq ($(MODAPP),1)
 	$(CC) $(OBJ) $(LDFLAGS) $(subst -ljack ,-ljackserver ,$(LIBS)) -shared -o $@
+else
+	$(CC) $(OBJ) $(LDFLAGS) $(LIBS) -shared -o $@
+endif
 
 # meta-rule to generate the object files
 %.o: %.$(EXT) src/info.h
