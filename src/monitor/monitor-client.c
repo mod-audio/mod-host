@@ -144,10 +144,10 @@ static void ProcessMonitorExtra(monitor_client_t *const mon, jack_nframes_t nfra
 static int ProcessMonitor(jack_nframes_t nframes, void *arg)
 {
     monitor_client_t *const mon = arg;
-    float *const bufIn1  = jack_port_get_buffer(mon->ports[PORT_IN1], nframes);
-    float *const bufIn2  = jack_port_get_buffer(mon->ports[PORT_IN2], nframes);
-    float *const bufOut1 = jack_port_get_buffer(mon->ports[PORT_OUT1], nframes);
-    float *const bufOut2 = jack_port_get_buffer(mon->ports[PORT_OUT2], nframes);
+    const float *const bufIn1  = jack_port_get_buffer(mon->ports[PORT_IN1], nframes);
+    const float *const bufIn2  = jack_port_get_buffer(mon->ports[PORT_IN2], nframes);
+    /* */ float *const bufOut1 = jack_port_get_buffer(mon->ports[PORT_OUT1], nframes);
+    /* */ float *const bufOut2 = jack_port_get_buffer(mon->ports[PORT_OUT2], nframes);
 
     if (mon->muted)
     {
@@ -231,9 +231,9 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
     if (mon->in1_connected || mon->in2_connected)
     {
         // only one input has connections
-        float *const bufInR  = mon->in1_connected ? bufIn1 : bufIn2;
-        float *const bufOutR = mon->in1_connected ? bufOut1 : bufOut2;
-        float *const bufOutC = mon->in1_connected ? bufOut2 : bufOut1;
+        const float *const bufInR  = mon->in1_connected ? bufIn1 : bufIn2;
+        /* */ float *const bufOutR = mon->in1_connected ? bufOut1 : bufOut2;
+        /* */ float *const bufOutC = mon->in1_connected ? bufOut2 : bufOut1;
 
         if (bufOutR != bufInR)
             memcpy(bufOutR, bufInR, sizeof(float)*nframes);
@@ -284,10 +284,10 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
 #ifdef _MOD_DEVICE_DUOX
 static void ProcessMonitorExtra(monitor_client_t *const mon, jack_nframes_t nframes)
 {
-    float *const bufIn3  = jack_port_get_buffer(mon->ports[PORT_EXTRA_IN3], nframes);
-    float *const bufIn4  = jack_port_get_buffer(mon->ports[PORT_EXTRA_IN4], nframes);
-    float *const bufOut3 = jack_port_get_buffer(mon->ports[PORT_EXTRA_OUT3], nframes);
-    float *const bufOut4 = jack_port_get_buffer(mon->ports[PORT_EXTRA_OUT4], nframes);
+    const float *const bufIn3  = jack_port_get_buffer(mon->ports[PORT_EXTRA_IN3], nframes);
+    const float *const bufIn4  = jack_port_get_buffer(mon->ports[PORT_EXTRA_IN4], nframes);
+    /* */ float *const bufOut3 = jack_port_get_buffer(mon->ports[PORT_EXTRA_OUT3], nframes);
+    /* */ float *const bufOut4 = jack_port_get_buffer(mon->ports[PORT_EXTRA_OUT4], nframes);
 
     const float new_volume_weight = 0.001f;
     const float old_volume_weight = 1.f - new_volume_weight;
@@ -342,9 +342,9 @@ static void ProcessMonitorExtra(monitor_client_t *const mon, jack_nframes_t nfra
     if (mon->in3_connected || mon->in4_connected)
     {
         // only one input has connections
-        float *const bufInR  = mon->in3_connected ? bufIn3 : bufIn4;
-        float *const bufOutR = mon->in3_connected ? bufOut3 : bufOut4;
-        float *const bufOutC = mon->in3_connected ? bufOut4 : bufOut3;
+        const float *const bufInR  = mon->in3_connected ? bufIn3 : bufIn4;
+        /* */ float *const bufOutR = mon->in3_connected ? bufOut3 : bufOut4;
+        /* */ float *const bufOutC = mon->in3_connected ? bufOut4 : bufOut3;
 
         if (bufOutR != bufInR)
             memcpy(bufOutR, bufInR, sizeof(float)*nframes);
@@ -385,37 +385,26 @@ static void ProcessMonitorExtra(monitor_client_t *const mon, jack_nframes_t nfra
 }
 #endif
 
-static void PortConnectMonitor(jack_port_id_t a, jack_port_id_t b, int connect, void* arg)
+static int GraphOrder(void* arg)
 {
     monitor_client_t *const mon = arg;
 
-    jack_port_t *const port_a = jack_port_by_id(mon->client, a);
-    jack_port_t *const port_b = jack_port_by_id(mon->client, b);
-
-#ifdef _WIN32
-    // FIXME unexpected bad mixdown
-    mon->in1_connected = mon->in2_connected = true;
-#else
-    if (port_a == mon->ports[PORT_IN1] || port_b == mon->ports[PORT_IN1])
-        mon->in1_connected = jack_port_connected(mon->ports[PORT_IN1]) > 0;
-    else if (port_a == mon->ports[PORT_IN2] || port_b == mon->ports[PORT_IN2])
-        mon->in2_connected = jack_port_connected(mon->ports[PORT_IN2]) > 0;
-#endif
+    mon->in1_connected = jack_port_connected(mon->ports[PORT_IN1]) > 0;
+    mon->in2_connected = jack_port_connected(mon->ports[PORT_IN2]) > 0;
 
 #ifdef _MOD_DEVICE_DUOX
     if (mon->extra_active)
     {
-        if (port_a == mon->ports[PORT_EXTRA_IN3] || port_b == mon->ports[PORT_EXTRA_IN3])
-            mon->in3_connected = jack_port_connected(mon->ports[PORT_EXTRA_IN3]) > 0;
-        else if (port_a == mon->ports[PORT_EXTRA_IN4] || port_b == mon->ports[PORT_EXTRA_IN4])
-            mon->in4_connected = jack_port_connected(mon->ports[PORT_EXTRA_IN4]) > 0;
+        mon->in3_connected = jack_port_connected(mon->ports[PORT_EXTRA_IN3]) > 0;
+        mon->in4_connected = jack_port_connected(mon->ports[PORT_EXTRA_IN4]) > 0;
     }
 #endif
 
-    return;
-
-    // unused
-    (void)connect;
+    printf("monitor debug: out1 connected: %s, out2 connected: %s\n",
+           mon->in1_connected ? "true" : "false",
+           mon->in2_connected ? "true" : "false");
+    fflush(stdout);
+    return 0;
 }
 
 #ifdef STANDALONE_MONITOR_CLIENT
@@ -505,7 +494,7 @@ int jack_initialize(jack_client_t* client, const char* load_init)
 #endif
 
     /* Set jack callbacks */
-    jack_set_port_connect_callback(client, PortConnectMonitor, mon);
+    jack_set_graph_order_callback(client, GraphOrder, mon);
     jack_set_process_callback(client, ProcessMonitor, mon);
 
     /* Activate the jack client */
@@ -525,27 +514,39 @@ int jack_initialize(jack_client_t* client, const char* load_init)
 
     const char* const ourclientname = jack_get_client_name(client);
 
-#ifndef _MOD_DEVICE_DWARF
-    snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:out_1", ourclientname);
-    jack_connect(client, ourportname, "system:playback_1");
+    if (jack_port_by_name(client, "system:playback_1") != NULL)
+    {
+       #ifndef _MOD_DEVICE_DWARF
+        snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:out_1", ourclientname);
+       #else
+        snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:out_2", ourclientname);
+       #endif
+        jack_connect(client, ourportname, "system:playback_1");
+    }
 
-    snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:out_2", ourclientname);
-    jack_connect(client, ourportname, "system:playback_2");
-#else
-    snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:out_1", ourclientname);
-    jack_connect(client, ourportname, "system:playback_2");
+    if (jack_port_by_name(client, "system:playback_2") != NULL)
+    {
+       #ifndef _MOD_DEVICE_DWARF
+        snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:out_2", ourclientname);
+       #else
+        snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:out_1", ourclientname);
+       #endif
+        jack_connect(client, ourportname, "system:playback_2");
+    }
 
-    snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:out_2", ourclientname);
-    jack_connect(client, ourportname, "system:playback_1");
-#endif
+   #ifdef _MOD_DEVICE_DUOX
+    if (jack_port_by_name(client, "system:playback_3") != NULL)
+    {
+        snprintf(ourportname, MAX_CHAR_BUF_SIZE, mon->extra_active ? "%s:out_3" : "%s:out_1", ourclientname);
+        jack_connect(client, ourportname, "system:playback_3");
+    }
 
-#ifdef _MOD_DEVICE_DUOX
-    snprintf(ourportname, MAX_CHAR_BUF_SIZE, mon->extra_active ? "%s:out_3" : "%s:out_1", ourclientname);
-    jack_connect(client, ourportname, "system:playback_3");
-
-    snprintf(ourportname, MAX_CHAR_BUF_SIZE, mon->extra_active ? "%s:out_4" : "%s:out_2", ourclientname);
-    jack_connect(client, ourportname, "system:playback_4");
-#endif
+    if (jack_port_by_name(client, "system:playback_4") != NULL)
+    {
+        snprintf(ourportname, MAX_CHAR_BUF_SIZE, mon->extra_active ? "%s:out_4" : "%s:out_2", ourclientname);
+        jack_connect(client, ourportname, "system:playback_4");
+    }
+   #endif
 
     return 0;
 }
