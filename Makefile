@@ -46,7 +46,16 @@ CFLAGS += -Winit-self -Wjump-misses-init -Wmissing-prototypes -Wnested-externs -
 endif
 
 # libraries
-LIBS = $(shell pkg-config --libs jack lilv-0) -lpthread -lm
+LIBS = $(shell pkg-config --libs lilv-0)
+
+ifeq ($(MODAPP),1)
+LIBS += $(subst -ljack ,-ljackserver ,$(shell pkg-config --libs jack))
+ifneq ($(MACOS)$(WINDOWS),true)
+LIBS += -Wl,-rpath,'$$ORIGIN/..'
+endif
+else
+LIBS += $(shell pkg-config --libs jack)
+endif
 
 # include paths
 INCS = $(shell pkg-config --cflags jack lilv-0)
@@ -92,6 +101,8 @@ ifeq ($(shell pkg-config --exists hylia && echo true), true)
 LIBS += $(shell pkg-config --libs hylia)
 INCS += $(shell pkg-config --cflags hylia) -DHAVE_HYLIA
 endif
+
+LIBS += -lpthread -lm
 
 # incompatible flags
 MACHINE = $(shell $(CC) -dumpmachine)
