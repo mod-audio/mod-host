@@ -399,11 +399,6 @@ static int GraphOrder(void* arg)
         mon->in4_connected = jack_port_connected(mon->ports[PORT_EXTRA_IN4]) > 0;
     }
 #endif
-
-    printf("monitor debug: out1 connected: %s, out2 connected: %s\n",
-           mon->in1_connected ? "true" : "false",
-           mon->in2_connected ? "true" : "false");
-    fflush(stdout);
     return 0;
 }
 
