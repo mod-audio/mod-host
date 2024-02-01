@@ -48,7 +48,7 @@ endif
 # libraries
 LIBS = $(shell pkg-config --libs lilv-0)
 
-ifeq ($(MODAPP),1)
+ifeq ($(MOD_DESKTOP),1)
 LIBS += $(subst -ljack ,-ljackserver ,$(shell pkg-config --libs jack))
 ifneq ($(MACOS)$(WINDOWS),true)
 LIBS += -Wl,-rpath,'$$ORIGIN/..'
