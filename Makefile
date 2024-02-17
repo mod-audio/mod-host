@@ -162,9 +162,9 @@ install: install_man
 	install -d $(DESTDIR)$(BINDIR)
 	install -m 755 $(PROG) $(DESTDIR)$(BINDIR)
 	install -d $(DESTDIR)$(shell pkg-config --variable=libdir jack)/jack/
-	install -m 755 $(PROG).so $(DESTDIR)$(shell pkg-config --variable=libdir jack)/jack/
-	install -m 755 fake-input.so $(DESTDIR)$(shell pkg-config --variable=libdir jack)/jack/
-	install -m 755 mod-monitor.so $(DESTDIR)$(shell pkg-config --variable=libdir jack)/jack/
+	install -m 644 $(PROG).so $(DESTDIR)$(shell pkg-config --variable=libdir jack)/jack/
+	install -m 644 fake-input.so $(DESTDIR)$(shell pkg-config --variable=libdir jack)/jack/
+	install -m 644 mod-monitor.so $(DESTDIR)$(shell pkg-config --variable=libdir jack)/jack/
 
 # clean rule
 clean:
