@@ -935,6 +935,9 @@ int jack_initialize(jack_client_t* client, const char* load_init)
     int socket_port = SOCKET_DEFAULT_PORT;
     int feedback_port = 0;
 
+    if (load_init == NULL || load_init[0] == '\0')
+        load_init = getenv("MOD_DEVICE_HOST_PORT");
+
     if (load_init != NULL && load_init[0] != '\0')
     {
         socket_port = atoi(load_init);
