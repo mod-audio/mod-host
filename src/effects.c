@@ -5595,9 +5595,11 @@ int effects_remove(int effect_id)
         {
             for (int i = 0; g_capture_ports[i]; i++)
             {
-                const char **capture_connections =
-                    jack_port_get_connections(jack_port_by_name(g_jack_global_client, g_capture_ports[i]));
+                jack_port_t *port = jack_port_by_name(g_jack_global_client, g_capture_ports[i]);
+                if (! port)
+                    continue;
 
+                const char **capture_connections = jack_port_get_connections(port);
                 if (capture_connections)
                 {
                     for (int j = 0; capture_connections[j]; j++)
