@@ -5501,6 +5501,10 @@ int effects_preset_show(const char *uri, char **state_str)
 {
     LilvNode* preset_uri = lilv_new_uri(g_lv2_data, uri);
 
+    if (! preset_uri) {
+        return ERR_LV2_INVALID_PRESET_URI;
+    }
+
     if (lilv_world_load_resource(g_lv2_data, preset_uri) >= 0)
     {
         LilvState* state = lilv_state_new_from_world(g_lv2_data, &g_urid_map, preset_uri);
