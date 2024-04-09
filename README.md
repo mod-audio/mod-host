@@ -108,32 +108,32 @@ The commands supported by mod-host are:
 
     add <lv2_uri> <instance_number>
         * add an LV2 plugin encapsulated as a jack client
-        e.g.: add http://lv2plug.in/plugins/eg-amp 0
-        instance_number must be any value between 0 ~ 9999, inclusively
+        e.g.: add "http://lv2plug.in/plugins/eg-amp" 0
+        instance_number must be any value between 0 ~ 9990, inclusively
 
     remove <instance_number>
         * remove an LV2 plugin instance (and also the jack client)
         e.g.: remove 0
 
     preset_load <instance_number> <preset_uri>
-        * load a preset state to given effect instance
+        * load a preset state of an effect instance
         e.g.: preset_load 0 "http://drobilla.net/plugins/mda/presets#JX10-moogcury-lite"
 
     preset_save <instance_number> <preset_name> <dir> <file_name>
-        * save a preset state from given effect instance
-        e.g.: preset_save 0 "My Preset" /home/user/.lv2/my-presets.lv2 mypreset.ttl
+        * save a preset state of an effect instance
+        e.g.: preset_save 0 "My Preset" "/home/user/.lv2/my-presets.lv2" "mypreset.ttl"
 
-    preset_show <instance_number> <preset_uri>
-        * show the preset information of requested instance / URI
-        e.g.: preset_show 0 http://drobilla.net/plugins/mda/presets#EPiano-bright
+    preset_show <preset_uri>
+        * show the preset information of requested URI
+        e.g.: preset_show "http://drobilla.net/plugins/mda/presets#EPiano-bright"
 
     connect <origin_port> <destination_port>
-        * connect two effect audio ports
-        e.g.: connect system:capture_1 effect_0:in
+        * connect two jack ports
+        e.g.: connect "system:capture_1" "effect_0:in"
 
     disconnect <origin_port> <destination_port>
-        * disconnect two effect audio ports
-        e.g.: disconnect system:capture_1 effect_0:in
+        * disconnect two jack ports
+        e.g.: disconnect "system:capture_1" "effect_0:in"
 
     bypass <instance_number> <bypass_value>
         * toggle effect processing
@@ -142,42 +142,54 @@ The commands supported by mod-host are:
         if bypass_value = 0 process effect
 
     param_set <instance_number> <param_symbol> <param_value>
-        * set a value to given control
-        e.g.: param_set 0 gain 2.50
+        * set the value of a control port
+        e.g.: param_set 0 "gain" 2.5
 
     param_get <instance_number> <param_symbol>
-        * get the value of the request control
-        e.g.: param_get 0 gain
+        * get the value of a control port
+        e.g.: param_get 0 "gain"
 
     param_monitor <instance_number> <param_symbol> <cond_op> <value>
-        * do monitoring a effect instance control port according given condition
-        e.g: param_monitor 0 gain > 2.50
+        * monitor a control port according to a condition
+        e.g: param_monitor 0 "gain" ">" 2.5
+
+    patch_set <instance_number> <property_uri> <value>
+        * set the value of a control port
+        e.g.: patch_set 0 "gain" 2.5
+
+    patch_get <instance_number> <property_uri>
+        * get the value of a control port
+        e.g.: patch_get 0 "gain"
 
     licensee <instance_number>
         * get the licensee name for a commercial plugin
         e.g.: licensee 0
 
     monitor <addr> <port> <status>
-        * open a socket port to monitoring parameters
+        * open a socket port for monitoring parameter changes
         e.g: monitor localhost 12345 1
         if status = 1 start monitoring
         if status = 0 stop monitoring
 
     monitor_output <instance_number> <param_symbol>
-        * request monitoring of an output control port in the feedback port
-        e.g.: monitor_output 0 meter
+        * request monitoring of an output control port (on the feedback port)
+        e.g.: monitor_output 0 "meter"
 
     midi_learn <instance_number> <param_symbol> <minimum> <maximum>
-        * start MIDI learn for a parameter
-        e.g.: midi_learn 0 gain 0.0 1.0
+        * start MIDI learn for a control port
+        e.g.: midi_learn 0 "gain" 0.0 1.0
 
     midi_map <instance_number> <param_symbol> <midi_channel> <midi_cc> <minimum> <maximum>
-        * map a MIDI controller to a parameter
-        e.g.: midi_map 0 gain 0 7 0.0 1.0
+        * map a MIDI controller to a control port
+        e.g.: midi_map 0 "gain" 0 7 0.0 1.0
 
     midi_unmap <instance_number> <param_symbol>
-        * unmap the MIDI controller from a parameter
-        e.g.: unmap 0 gain
+        * unmap the MIDI controller from a control port
+        e.g.: midi_unmap 0 "gain"
+
+    monitor_midi_program <midi_channel> <enable>
+        * listen to MIDI program change messages (on the feedback port)
+        e.g.: monitor_midi_program 0 1
 
     set_midi_program_change_pedalboard_bank_channel <enable> <midi_channel>
         * set the MIDI channel which changes pedalboard banks on MIDI program change. <midi_channel> is in the range of [0,15].
@@ -188,20 +200,24 @@ The commands supported by mod-host are:
         e.g.: set_midi_program_change_pedalboard_snapshot_channel 1 4 to enable listening for preset changes on channel 5
 
     cc_map <instance_number> <param_symbol> <device_id> <actuator_id> <label> <value> <minimum> <maximum> <steps> <unit> <scalepoints_count> <scalepoints...>
-        * map a Control Chain actuator to a parameter
-        e.g.: cc_map 0 gain 0 1 "Gain" 0.0 -24.0 3.0 33 "dB" 0
+        * map a Control Chain actuator to a control port
+        e.g.: cc_map 0 "gain" 0 1 "Gain" 0.0 -24.0 3.0 33 "dB" 0
 
     cc_unmap <instance_number> <param_symbol>
-        * unmap the Control Chain actuator from a parameter
-        e.g.: unmap 0 gain
+        * unmap the Control Chain actuator from a control port
+        e.g.: cc_unmap 0 "gain"
+
+    cc_value_set <instance_number> <param_symbol> <value>
+        * set the value of a  mapped Control Chain actuator
+        e.g.: cc_value_set 0 "gain" 2.5
 
     cv_map <instance_number> <param_symbol> <source_port_name> <minimum> <maximum> <operational-mode>
-        * map a CV source port to a parameter, operational-mode being one of '-', '+', 'b' or '='
-        e.g.: cv_map 0 gain "AMS CV Source:CV Out 1" -24.0 3.0 =
+        * map a CV source port to a control port, operational-mode being one of '-', '+', 'b' or '='
+        e.g.: cv_map 0 "gain" "AMS CV Source:CV Out 1" -24.0 3.0 =
 
     cv_unmap <instance_number> <param_symbol>
-        * unmap the CV source port actuator from a parameter
-        e.g.: cv_unmap 0 gain
+        * unmap the CV source port actuator from a control port
+        e.g.: cv_unmap 0 "gain"
 
     cpu_load
         * return current jack cpu load
@@ -218,20 +234,33 @@ The commands supported by mod-host are:
 
     bundle_add <bundle_path>
         * add a bundle to the running lv2 world
-        e.g.: bundle_add /path/to/bundle.lv2
+        e.g.: bundle_add "/path/to/bundle.lv2"
 
-    bundle_remove <bundle_path>
+    bundle_remove <bundle_path> <resource>
         * remove a bundle from the running lv2 world
-        e.g.: bundle_remove /path/to/bundle.lv2
+        e.g.: bundle_remove "/path/to/bundle.lv2" ""
 
     feature_enable <feature> <enable>
         * enable or disable a feature
         e.g.: feature_enable link 1
         current features are "link", "processing" and "midi_clock_slave"
 
+    set_bpm <beats_per_minute>
+        * set the global beats per minute transport value
+        e.g.: set_bpm 120
+
+    set_bpb <beats_per_bar>
+        * set the global beats per bar transport value
+        e.g.: set_bpb 4
+
     transport <rolling> <beats_per_bar> <beats_per_minute>
-        * change the current transport state
+        * change the global transport state
         e.g.: transport 1 4 120
+
+    transport_sync <mode>
+        * change the transport sync mode
+        * mode can be one of "none", "link" or "midi"
+        e.g.: transport_sync "midi"
 
     output_data_ready
         * report feedback port ready for more messages
