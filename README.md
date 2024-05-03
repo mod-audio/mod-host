@@ -114,6 +114,7 @@ The commands supported by mod-host are:
     remove <instance_number>
         * remove an LV2 plugin instance (and also the jack client)
         e.g.: remove 0
+        when instance_number is -1 all plugins will be removed
 
     preset_load <instance_number> <preset_uri>
         * load a preset state of an effect instance
@@ -182,6 +183,7 @@ The commands supported by mod-host are:
     midi_map <instance_number> <param_symbol> <midi_channel> <midi_cc> <minimum> <maximum>
         * map a MIDI controller to a control port
         e.g.: midi_map 0 "gain" 0 7 0.0 1.0
+        a non-standard midi_cc value of 131 (0x83) is used for pitchbend
 
     midi_unmap <instance_number> <param_symbol>
         * unmap the MIDI controller from a control port
@@ -242,8 +244,9 @@ The commands supported by mod-host are:
 
     feature_enable <feature> <enable>
         * enable or disable a feature
+        * feature can be one of "aggregated-midi", "freewheeling" or "processing"
+        * the "aggregated-midi" feature requires the use of jack2 and mod-midi-merger to be installed system-wide
         e.g.: feature_enable link 1
-        current features are "link", "processing" and "midi_clock_slave"
 
     set_bpm <beats_per_minute>
         * set the global beats per minute transport value
