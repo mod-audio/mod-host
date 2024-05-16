@@ -142,6 +142,12 @@ The commands supported by mod-host are:
         if bypass_value = 1 bypass effect
         if bypass_value = 0 process effect
 
+    bypass_monitor <instance_number> <status>
+        * enable bypass monitoring for a plugin
+        e.g.: bypass_monitor 0 1
+        if status = 1 monitor enabled
+        if status = 0 monitor disabled
+
     param_set <instance_number> <param_symbol> <param_value>
         * set the value of a control port
         e.g.: param_set 0 "gain" 2.5

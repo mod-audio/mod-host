@@ -438,6 +438,7 @@ typedef struct EFFECT_T {
     port_t bypass_port;
     float bypass;
     bool was_bypassed;
+    bool bypass_monitored;
 
     // cached plugin information, avoids iterating controls each cycle
     enum PluginHints hints;
@@ -4745,6 +4746,7 @@ int effects_add(const char *uri, int instance)
     effect->presets = NULL;
     effect->monitors_count = 0;
     effect->monitors = NULL;
+    effect->bypass_monitored = false;
     effect->ports_count = ports_count;
     effect->ports = (port_t **) mod_calloc(ports_count, sizeof(port_t *));
 
@@ -6420,6 +6422,17 @@ int effects_get_property(int effect_id, const char *uri)
     return ERR_INSTANCE_NON_EXISTS;
 }
 
+int effects_monitor_bypass(int effect_id, int status){
+    if (!InstanceExist(effect_id))
+    {
+        return ERR_INSTANCE_NON_EXISTS;
+    }
+
+    effect_t *effect = &g_effects[effect_id];
+    effect->bypass_monitored = status;
+    return SUCCESS;
+}
+
 int effects_monitor_parameter(int effect_id, const char *control_symbol, const char *op, float value)
 {
     float v;
@@ -6532,6 +6545,9 @@ int effects_bypass(int effect_id, int value)
         *(effect->ports[effect->enabled_index]->buffer) = value ? 0.0f : 1.0f;
     }
 
+    if(effect->bypass_monitored){
+        monitor_send(effect_id, "bypass", value ? 1.0f : 0.0f);
+    }
     return SUCCESS;
 }
 

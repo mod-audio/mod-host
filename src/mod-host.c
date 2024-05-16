@@ -226,6 +226,17 @@ static void effects_monitor_param_cb(proto_t *proto)
     protocol_response_int(resp, proto);
 }
 
+static void effects_bypass_monitor_cb(proto_t *proto)
+{
+    int resp;
+    if (monitor_status())
+        resp = effects_monitor_bypass(atoi(proto->list[1]), atoi(proto->list[2]));
+    else
+        resp = -1;
+
+    protocol_response_int(resp, proto);
+}
+
 static void effects_set_property_cb(proto_t *proto)
 {
     int resp;
@@ -680,6 +691,7 @@ static int mod_host_init(jack_client_t* client, int socket_port, int feedback_po
     protocol_add_command(EFFECT_CONNECT, effects_connect_cb);
     protocol_add_command(EFFECT_DISCONNECT, effects_disconnect_cb);
     protocol_add_command(EFFECT_BYPASS, effects_bypass_cb);
+    protocol_add_command(EFFECT_BYPASS_MON, effects_bypass_monitor_cb);
     protocol_add_command(EFFECT_PARAM_SET, effects_set_param_cb);
     protocol_add_command(EFFECT_PARAM_GET, effects_get_param_cb);
     protocol_add_command(EFFECT_PARAM_MON, effects_monitor_param_cb);

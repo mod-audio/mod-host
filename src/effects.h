@@ -147,6 +147,7 @@ int effects_get_parameter(int effect_id, const char *control_symbol, float *valu
 int effects_set_property(int effect_id, const char *uri, const char *value);
 int effects_get_property(int effect_id, const char *uri);
 int effects_monitor_parameter(int effect_id, const char *control_symbol, const char *op, float value);
+int effects_monitor_bypass(int effect_id, int status);
 int effects_monitor_output_parameter(int effect_id, const char *control_symbol);
 int effects_bypass(int effect_id, int value);
 int effects_get_parameter_symbols(int effect_id, int output_ports, const char** symbols);
