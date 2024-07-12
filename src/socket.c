@@ -391,10 +391,27 @@ void socket_run(int exit_on_failure)
                 msgbuffer = buffer;
             }
 
-            msg.sender_id = clientfd;
-            msg.data = msgbuffer;
-            msg.data_size = count;
-            if (g_receive_cb) g_receive_cb(&msg);
+            if (g_receive_cb)
+            {
+                msg.data = msgbuffer;
+
+                while (count != 0)
+                {
+                    if (*msg.data == '\0')
+                    {
+                        --count;
+                        ++msg.data;
+                        continue;
+                    }
+
+                    msg.sender_id = clientfd;
+                    msg.data_size = strlen(msg.data) + 1;
+                    g_receive_cb(&msg);
+
+                    count -= msg.data_size;
+                    msg.data += msg.data_size;
+                }
+            }
 
             if (msgbuffer != buffer)
                 free(msgbuffer);
