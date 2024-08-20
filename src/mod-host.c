@@ -131,7 +131,7 @@ static pthread_t intclient_socket_thread;
 static void effects_add_cb(proto_t *proto)
 {
     int resp;
-    resp = effects_add(proto->list[1], atoi(proto->list[2]));
+    resp = effects_add(proto->list[1], atoi(proto->list[2]), 1);
     protocol_response_int(resp, proto);
 }
 
@@ -139,6 +139,20 @@ static void effects_remove_cb(proto_t *proto)
 {
     int resp;
     resp = effects_remove(atoi(proto->list[1]));
+    protocol_response_int(resp, proto);
+}
+
+static void effects_activate_cb(proto_t *proto)
+{
+    int resp;
+    resp = effects_activate(atoi(proto->list[1]), atoi(proto->list[2]));
+    protocol_response_int(resp, proto);
+}
+
+static void effects_preload_cb(proto_t *proto)
+{
+    int resp;
+    resp = effects_add(proto->list[1], atoi(proto->list[2]), 0);
     protocol_response_int(resp, proto);
 }
 
@@ -674,6 +688,8 @@ static int mod_host_init(jack_client_t* client, int socket_port, int feedback_po
     /* Setup the protocol */
     protocol_add_command(EFFECT_ADD, effects_add_cb);
     protocol_add_command(EFFECT_REMOVE, effects_remove_cb);
+    protocol_add_command(EFFECT_ACTIVATE, effects_activate_cb);
+    protocol_add_command(EFFECT_PRELOAD, effects_preload_cb);
     protocol_add_command(EFFECT_PRESET_LOAD, effects_preset_load_cb);
     protocol_add_command(EFFECT_PRESET_SAVE, effects_preset_save_cb);
     protocol_add_command(EFFECT_PRESET_SHOW, effects_preset_show_cb);

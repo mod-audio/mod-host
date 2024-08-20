@@ -107,7 +107,7 @@ Commands (or Protocol)
 The commands supported by mod-host are:
 
     add <lv2_uri> <instance_number>
-        * add an LV2 plugin encapsulated as a jack client
+        * add an LV2 plugin encapsulated as a jack client, in activated state
         e.g.: add "http://lv2plug.in/plugins/eg-amp" 0
         instance_number must be any value between 0 ~ 9990, inclusively
 
@@ -115,6 +115,17 @@ The commands supported by mod-host are:
         * remove an LV2 plugin instance (and also the jack client)
         e.g.: remove 0
         when instance_number is -1 all plugins will be removed
+
+    activate <instance_number> <activate_value>
+        * toggle effect activated state
+        e.g.: activate 0 1
+        if bypass_value = 1 activate effect
+        if bypass_value = 0 deactivate effect
+
+    preload <lv2_uri> <instance_number>
+        * add an LV2 plugin encapsulated as a jack client, in deactivated state
+        e.g.: preload "http://lv2plug.in/plugins/eg-amp" 0
+        instance_number must be any value between 0 ~ 9990, inclusively
 
     preset_load <instance_number> <preset_uri>
         * load a preset state of an effect instance

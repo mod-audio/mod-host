@@ -428,6 +428,8 @@ typedef struct EFFECT_T {
     jack_ringbuffer_t *events_out_buffer;
     char *events_in_buffer_helper;
 
+    bool activated;
+
     // previous transport state
     bool transport_rolling;
     uint32_t transport_frame;
@@ -1713,7 +1715,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
     if (arg == NULL) return 0;
     effect = arg;
 
-    if (!g_processing_enabled || (
+    if (!g_processing_enabled || !effect->activated || (
         (effect->hints & HINT_STATE_UNSAFE) && pthread_mutex_trylock(&effect->state_restore_mutex) != 0))
     {
         for (i = 0; i < effect->output_audio_ports_count; i++)
@@ -4538,7 +4540,7 @@ int effects_finish(int close_client)
     return SUCCESS;
 }
 
-int effects_add(const char *uri, int instance)
+int effects_add(const char *uri, int instance, int activate)
 {
     unsigned int ports_count;
     char effect_name[32], port_name[MAX_CHAR_BUF_SIZE+1];
@@ -4579,6 +4581,7 @@ int effects_add(const char *uri, int instance)
     /* Init the struct */
     mod_memset(effect, 0, sizeof(effect_t));
     effect->instance = instance;
+    effect->activated = activate;
 
     /* Init the pointers */
     plugin_uri = NULL;
@@ -5962,6 +5965,36 @@ int effects_remove(int effect_id)
 
         g_postevents_running = 1;
         pthread_create(&g_postevents_thread, NULL, PostPonedEventsThread, NULL);
+    }
+
+    return SUCCESS;
+}
+
+int effects_activate(int effect_id, int value)
+{
+    if (!InstanceExist(effect_id))
+    {
+        return ERR_INSTANCE_NON_EXISTS;
+    }
+
+    effect_t *effect = &g_effects[effect_id];
+
+    if (value)
+    {
+        if (! effect->activated)
+        {
+            lilv_instance_deactivate(effect->lilv_instance);
+            lilv_instance_activate(effect->lilv_instance);
+
+            effect->activated = true;
+        }
+    }
+    else
+    {
+        if (effect->activated)
+        {
+            effect->activated = false;
+        }
     }
 
     return SUCCESS;
