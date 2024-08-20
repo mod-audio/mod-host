@@ -40,6 +40,10 @@
 ************************************************************************************************************************
 */
 
+#if defined(_MOD_DEVICE_DUOX) || defined(_MOD_DEVICE_DWARF)
+#define MOD_IO_PROCESSING_ENABLED
+#endif
+
 // used for local stack variables
 #define MAX_CHAR_BUF_SIZE 255
 
@@ -86,9 +90,11 @@ typedef struct MONITOR_CLIENT_T {
     bool apply_compressor;
     bool apply_volume, apply_smoothing;
     bool muted;
+#ifdef MOD_IO_PROCESSING_ENABLED
     sf_compressor_state_st compressor;
 #ifdef _MOD_DEVICE_DUOX
     sf_compressor_state_st compressor2;
+#endif
 #endif
     float volume, smooth_volume;
 } monitor_client_t;
@@ -98,6 +104,8 @@ typedef struct MONITOR_CLIENT_T {
 *           LOCAL MACROS
 ************************************************************************************************************************
 */
+
+#define UNUSED_PARAM(var)           do { (void)(var); } while (0)
 
 /*
 ************************************************************************************************************************
@@ -177,9 +185,11 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
         mon->apply_smoothing = true;
     }
 
-    const bool apply_compressor = mon->apply_compressor;
     const bool apply_smoothing = mon->apply_smoothing;
     const bool apply_volume = mon->apply_volume;
+#ifdef MOD_IO_PROCESSING_ENABLED
+    const bool apply_compressor = mon->apply_compressor;
+#endif
 
 #ifdef _MOD_DEVICE_DUOX
     if (mon->extra_active)
@@ -193,6 +203,7 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
         if (bufOut2 != bufIn2)
             memcpy(bufOut2, bufIn2, sizeof(float)*nframes);
 
+#ifdef MOD_IO_PROCESSING_ENABLED
         // input1 and input2 have connections
         if (apply_compressor)
         {
@@ -210,6 +221,7 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
             }
         }
         else
+#endif
         {
             if (apply_volume)
             {
@@ -238,6 +250,7 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
         if (bufOutR != bufInR)
             memcpy(bufOutR, bufInR, sizeof(float)*nframes);
 
+#ifdef MOD_IO_PROCESSING_ENABLED
         if (apply_compressor)
         {
             compressor_process_mono(&mon->compressor, nframes, bufOutR);
@@ -253,6 +266,7 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
             }
         }
         else
+#endif
         {
             if (apply_volume)
             {
@@ -434,15 +448,18 @@ int jack_initialize(jack_client_t* client, const char* load_init)
     mon->extra_active = access("/data/separate-spdif-outs", F_OK) != -1;
 #endif
 
-    mon->apply_compressor = false;
     mon->apply_volume = false;
     mon->muted = false;
     mon->volume = 1.0f;
+
+#ifdef MOD_IO_PROCESSING_ENABLED
+    mon->apply_compressor = false;
 
     compressor_init(&mon->compressor, jack_get_sample_rate(client));
 #ifdef _MOD_DEVICE_DUOX
     if (mon->extra_active)
         compressor_init(&mon->compressor2, jack_get_sample_rate(client));
+#endif
 #endif
 
     /* Register jack ports */
@@ -588,6 +605,7 @@ bool monitor_client_init(void)
 
 bool monitor_client_setup_compressor(int mode, float release)
 {
+#ifdef MOD_IO_PROCESSING_ENABLED
     monitor_client_t *const mon = g_monitor_handle;
 
     if (!mon)
@@ -630,6 +648,13 @@ bool monitor_client_setup_compressor(int mode, float release)
 
     mon->apply_compressor = mode != 0;
     return true;
+#else
+    fprintf(stderr, "asked to setup compressor while IO processing is not enabled\n");
+    return false;
+
+    UNUSED_PARAM(mode);
+    UNUSED_PARAM(release);
+#endif
 }
 
 bool monitor_client_setup_volume(float volume)
