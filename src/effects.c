@@ -1042,7 +1042,11 @@ static int BufferSize(jack_nframes_t nframes, void* data)
             options[4].type = 0;
             options[4].value = NULL;
 
+            lilv_instance_deactivate(effect->lilv_instance);
+
             effect->options_interface->set(effect->lilv_instance->lv2_handle, options);
+
+            lilv_instance_activate(effect->lilv_instance);
         }
     }
 #ifdef HAVE_HYLIA
