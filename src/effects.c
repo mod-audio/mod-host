@@ -5903,8 +5903,12 @@ int effects_remove(int effect_id)
             }
 
             if (effect->lilv_instance)
-                lilv_instance_deactivate(effect->lilv_instance);
-            lilv_instance_free(effect->lilv_instance);
+            {
+                if (effect->activated)
+                    lilv_instance_deactivate(effect->lilv_instance);
+
+                lilv_instance_free(effect->lilv_instance);
+            }
 
             if (effect->jack_client)
                 jack_client_close(effect->jack_client);
