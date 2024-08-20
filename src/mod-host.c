@@ -145,7 +145,7 @@ static void effects_remove_cb(proto_t *proto)
 static void effects_activate_cb(proto_t *proto)
 {
     int resp;
-    resp = effects_activate(atoi(proto->list[1]), atoi(proto->list[2]));
+    resp = effects_activate(atoi(proto->list[1]), atoi(proto->list[2]), atoi(proto->list[3]));
     protocol_response_int(resp, proto);
 }
 

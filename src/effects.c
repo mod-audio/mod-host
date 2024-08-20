@@ -1042,11 +1042,13 @@ static int BufferSize(jack_nframes_t nframes, void* data)
             options[4].type = 0;
             options[4].value = NULL;
 
-            lilv_instance_deactivate(effect->lilv_instance);
+            if (effect->activated)
+                lilv_instance_deactivate(effect->lilv_instance);
 
             effect->options_interface->set(effect->lilv_instance->lv2_handle, options);
 
-            lilv_instance_activate(effect->lilv_instance);
+            if (effect->activated)
+                lilv_instance_activate(effect->lilv_instance);
         }
     }
 #ifdef HAVE_HYLIA
@@ -1719,7 +1721,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
     if (arg == NULL) return 0;
     effect = arg;
 
-    if (!g_processing_enabled || !effect->activated || (
+    if (!g_processing_enabled || (
         (effect->hints & HINT_STATE_UNSAFE) && pthread_mutex_trylock(&effect->state_restore_mutex) != 0))
     {
         for (i = 0; i < effect->output_audio_ports_count; i++)
@@ -5419,14 +5421,18 @@ int effects_add(const char *uri, int instance, int activate)
     jack_set_buffer_size_callback(jack_client, BufferSize, effect);
     jack_set_freewheel_callback(jack_client, FreeWheelMode, effect);
 
-    lilv_instance_activate(lilv_instance);
 
-    /* Try activate the Jack client */
-    if (jack_activate(jack_client) != 0)
+    if (activate)
     {
-        fprintf(stderr, "can't activate jack_client\n");
-        error = ERR_JACK_CLIENT_ACTIVATION;
-        goto error;
+        lilv_instance_activate(lilv_instance);
+
+        /* Try activate the Jack client */
+        if (jack_activate(jack_client) != 0)
+        {
+            fprintf(stderr, "can't activate jack_client\n");
+            error = ERR_JACK_CLIENT_ACTIVATION;
+            goto error;
+        }
     }
 
     if (raw_midi_port != NULL)
@@ -5974,30 +5980,122 @@ int effects_remove(int effect_id)
     return SUCCESS;
 }
 
-int effects_activate(int effect_id, int value)
+static void* effects_activate_thread(void* arg)
+{
+    jack_client_t *jack_client = arg;
+
+    if (jack_activate(jack_client) != 0)
+        fprintf(stderr, "can't activate jack_client\n");
+
+    return NULL;
+}
+
+static void* effects_deactivate_thread(void* arg)
+{
+    jack_client_t *jack_client = arg;
+
+    if (jack_deactivate(jack_client) != 0)
+        fprintf(stderr, "can't deactivate jack_client\n");
+
+    return NULL;
+}
+
+int effects_activate(int effect_id, int effect_id_end, int value)
 {
     if (!InstanceExist(effect_id))
     {
         return ERR_INSTANCE_NON_EXISTS;
     }
-
-    effect_t *effect = &g_effects[effect_id];
-
-    if (value)
+    if (effect_id > effect_id_end)
     {
-        if (! effect->activated)
-        {
-            lilv_instance_deactivate(effect->lilv_instance);
-            lilv_instance_activate(effect->lilv_instance);
+        return ERR_INVALID_OPERATION;
+    }
 
-            effect->activated = true;
+    if (effect_id == effect_id_end)
+    {
+        effect_t *effect = &g_effects[effect_id];
+
+        if (value)
+        {
+            if (! effect->activated)
+            {
+                effect->activated = true;
+                lilv_instance_activate(effect->lilv_instance);
+
+                if (jack_activate(effect->jack_client) != 0)
+                {
+                    fprintf(stderr, "can't activate jack_client\n");
+                    return ERR_JACK_CLIENT_ACTIVATION;
+                }
+            }
+        }
+        else
+        {
+            if (effect->activated)
+            {
+                effect->activated = false;
+
+                if (jack_deactivate(effect->jack_client) != 0)
+                {
+                    fprintf(stderr, "can't deactivate jack_client\n");
+                    return ERR_JACK_CLIENT_DEACTIVATION;
+                }
+
+                lilv_instance_deactivate(effect->lilv_instance);
+            }
         }
     }
     else
     {
-        if (effect->activated)
+        int num_threads = 0;
+        pthread_t *threads = malloc(sizeof(pthread_t) * (effect_id_end - effect_id));
+
+        // create threads to activate all clients
+        for (int i = effect_id; i <= effect_id_end; ++i)
         {
-            effect->activated = false;
+            effect_t *effect = &g_effects[i];
+
+            if (effect->jack_client == NULL)
+                continue;
+
+            if (value)
+            {
+                if (! effect->activated)
+                {
+                    effect->activated = true;
+                    lilv_instance_activate(effect->lilv_instance);
+
+                    pthread_create(&threads[num_threads++], NULL, effects_activate_thread, effect->jack_client);
+                }
+            }
+            else
+            {
+                if (effect->activated)
+                {
+                    pthread_create(&threads[num_threads++], NULL, effects_deactivate_thread, effect->jack_client);
+                }
+            }
+        }
+
+        // wait for all threads to be done
+        for (int i = 0; i < num_threads; ++i)
+            pthread_join(threads[i], NULL);
+
+        free(threads);
+
+        // if deactivating, do the last lv2 deactivate step now
+        if (! value)
+        {
+            for (int i = effect_id; i <= effect_id_end; ++i)
+            {
+                effect_t *effect = &g_effects[i];
+
+                if (! effect->activated || effect->jack_client == NULL)
+                    continue;
+
+                effect->activated = false;
+                lilv_instance_deactivate(effect->lilv_instance);
+            }
         }
     }
 
