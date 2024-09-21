@@ -40,6 +40,10 @@
 ************************************************************************************************************************
 */
 
+#if defined(_MOD_DEVICE_DUO) || defined(_MOD_DEVICE_DUOX) || defined(_MOD_DEVICE_DWARF)
+#define MOD_MONITOR_STEREO_HANDLING
+#endif
+
 #if defined(_MOD_DEVICE_DUOX) || defined(_MOD_DEVICE_DWARF)
 #define MOD_IO_PROCESSING_ENABLED
 #endif
@@ -63,22 +67,22 @@ typedef struct MONITOR_CLIENT_T {
     jack_client_t *client;
     jack_port_t **in_ports;
     jack_port_t **out_ports;
-    uint32_t numports;
     uint64_t connected;
-    bool mono_copy;
-#ifdef _MOD_DEVICE_DUOX
+    uint32_t numports;
+    float volume, smooth_volume;
+   #ifdef MOD_IO_PROCESSING_ENABLED
+    sf_compressor_state_st compressor;
+   #endif
+   #ifdef _MOD_DEVICE_DUOX
+    sf_compressor_state_st compressor2;
     bool extra_active;
-#endif
+   #endif
+   #ifdef MOD_MONITOR_STEREO_HANDLING
+    bool mono_copy;
+   #endif
     bool apply_compressor;
     bool apply_volume, apply_smoothing;
     bool muted;
-#ifdef MOD_IO_PROCESSING_ENABLED
-    sf_compressor_state_st compressor;
-#ifdef _MOD_DEVICE_DUOX
-    sf_compressor_state_st compressor2;
-#endif
-#endif
-    float volume, smooth_volume;
 } monitor_client_t;
 
 /*
@@ -127,7 +131,7 @@ static inline float db2lin(const float db)
     return powf(10.0f, 0.05f * db);
 }
 
-#if defined(_MOD_DEVICE_DUO) || defined(_MOD_DEVICE_DUOX) || defined(_MOD_DEVICE_DWARF)
+#ifdef MOD_MONITOR_STEREO_HANDLING
 static void ProcessMonitorLoopStereo(monitor_client_t *const mon, jack_nframes_t nframes, uint32_t offset)
 {
     const float *const bufIn1  = jack_port_get_buffer(mon->in_ports[offset], nframes);
@@ -272,7 +276,7 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
         mon->apply_smoothing = true;
     }
 
-  #if defined(_MOD_DEVICE_DUO) || defined(_MOD_DEVICE_DUOX) || defined(_MOD_DEVICE_DWARF)
+  #ifdef MOD_MONITOR_STEREO_HANDLING
     smooth_volume = ProcessMonitorLoopStereo(mon, nframes, 0);
 
    #ifdef _MOD_DEVICE_DUOX
@@ -367,31 +371,35 @@ int jack_initialize(jack_client_t* client, const char* load_init)
 
     mon->client = client;
     mon->connected = 0;
-    mon->mono_copy = (load_init && !strcmp(load_init, "1")) || access("/data/jack-mono-copy", F_OK) != -1;
-#ifdef _MOD_DEVICE_DUOX
+
+   #ifdef MOD_IO_PROCESSING_ENABLED
+    mon->apply_compressor = false;
+    compressor_init(&mon->compressor, jack_get_sample_rate(client));
+   #endif
+
+   #ifdef _MOD_DEVICE_DUOX
     mon->extra_active = access("/data/separate-spdif-outs", F_OK) != -1;
-#endif
+
+    if (mon->extra_active)
+        compressor_init(&mon->compressor2, jack_get_sample_rate(client));
+   #endif
+
+   #ifdef MOD_MONITOR_STEREO_HANDLING
+    mon->mono_copy = (load_init && !strcmp(load_init, "1")) || access("/data/jack-mono-copy", F_OK) != -1;
+   #endif
 
     mon->apply_volume = false;
     mon->muted = false;
     mon->volume = 1.0f;
 
-#ifdef MOD_IO_PROCESSING_ENABLED
-    mon->apply_compressor = false;
-
-    compressor_init(&mon->compressor, jack_get_sample_rate(client));
-#ifdef _MOD_DEVICE_DUOX
-    if (mon->extra_active)
-        compressor_init(&mon->compressor2, jack_get_sample_rate(client));
-#endif
-#endif
-
     /* Register jack ports */
-#if defined(_MOD_DEVICE_DUO) || defined(_MOD_DEVICE_DWARF)
+   #if defined(_MOD_DEVICE_DUO) || defined(_MOD_DEVICE_DWARF)
     const uint32_t numports = 2;
-#elif defined(_MOD_DEVICE_DUOX)
+   #elif defined(_MOD_DEVICE_DUOX)
     const uint32_t numports = mon->extra_active ? 4 : 2;
-#else
+   #elif defined(_DARKGLASS_DEVICE_PABLITO)
+    const uint32_t numports = 2;
+   #else
     uint32_t numports = 0;
 
     const char** const sysports = jack_get_ports(client, "system:playback_", JACK_DEFAULT_AUDIO_TYPE, JackPortIsInput);
@@ -408,7 +416,7 @@ int jack_initialize(jack_client_t* client, const char* load_init)
         free(mon);
         return 1;
     }
-#endif
+   #endif
 
     mon->numports = numports;
     mon->in_ports = malloc(sizeof(jack_port_t*) * numports);
@@ -462,35 +470,45 @@ int jack_initialize(jack_client_t* client, const char* load_init)
 
     const char* const ourclientname = jack_get_client_name(client);
 
-  #if defined(_MOD_DEVICE_DUO) || defined(_MOD_DEVICE_DUOX)
-    snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:out_1", ourclientname);
-    jack_connect(client, ourportname, "system:playback_1");
-
-    snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:out_2", ourclientname);
-    jack_connect(client, ourportname, "system:playback_2");
-   #ifdef _MOD_DEVICE_DUOX
-    snprintf(ourportname, MAX_CHAR_BUF_SIZE, mon->extra_active ? "%s:out_3" : "%s:out_1", ourclientname);
-    jack_connect(client, ourportname, "system:playback_3");
-
-    snprintf(ourportname, MAX_CHAR_BUF_SIZE, mon->extra_active ? "%s:out_4" : "%s:out_2", ourclientname);
-    jack_connect(client, ourportname, "system:playback_4");
-   #endif
-  #elif defined(_MOD_DEVICE_DWARF)
+   #ifdef _MOD_DEVICE_DWARF
     snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:out_2", ourclientname);
     jack_connect(client, ourportname, "system:playback_1");
 
     snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:out_1", ourclientname);
     jack_connect(client, ourportname, "system:playback_2");
-  #else
+   #else
     for (uint32_t i=0; i<numports; ++i)
     {
         snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:out_%d", ourclientname, i + 1);
         snprintf(portname, MAX_CHAR_BUF_SIZE, "system:playback_%d", i + 1);
         jack_connect(client, ourportname, portname);
     }
-  #endif
+   #endif
+
+   #if defined(_DARKGLASS_DEVICE_PABLITO)
+    snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:out_1", ourclientname);
+    jack_connect(client, ourportname, "system:playback_3");
+    jack_connect(client, ourportname, "system:playback_7");
+
+    snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:out_2", ourclientname);
+    jack_connect(client, ourportname, "system:playback_4");
+    jack_connect(client, ourportname, "system:playback_8");
+   #elif defined(_MOD_DEVICE_DUOX)
+    if (!mon->extra_active)
+    {
+        snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:out_1", ourclientname);
+        jack_connect(client, ourportname, "system:playback_3");
+
+        snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:out_2", ourclientname);
+        jack_connect(client, ourportname, "system:playback_4");
+    }
+   #endif
 
     return 0;
+
+   #ifndef MOD_MONITOR_STEREO_HANDLING
+    UNUSED_PARAM(load_init);
+   #endif
 }
 
 #ifdef STANDALONE_MONITOR_CLIENT
@@ -540,7 +558,7 @@ bool monitor_client_init(void)
 
 bool monitor_client_setup_compressor(int mode, float release)
 {
-#ifdef MOD_IO_PROCESSING_ENABLED
+   #ifdef MOD_IO_PROCESSING_ENABLED
     monitor_client_t *const mon = g_monitor_handle;
 
     if (!mon)
@@ -553,43 +571,43 @@ bool monitor_client_setup_compressor(int mode, float release)
     {
     case 1:
         compressor_set_params(&mon->compressor, -12.f, 12.f, 2.f, 0.0001f, release / 1000, -3.f);
-#ifdef _MOD_DEVICE_DUOX
+       #ifdef _MOD_DEVICE_DUOX
         if (mon->extra_active)
             compressor_set_params(&mon->compressor2, -12.f, 12.f, 2.f, 0.0001f, release / 1000, -3.f);
-#endif
+       #endif
         break;
     case 2:
         compressor_set_params(&mon->compressor, -12.f, 12.f, 3.f, 0.0001f, release / 1000, -3.f);
-#ifdef _MOD_DEVICE_DUOX
+       #ifdef _MOD_DEVICE_DUOX
         if (mon->extra_active)
             compressor_set_params(&mon->compressor2, -12.f, 12.f, 3.f, 0.0001f, release / 1000, -3.f);
-#endif
+       #endif
         break;
     case 3:
         compressor_set_params(&mon->compressor, -15.f, 15.f, 4.f, 0.0001f, release / 1000, -3.f);
-#ifdef _MOD_DEVICE_DUOX
+       #ifdef _MOD_DEVICE_DUOX
         if (mon->extra_active)
             compressor_set_params(&mon->compressor2, -15.f, 15.f, 4.f, 0.0001f, release / 1000, -3.f);
-#endif
+       #endif
         break;
     case 4:
         compressor_set_params(&mon->compressor, -25.f, 15.f, 10.f, 0.0001f, release / 1000, -6.f);
-#ifdef _MOD_DEVICE_DUOX
+       #ifdef _MOD_DEVICE_DUOX
         if (mon->extra_active)
             compressor_set_params(&mon->compressor2, -25.f, 15.f, 10.f, 0.0001f, release / 1000, -6.f);
-#endif
+       #endif
         break;
     }
 
     mon->apply_compressor = mode != 0;
     return true;
-#else
+   #else
     fprintf(stderr, "asked to setup compressor while IO processing is not enabled\n");
     return false;
 
     UNUSED_PARAM(mode);
     UNUSED_PARAM(release);
-#endif
+   #endif
 }
 
 bool monitor_client_setup_volume(float volume)
