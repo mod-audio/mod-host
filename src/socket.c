@@ -371,6 +371,17 @@ void socket_run(int exit_on_failure)
                     if (new_count > 0) /* Data received */
                     {
                         count += new_count;
+
+                        if (msgbuffer[count - 1] == '\0')
+                        {
+                            // ignore leftover null bytes
+                            while (count > 1 && msgbuffer[count - 1] == '\0')
+                                --count;
+
+                            // make sure to keep 1 null byte at the end of the string
+                            ++count;
+                            break;
+                        }
                     }
                     else if (new_count < 0) /* Error */
                     {
@@ -395,7 +406,7 @@ void socket_run(int exit_on_failure)
             {
                 msg.data = msgbuffer;
 
-                while (count != 0)
+                while (count > 0)
                 {
                     if (*msg.data == '\0')
                     {
