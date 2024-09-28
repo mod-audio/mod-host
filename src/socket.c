@@ -32,6 +32,7 @@
 #else
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #define closesocket close
 #define INVALID_SOCKET -1
 typedef int SOCKET;
@@ -160,7 +161,12 @@ int socket_start(int socket_port, int feedback_port, int buffer_size)
     if (feedback_port != 0)
         setsockopt(g_fbserverfd, SOL_SOCKET, SO_REUSEPORT, &value, sizeof(value));
 
-    /* increase socket size */
+    /* Set TCP_NODELAY */
+    setsockopt(g_serverfd, SOL_TCP, TCP_NODELAY, &value, sizeof(value));
+    if (feedback_port != 0)
+        setsockopt(g_fbserverfd, SOL_TCP, TCP_NODELAY, &value, sizeof(value));
+
+    /* Increase socket size */
     value = 131071;
     setsockopt(g_serverfd, SOL_SOCKET, SO_RCVBUF, &value, sizeof(value));
     if (feedback_port != 0)
