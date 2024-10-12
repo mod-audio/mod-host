@@ -6130,6 +6130,16 @@ int effects_disconnect(const char *portA, const char *portB)
     return ret;
 }
 
+int effects_disconnect_all(const char *port)
+{
+    int ret;
+
+    ret = jack_port_disconnect(g_jack_global_client, jack_port_by_name(g_jack_global_client, port));
+    if (ret != 0) return ERR_JACK_PORT_DISCONNECTION;
+
+    return ret;
+}
+
 int effects_set_parameter(int effect_id, const char *control_symbol, float value)
 {
     port_t *port;

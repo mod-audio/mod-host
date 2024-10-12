@@ -147,6 +147,10 @@ The commands supported by mod-host are:
         * disconnect two jack ports
         e.g.: disconnect "system:capture_1" "effect_0:in"
 
+    disconnect_all <origin_port>
+        * disconnect all connections of a jack port
+        e.g.: disconnect_all "effect_0:in"
+
     bypass <instance_number> <bypass_value>
         * toggle effect processing
         e.g.: bypass 0 1

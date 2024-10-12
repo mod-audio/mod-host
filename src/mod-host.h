@@ -60,6 +60,7 @@
 #define EFFECT_PRESET_SHOW   "preset_show %s"
 #define EFFECT_CONNECT       "connect %s %s"
 #define EFFECT_DISCONNECT    "disconnect %s %s"
+#define EFFECT_DISCONNECT_ALL "disconnect_all %s"
 #define EFFECT_BYPASS        "bypass %i %i"
 #define EFFECT_PARAM_SET     "param_set %i %s %s"
 #define EFFECT_PARAM_GET     "param_get %i %s"

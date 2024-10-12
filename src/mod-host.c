@@ -199,6 +199,13 @@ static void effects_disconnect_cb(proto_t *proto)
     protocol_response_int(resp, proto);
 }
 
+static void effects_disconnect_all_cb(proto_t *proto)
+{
+    int resp;
+    resp = effects_disconnect_all(proto->list[1]);
+    protocol_response_int(resp, proto);
+}
+
 static void effects_bypass_cb(proto_t *proto)
 {
     int resp;
@@ -695,6 +702,7 @@ static int mod_host_init(jack_client_t* client, int socket_port, int feedback_po
     protocol_add_command(EFFECT_PRESET_SHOW, effects_preset_show_cb);
     protocol_add_command(EFFECT_CONNECT, effects_connect_cb);
     protocol_add_command(EFFECT_DISCONNECT, effects_disconnect_cb);
+    protocol_add_command(EFFECT_DISCONNECT_ALL, effects_disconnect_all_cb);
     protocol_add_command(EFFECT_BYPASS, effects_bypass_cb);
     protocol_add_command(EFFECT_PARAM_SET, effects_set_param_cb);
     protocol_add_command(EFFECT_PARAM_GET, effects_get_param_cb);
