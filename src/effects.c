@@ -527,6 +527,7 @@ typedef struct URIDS_T {
     LV2_URID bufsz_minBlockLength;
     LV2_URID bufsz_nomimalBlockLength;
     LV2_URID bufsz_sequenceSize;
+    LV2_URID jack_client;
     LV2_URID log_Error;
     LV2_URID log_Note;
     LV2_URID log_Trace;
@@ -756,7 +757,7 @@ static LV2_HMI_WidgetControl g_hmi_wc;
 static MOD_License_Feature g_license;
 static LV2_Atom_Forge g_lv2_atom_forge;
 static LV2_Log_Log g_lv2_log;
-static LV2_Options_Option g_options[8];
+static LV2_Options_Option g_options[9];
 static LV2_State_Free_Path g_state_freePath;
 static LV2_URI_Map_Feature g_uri_map;
 static LV2_URID_Map g_urid_map;
@@ -3008,6 +3009,9 @@ static void GetFeatures(effect_t *effect)
     features[FEATURE_TERMINATOR]        = NULL;
 
     effect->features = features;
+
+    /* also update jack client option value */
+    g_options[7].value = effect->jack_client;
 }
 
 /**
@@ -4209,6 +4213,8 @@ int effects_init(void* client)
     g_urids.bufsz_nomimalBlockLength = urid_to_id(g_symap, LV2_BUF_SIZE__nominalBlockLength);
     g_urids.bufsz_sequenceSize   = urid_to_id(g_symap, LV2_BUF_SIZE__sequenceSize);
 
+    g_urids.jack_client          = urid_to_id(g_symap, "http://jackaudio.org/metadata/client");
+
     g_urids.log_Error            = urid_to_id(g_symap, LV2_LOG__Error);
     g_urids.log_Note             = urid_to_id(g_symap, LV2_LOG__Note);
     g_urids.log_Trace            = urid_to_id(g_symap, LV2_LOG__Trace);
@@ -4289,10 +4295,17 @@ int effects_init(void* client)
 
     g_options[7].context = LV2_OPTIONS_INSTANCE;
     g_options[7].subject = 0;
-    g_options[7].key = 0;
-    g_options[7].size = 0;
-    g_options[7].type = 0;
+    g_options[7].key = g_urids.jack_client;
+    g_options[7].size = sizeof(jack_client_t*);
+    g_options[7].type = g_urids.jack_client;
     g_options[7].value = NULL;
+
+    g_options[8].context = LV2_OPTIONS_INSTANCE;
+    g_options[8].subject = 0;
+    g_options[8].key = 0;
+    g_options[8].size = 0;
+    g_options[8].type = 0;
+    g_options[8].value = NULL;
 
 #ifdef __MOD_DEVICES__
     g_hmi_wc.size                    = sizeof(g_hmi_wc);
