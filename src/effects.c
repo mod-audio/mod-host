@@ -5984,6 +5984,7 @@ int effects_remove(int effect_id)
     return SUCCESS;
 }
 
+#if 0
 static void* effects_activate_thread(void* arg)
 {
     jack_client_t *jack_client = arg;
@@ -6003,13 +6004,15 @@ static void* effects_deactivate_thread(void* arg)
 
     return NULL;
 }
+#endif
 
-int effects_activate(int effect_id, int effect_id_end, int value)
+int effects_activate(int effect_id, int value)
 {
     if (!InstanceExist(effect_id))
     {
         return ERR_INSTANCE_NON_EXISTS;
     }
+#if 0
     if (effect_id > effect_id_end)
     {
         return ERR_INVALID_OPERATION;
@@ -6017,6 +6020,7 @@ int effects_activate(int effect_id, int effect_id_end, int value)
 
     if (effect_id == effect_id_end)
     {
+#endif
         effect_t *effect = &g_effects[effect_id];
 
         if (value)
@@ -6048,6 +6052,7 @@ int effects_activate(int effect_id, int effect_id_end, int value)
                 lilv_instance_deactivate(effect->lilv_instance);
             }
         }
+#if 0
     }
     else
     {
@@ -6102,6 +6107,7 @@ int effects_activate(int effect_id, int effect_id_end, int value)
             }
         }
     }
+#endif
 
     return SUCCESS;
 }

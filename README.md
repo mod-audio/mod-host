@@ -116,9 +116,9 @@ The commands supported by mod-host are:
         e.g.: remove 0
         when instance_number is -1 all plugins will be removed
 
-    activate <instance_number> <instance_number_end> <activate_value>
-        * toggle effects activated state
-        e.g.: activate 0 0 1
+    activate <instance_number> <activate_value>
+        * toggle effect activated state
+        e.g.: activate 0 1
         if activate_value = 1 activate effect
         if activate_value = 0 deactivate effect
 

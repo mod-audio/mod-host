@@ -53,7 +53,7 @@
 /* Protocol commands definition */
 #define EFFECT_ADD           "add %s %i"
 #define EFFECT_REMOVE        "remove %i"
-#define EFFECT_ACTIVATE      "activate %i %i %i"
+#define EFFECT_ACTIVATE      "activate %i %i"
 #define EFFECT_PRELOAD       "preload %s %i"
 #define EFFECT_PRESET_LOAD   "preset_load %i %s"
 #define EFFECT_PRESET_SAVE   "preset_save %i %s %s %s"

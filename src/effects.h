@@ -137,7 +137,7 @@ int effects_init(void* client);
 int effects_finish(int close_client);
 int effects_add(const char *uri, int instance, int activate);
 int effects_remove(int effect_id);
-int effects_activate(int effect_id, int effect_id_end, int value);
+int effects_activate(int effect_id, int value);
 int effects_preset_load(int effect_id, const char *uri);
 int effects_preset_save(int effect_id, const char *dir, const char *file_name, const char *label);
 int effects_preset_show(const char *uri, char **state_str);
