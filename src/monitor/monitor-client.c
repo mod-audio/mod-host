@@ -485,15 +485,7 @@ int jack_initialize(jack_client_t* client, const char* load_init)
     }
    #endif
 
-   #if defined(_DARKGLASS_DEVICE_PABLITO)
-    snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:out_1", ourclientname);
-    jack_connect(client, ourportname, "system:playback_3");
-    jack_connect(client, ourportname, "system:playback_7");
-
-    snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:out_2", ourclientname);
-    jack_connect(client, ourportname, "system:playback_4");
-    jack_connect(client, ourportname, "system:playback_8");
-   #elif defined(_MOD_DEVICE_DUOX)
+   #ifdef _MOD_DEVICE_DUOX
     if (!mon->extra_active)
     {
         snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:out_1", ourclientname);
