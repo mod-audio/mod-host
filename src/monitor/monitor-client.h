@@ -79,6 +79,8 @@ void monitor_client_stop(void);
 
 bool monitor_client_setup_compressor(int mode, float release);
 bool monitor_client_setup_volume(float volume);
+bool monitor_client_flush_volume(void);
+bool monitor_client_wait_volume(void);
 
 
 /*

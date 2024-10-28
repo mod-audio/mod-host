@@ -8211,10 +8211,45 @@ int effects_freewheeling_enable(int enable)
 
 int effects_processing_enable(int enable)
 {
-    g_processing_enabled = enable;
+    switch (enable)
+    {
+    // regular on/off
+    case 0:
+    case 1:
+        g_processing_enabled = enable != 0;
+        break;
 
-    if (enable > 1) {
+    // turn on while reporting feedback data ready
+    case 2:
+        g_processing_enabled = true;
         effects_output_data_ready();
+        break;
+
+    // use fade-out while turning off
+    case -1:
+        monitor_client_setup_volume(-30.f);
+        if (g_processing_enabled)
+        {
+            monitor_client_wait_volume();
+            g_processing_enabled = false;
+        }
+        break;
+
+    // don't use fade-out while turning off, mute right away
+    case -2:
+        monitor_client_setup_volume(-30.f);
+        monitor_client_flush_volume();
+        g_processing_enabled = false;
+        break;
+
+    // use fade-in while turning on
+    case 3:
+        g_processing_enabled = true;
+        monitor_client_setup_volume(0.f);
+        break;
+
+    default:
+        return ERR_INVALID_OPERATION;
     }
 
     return SUCCESS;

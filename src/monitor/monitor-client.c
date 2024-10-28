@@ -31,6 +31,7 @@
 #include <jack/jack.h>
 
 #include "monitor-client.h"
+#include "../mod-semaphore.h"
 #include "../utils.h"
 #include "../dsp/compressor_core.h"
 
@@ -67,9 +68,10 @@ typedef struct MONITOR_CLIENT_T {
     jack_client_t *client;
     jack_port_t **in_ports;
     jack_port_t **out_ports;
+    sem_t wait_volume_sem;
     uint64_t connected;
     uint32_t numports;
-    float volume, smooth_volume;
+    float volume, smooth_volume, step_volume;
    #ifdef MOD_IO_PROCESSING_ENABLED
     sf_compressor_state_st compressor;
    #endif
@@ -83,6 +85,7 @@ typedef struct MONITOR_CLIENT_T {
     bool apply_compressor;
     bool apply_volume, apply_smoothing;
     bool muted;
+    bool wait_volume;
 } monitor_client_t;
 
 /*
@@ -145,11 +148,8 @@ static void ProcessMonitorLoopStereo(monitor_client_t *const mon, jack_nframes_t
     const bool apply_smoothing = mon->apply_smoothing;
     const bool apply_volume = mon->apply_volume;
 
-    const float new_volume_weight = 0.001f;
-    const float old_volume_weight = 1.f - new_volume_weight;
-
     const float volume = mon->volume;
-
+    const float step_volume = mon->step_volume;
     float smooth_volume = mon->smooth_volume;
 
     const bool in1_connected = mon->connected & (1 << offset);
@@ -176,10 +176,16 @@ static void ProcessMonitorLoopStereo(monitor_client_t *const mon, jack_nframes_t
 
             if (apply_volume)
             {
+                float dy;
+
                 for (jack_nframes_t i=0; i<nframes; ++i)
                 {
                     if (apply_smoothing)
-                        smooth_volume = new_volume_weight * volume + old_volume_weight * smooth_volume;
+                    {
+                        dy = volume - smooth_volume;
+                        smooth_volume += copysignf(fminf(fabsf(dy), step_volume), dy);
+                    }
+
                     bufOut1[i] *= smooth_volume;
                     bufOut2[i] *= smooth_volume;
                 }
@@ -190,10 +196,16 @@ static void ProcessMonitorLoopStereo(monitor_client_t *const mon, jack_nframes_t
         {
             if (apply_volume)
             {
+                float dy;
+
                 for (jack_nframes_t i=0; i<nframes; ++i)
                 {
                     if (apply_smoothing)
-                        smooth_volume = new_volume_weight * volume + old_volume_weight * smooth_volume;
+                    {
+                        dy = volume - smooth_volume;
+                        smooth_volume += copysignf(fminf(fabsf(dy), step_volume), dy);
+                    }
+
                     bufOut1[i] *= smooth_volume;
                     bufOut2[i] *= smooth_volume;
                 }
@@ -217,10 +229,16 @@ static void ProcessMonitorLoopStereo(monitor_client_t *const mon, jack_nframes_t
 
             if (apply_volume)
             {
+                float dy;
+
                 for (jack_nframes_t i=0; i<nframes; ++i)
                 {
                     if (apply_smoothing)
-                        smooth_volume = new_volume_weight * volume + old_volume_weight * smooth_volume;
+                    {
+                        dy = volume - smooth_volume;
+                        smooth_volume += copysignf(fminf(fabsf(dy), step_volume), dy);
+                    }
+
                     bufOutR[i] *= smooth_volume;
                 }
             }
@@ -230,10 +248,16 @@ static void ProcessMonitorLoopStereo(monitor_client_t *const mon, jack_nframes_t
         {
             if (apply_volume)
             {
+                float dy;
+
                 for (jack_nframes_t i=0; i<nframes; ++i)
                 {
                     if (apply_smoothing)
-                        smooth_volume = new_volume_weight * volume + old_volume_weight * smooth_volume;
+                    {
+                        dy = volume - smooth_volume;
+                        smooth_volume += copysignf(fminf(fabsf(dy), step_volume), dy);
+                    }
+
                     bufOutR[i] *= smooth_volume;
                 }
             }
@@ -261,13 +285,14 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
 
     if (mon->muted)
     {
-        for (uint32_t i=0; i<mon->numports; ++i)
+        for (uint32_t i=0; i < mon->numports; ++i)
             memset(jack_port_get_buffer(mon->out_ports[i], nframes), 0, sizeof(float)*nframes);
 
         return 0;
     }
 
     const float volume = mon->volume;
+    const float step_volume = mon->step_volume;
     float smooth_volume = mon->smooth_volume;
 
     if (floats_differ_enough(volume, smooth_volume))
@@ -287,14 +312,11 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
     const float* bufIn[mon->numports];
     /* */ float* bufOut[mon->numports];
 
-    const float new_volume_weight = 0.001f;
-    const float old_volume_weight = 1.f - new_volume_weight;
-
     const bool apply_smoothing = mon->apply_smoothing;
     const bool apply_volume = mon->apply_volume;
     const uint64_t connected = mon->connected;
 
-    for (uint32_t i=0; i<mon->numports; ++i)
+    for (uint32_t i=0; i < mon->numports; ++i)
     {
         bufIn[i] = jack_port_get_buffer(mon->in_ports[i], nframes);
         bufOut[i] = jack_port_get_buffer(mon->out_ports[i], nframes);
@@ -312,10 +334,15 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
 
     if (apply_volume)
     {
+        float dy;
+
         for (jack_nframes_t i=0; i<nframes; ++i)
         {
             if (apply_smoothing)
-                smooth_volume = new_volume_weight * volume + old_volume_weight * smooth_volume;
+            {
+                dy = volume - smooth_volume;
+                smooth_volume += copysignf(fminf(fabsf(dy), step_volume), dy);
+            }
 
             for (uint32_t j=0; j<mon->numports; ++j)
                 bufOut[j][i] *= smooth_volume;
@@ -325,6 +352,14 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
 
     mon->apply_volume = floats_differ_enough(smooth_volume, 1.0f);
     mon->smooth_volume = smooth_volume;
+    mon->muted = smooth_volume <= db2lin(-30.f) || !floats_differ_enough(smooth_volume, db2lin(-30.0f));
+
+    if (mon->wait_volume && fabsf(volume - smooth_volume) < 0.000001f)
+    {
+        mon->wait_volume = false;
+        sem_post(&mon->wait_volume_sem);
+    }
+
     return 0;
 }
 
@@ -390,7 +425,9 @@ int jack_initialize(jack_client_t* client, const char* load_init)
 
     mon->apply_volume = false;
     mon->muted = false;
-    mon->volume = 1.0f;
+    mon->wait_volume = false;
+    mon->volume = mon->smooth_volume = 1.0f;
+    mon->step_volume = 0.f;
 
     /* Register jack ports */
    #if defined(_MOD_DEVICE_DUO) || defined(_MOD_DEVICE_DWARF)
@@ -449,6 +486,8 @@ int jack_initialize(jack_client_t* client, const char* load_init)
         jack_port_tie(mon->in_ports[i], mon->out_ports[i]);
     }
 
+    sem_init(&mon->wait_volume_sem, 0, 0);
+
     /* Set jack callbacks */
     jack_set_graph_order_callback(client, GraphOrder, mon);
     jack_set_process_callback(client, ProcessMonitor, mon);
@@ -457,6 +496,7 @@ int jack_initialize(jack_client_t* client, const char* load_init)
     if (jack_activate(client) != 0)
     {
         fprintf(stderr, "can't activate jack client\n");
+        sem_destroy(&mon->wait_volume_sem);
         free(mon);
         return 1;
     }
@@ -514,6 +554,7 @@ void jack_finish(void* arg)
     monitor_client_t *const mon = arg;
 
     jack_deactivate(mon->client);
+    sem_destroy(&mon->wait_volume_sem);
 
     g_monitor_handle = NULL;
     g_active = false;
@@ -546,6 +587,22 @@ bool monitor_client_init(void)
     }
 
     return true;
+}
+
+void monitor_client_stop(void)
+{
+    monitor_client_t *const mon = g_monitor_handle;
+
+    if (!mon)
+    {
+        fprintf(stderr, "failed to close mod-monitor client\n");
+        return;
+    }
+
+    jack_client_t *const client = mon->client;
+
+    jack_finish(mon);
+    jack_client_close(client);
 }
 
 bool monitor_client_setup_compressor(int mode, float release)
@@ -614,27 +671,44 @@ bool monitor_client_setup_volume(float volume)
 
     // local variables for calculations before changing the real struct values
     const float final_volume = db2lin(volume);
+    const float step_volume = fabsf(final_volume - mon->smooth_volume) / (0.03f * jack_get_sample_rate(mon->client));
     const bool apply_volume = floats_differ_enough(final_volume, 1.0f);
-    const bool muted = volume <= -30.f || !floats_differ_enough(volume, -30.0f);
+    const bool unmute = volume > -30.f;
 
     mon->volume = final_volume;
+    mon->step_volume = step_volume;
     mon->apply_volume = apply_volume;
-    mon->muted = muted;
+
+    if (unmute)
+        mon->muted = false;
+
     return true;
 }
 
-void monitor_client_stop(void)
+bool monitor_client_flush_volume(void)
 {
     monitor_client_t *const mon = g_monitor_handle;
 
     if (!mon)
     {
-        fprintf(stderr, "failed to close mod-monitor client\n");
-        return;
+        fprintf(stderr, "asked to flush volume while monitor client is not active\n");
+        return false;
     }
 
-    jack_client_t *const client = mon->client;
+    mon->smooth_volume = mon->volume;
+    return true;
+}
 
-    jack_finish(mon);
-    jack_client_close(client);
+bool monitor_client_wait_volume(void)
+{
+    monitor_client_t *const mon = g_monitor_handle;
+
+    if (!mon)
+    {
+        fprintf(stderr, "asked to wait for volume while monitor client is not active\n");
+        return false;
+    }
+
+    mon->wait_volume = true;
+    return sem_timedwait_secs(&mon->wait_volume_sem, 1) == 0;
 }
