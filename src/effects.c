@@ -277,6 +277,7 @@ enum {
 
 enum PostPonedEventType {
     POSTPONED_PARAM_SET,
+    POSTPONED_AUDIO_MONITOR,
     POSTPONED_OUTPUT_MONITOR,
     POSTPONED_MIDI_PROGRAM_CHANGE,
     POSTPONED_MIDI_MAP,
@@ -309,7 +310,6 @@ typedef struct AUDIO_MONITOR_T {
     jack_port_t *port;
     char *source_port_name;
     float value;
-    bool updated;
 } audio_monitor_t;
 
 typedef struct CV_SOURCE_T {
@@ -593,6 +593,11 @@ typedef struct POSTPONED_PARAMETER_EVENT_T {
     float value;
 } postponed_parameter_event_t;
 
+typedef struct POSTPONED_AUDIO_MONITOR_EVENT_T {
+    int index;
+    float value;
+} postponed_audio_monitor_event_t;
+
 typedef struct POSTPONED_MIDI_PROGRAM_CHANGE_EVENT_T {
     int8_t program;
     int8_t channel;
@@ -635,6 +640,7 @@ typedef struct POSTPONED_EVENT_T {
     enum PostPonedEventType type;
     union {
         postponed_parameter_event_t parameter;
+        postponed_audio_monitor_event_t audio_monitor;
         postponed_midi_program_change_event_t program_change;
         postponed_midi_map_event_t midi_map;
         postponed_transport_event_t transport;
@@ -1236,16 +1242,18 @@ static void RunPostPonedEvents(int ignored_effect_id)
     // cached data, to make sure we only handle similar events once
     bool got_midi_program = false;
     bool got_transport = false;
-    postponed_cached_effect_events cached_process_out_buf;
+    postponed_cached_effect_events cached_audio_monitor, cached_process_out_buf;
     postponed_cached_symbol_events cached_param_set, cached_output_mon;
 
+    cached_audio_monitor.last_effect_id = -1;
     cached_process_out_buf.last_effect_id = -1;
     cached_param_set.last_effect_id = -1;
-    cached_output_mon.last_effect_id = -1;
     cached_param_set.last_symbol[0] = '\0';
     cached_param_set.last_symbol[MAX_CHAR_BUF_SIZE] = '\0';
+    cached_output_mon.last_effect_id = -1;
     cached_output_mon.last_symbol[0] = '\0';
     cached_output_mon.last_symbol[MAX_CHAR_BUF_SIZE] = '\0';
+    INIT_LIST_HEAD(&cached_audio_monitor.effects.siblings);
     INIT_LIST_HEAD(&cached_process_out_buf.effects.siblings);
     INIT_LIST_HEAD(&cached_param_set.symbols.siblings);
     INIT_LIST_HEAD(&cached_output_mon.symbols.siblings);
@@ -1292,6 +1300,23 @@ static void RunPostPonedEvents(int ignored_effect_id)
             // save for fast checkup next time
             cached_param_set.last_effect_id = eventptr->event.parameter.effect_id;
             strncpy(cached_param_set.last_symbol, eventptr->event.parameter.symbol, MAX_CHAR_BUF_SIZE);
+            break;
+
+        case POSTPONED_AUDIO_MONITOR:
+            if (ShouldIgnorePostPonedEffectEvent(eventptr->event.audio_monitor.index, &cached_audio_monitor))
+                continue;
+
+            pthread_mutex_lock(&g_audio_monitor_mutex);
+            if (eventptr->event.audio_monitor.index < g_audio_monitor_count)
+                g_audio_monitors[eventptr->event.audio_monitor.index].value = 0.f;
+            pthread_mutex_unlock(&g_audio_monitor_mutex);
+
+            snprintf(buf, FEEDBACK_BUF_SIZE, "audio_monitor %i %f", eventptr->event.audio_monitor.index,
+                                                                    eventptr->event.audio_monitor.value);
+            socket_send_feedback_debug(buf);
+
+            // save for fast checkup next time
+            cached_audio_monitor.last_effect_id = eventptr->event.audio_monitor.index;
             break;
 
         case POSTPONED_OUTPUT_MONITOR:
@@ -1563,6 +1588,11 @@ static void RunPostPonedEvents(int ignored_effect_id)
     postponed_cached_effect_list_data *peffect;
     postponed_cached_symbol_list_data *psymbol;
 
+    list_for_each_safe(it, it2, &cached_audio_monitor.effects.siblings)
+    {
+        peffect = list_entry(it, postponed_cached_effect_list_data, siblings);
+        free(peffect);
+    }
     list_for_each_safe(it, it2, &cached_process_out_buf.effects.siblings)
     {
         peffect = list_entry(it, postponed_cached_effect_list_data, siblings);
@@ -2822,8 +2852,21 @@ static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
             if (oldvalue < value)
             {
                 g_audio_monitors[i].value = value;
-                g_audio_monitors[i].updated = true;
-                needs_post = true;
+
+                postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
+
+                if (posteventptr)
+                {
+                    posteventptr->event.type = POSTPONED_AUDIO_MONITOR;
+                    posteventptr->event.audio_monitor.index = i;
+                    posteventptr->event.audio_monitor.value = value;
+
+                    pthread_mutex_lock(&g_rtsafe_mutex);
+                    list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
+                    pthread_mutex_unlock(&g_rtsafe_mutex);
+
+                    needs_post = true;
+                }
             }
         }
 
@@ -8304,9 +8347,15 @@ int effects_monitor_audio_levels(const char *source_port_name, int enable)
 
     if (enable)
     {
+        for (int i = 0; i < g_audio_monitor_count; ++i)
+        {
+            if (!strcmp(g_audio_monitors[i].source_port_name, source_port_name))
+                return SUCCESS;
+        }
+
         pthread_mutex_lock(&g_audio_monitor_mutex);
         g_audio_monitors = realloc(g_audio_monitors, sizeof(audio_monitor_t) * (g_audio_monitor_count + 1));
-        pthread_mutex_lock(&g_audio_monitor_mutex);
+        pthread_mutex_unlock(&g_audio_monitor_mutex);
 
         if (g_audio_monitors == NULL)
             return ERR_MEMORY_ALLOCATION;
@@ -8331,7 +8380,6 @@ int effects_monitor_audio_levels(const char *source_port_name, int enable)
         monitor->port = port;
         monitor->source_port_name = strdup(source_port_name);
         monitor->value = 0.f;
-        monitor->updated = false;
 
         ++g_audio_monitor_count;
     }
