@@ -596,6 +596,13 @@ static void show_external_ui(proto_t *proto)
     protocol_response_int(resp, proto);
 }
 
+static void hide_external_ui(proto_t *proto)
+{
+    const int resp = effects_hide_external_ui(atoi(proto->list[1]));
+    protocol_response_int(resp, proto);
+}
+
+
 static void output_data_ready(proto_t *proto)
 {
     effects_output_data_ready();
@@ -748,6 +755,7 @@ static int mod_host_init(jack_client_t* client, int socket_port, int feedback_po
     protocol_add_command(TRANSPORT, transport);
     protocol_add_command(TRANSPORT_SYNC, transport_sync);
     protocol_add_command(SHOW_EXTERNAL_UI, show_external_ui);
+    protocol_add_command(HIDE_EXTERNAL_UI, hide_external_ui);
     protocol_add_command(OUTPUT_DATA_READY, output_data_ready);
 
     /* skip help and quit for internal client */

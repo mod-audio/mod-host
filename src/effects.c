@@ -8552,6 +8552,8 @@ int effects_show_external_ui(int effect_id)
         return ERR_ASSIGNMENT_INVALID_OP;
 
     effect_t *effect = &g_effects[effect_id];
+    if (effect->ui_handle)
+        return ERR_ASSIGNMENT_ALREADY_EXISTS;
     LilvUIs *uis = lilv_plugin_get_uis(effect->lilv_plugin);
 
     if (uis == NULL)
@@ -8653,6 +8655,34 @@ cleanup:
     return ERR_EXTERNAL_UI_UNAVAILABLE;
 
     UNUSED_PARAM(effect_id);
+#endif
+}
+
+int effects_hide_external_ui(int effect_id) {
+#ifdef WITH_EXTERNAL_UI_SUPPORT
+    if (!InstanceExist(effect_id))
+        return ERR_INSTANCE_NON_EXISTS;
+
+    effect_t *effect = &g_effects[effect_id];
+    if (effect == NULL)
+        return ERR_INSTANCE_INVALID;
+
+    if (effect->ui_desc == NULL)
+        return ERR_EXTERNAL_UI_UNAVAILABLE;
+
+    const LV2UI_Show_Interface *show_iface;
+    if ((show_iface = effect->ui_desc->extension_data(LV2_UI__showInterface)) == NULL)
+        return ERR_EXTERNAL_UI_UNAVAILABLE;
+
+    show_iface->hide(effect->ui_handle);
+    dlclose(effect->ui_handle);
+    effect->ui_desc = NULL;
+    effect->ui_handle = NULL;
+    effect->ui_idle_iface = NULL;
+    effect->ui_libhandle = NULL;
+
+    return SUCCESS;
+
 #endif
 }
 

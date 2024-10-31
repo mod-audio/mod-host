@@ -189,6 +189,7 @@ void effects_transport(int rolling, double beats_per_bar, double beats_per_minut
 int effects_transport_sync_mode(const char *mode);
 void effects_output_data_ready(void);
 int effects_show_external_ui(int effect_id);
+int effects_hide_external_ui(int effect_id);
 void effects_idle_external_uis(void);
 
 /*
