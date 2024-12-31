@@ -6358,6 +6358,51 @@ int effects_get_parameter(int effect_id, const char *control_symbol, float *valu
     return ERR_INSTANCE_NON_EXISTS;
 }
 
+int effects_flush_parameters(int effect_id, int param_count, const flushed_param_t *params)
+{
+    if (!InstanceExist(effect_id))
+        return ERR_INSTANCE_NON_EXISTS;
+    if (param_count == 0)
+        return ERR_ASSIGNMENT_INVALID_OP;
+
+    effect_t *effect = &(g_effects[effect_id]);
+    port_t *port;
+    float value;
+
+    if (effect->reset_index >= 0)
+    {
+        *(effect->ports[effect->reset_index]->buffer) = 1.0f;
+    }
+
+    for (int i = 0; i < param_count; i++)
+    {
+        port = FindEffectInputPortBySymbol(effect, params[i].symbol);
+        if (port)
+        {
+            value = params[i].value;
+
+            if (value < port->min_value)
+                value = port->max_value;
+            else if (value > port->max_value)
+                value = port->max_value;
+
+            port->prev_value = *port->buffer = params[i].value;
+
+#ifdef WITH_EXTERNAL_UI_SUPPORT
+            port->hints |= HINT_SHOULD_UPDATE;
+#endif
+        }
+    }
+
+    // reset a 2nd time in case plugin was processing while we changed parameters
+    if (effect->reset_index >= 0)
+    {
+        *(effect->ports[effect->reset_index]->buffer) = 1.0f;
+    }
+
+    return SUCCESS;
+}
+
 static inline
 bool lv2_atom_forge_property_set(LV2_Atom_Forge *forge, LV2_URID urid, const char *value, LV2_URID type)
 {

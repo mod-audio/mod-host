@@ -247,6 +247,41 @@ static void effects_monitor_param_cb(proto_t *proto)
     protocol_response_int(resp, proto);
 }
 
+static void effects_flush_params_cb(proto_t *proto)
+{
+    int resp;
+    int param_count = atoi(proto->list[2]);
+    flushed_param_t *params;
+
+    if (param_count == 0)
+    {
+        protocol_response_int(ERR_ASSIGNMENT_INVALID_OP, proto);
+        return;
+    }
+
+    params = malloc(sizeof(flushed_param_t) * param_count);
+
+    if (params != NULL)
+    {
+        for (int i = 0; i < param_count; i++)
+        {
+            params[i].symbol = proto->list[3 + i * 2];
+            params[i].value = atof(proto->list[4 + i * 2]);
+        }
+    }
+    else
+    {
+        protocol_response_int(ERR_MEMORY_ALLOCATION, proto);
+        return;
+    }
+
+    resp = effects_flush_parameters(atoi(proto->list[1]), param_count, params);
+
+    free(params);
+
+    protocol_response_int(resp, proto);
+}
+
 static void effects_set_property_cb(proto_t *proto)
 {
     int resp;
@@ -715,6 +750,7 @@ static int mod_host_init(jack_client_t* client, int socket_port, int feedback_po
     protocol_add_command(EFFECT_PARAM_SET, effects_set_param_cb);
     protocol_add_command(EFFECT_PARAM_GET, effects_get_param_cb);
     protocol_add_command(EFFECT_PARAM_MON, effects_monitor_param_cb);
+    protocol_add_command(EFFECT_PARAMS_FLUSH, effects_flush_params_cb);
     protocol_add_command(EFFECT_PATCH_GET, effects_get_property_cb);
     protocol_add_command(EFFECT_PATCH_SET, effects_set_property_cb);
     protocol_add_command(EFFECT_LICENSEE, effects_licensee_cb);
