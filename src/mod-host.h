@@ -65,7 +65,7 @@
 #define EFFECT_PARAM_SET     "param_set %i %s %s"
 #define EFFECT_PARAM_GET     "param_get %i %s"
 #define EFFECT_PARAM_MON     "param_monitor %i %s %s %f"
-#define EFFECT_PARAMS_FLUSH  "params_flush %i %i ..."
+#define EFFECT_PARAMS_FLUSH  "params_flush %i %i %i ..."
 #define EFFECT_PATCH_GET     "patch_get %i %s"
 #define EFFECT_PATCH_SET     "patch_set %i %s %s"
 #define EFFECT_LICENSEE      "licensee %i"

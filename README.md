@@ -169,9 +169,10 @@ The commands supported by mod-host are:
         * monitor a control port according to a condition
         e.g: param_monitor 0 "gain" ">" 2.5
 
-    params_flush <instance_number> <param_count> <params...>
+    params_flush <instance_number> <reset_value> <param_count> <params...>
         * flush several param values at once and trigger reset if available
-        e.g.: params_flush 0 2 "gain" 0.0 "distortion" 0.5
+        * reset value must be according to reset property spec
+        e.g.: params_flush 0 1 2 "gain" 0.0 "distortion" 0.5
 
     patch_set <instance_number> <property_uri> <value>
         * set the value of a control port

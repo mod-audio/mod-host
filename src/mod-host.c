@@ -250,32 +250,31 @@ static void effects_monitor_param_cb(proto_t *proto)
 static void effects_flush_params_cb(proto_t *proto)
 {
     int resp;
-    int param_count = atoi(proto->list[2]);
+    int param_count = atoi(proto->list[3]);
     flushed_param_t *params;
 
-    if (param_count == 0)
+    if (param_count != 0)
     {
-        protocol_response_int(ERR_ASSIGNMENT_INVALID_OP, proto);
-        return;
-    }
+        params = malloc(sizeof(flushed_param_t) * param_count);
 
-    params = malloc(sizeof(flushed_param_t) * param_count);
+        if (params == NULL)
+        {
+            protocol_response_int(ERR_MEMORY_ALLOCATION, proto);
+            return;
+        }
 
-    if (params != NULL)
-    {
         for (int i = 0; i < param_count; i++)
         {
-            params[i].symbol = proto->list[3 + i * 2];
-            params[i].value = atof(proto->list[4 + i * 2]);
+            params[i].symbol = proto->list[4 + i * 2];
+            params[i].value = atof(proto->list[5 + i * 2]);
         }
     }
     else
     {
-        protocol_response_int(ERR_MEMORY_ALLOCATION, proto);
-        return;
+        params = NULL;
     }
 
-    resp = effects_flush_parameters(atoi(proto->list[1]), param_count, params);
+    resp = effects_flush_parameters(atoi(proto->list[1]), atoi(proto->list[2]), param_count, params);
 
     free(params);
 

@@ -151,7 +151,7 @@ int effects_disconnect(const char *portA, const char *portB);
 int effects_disconnect_all(const char *port);
 int effects_set_parameter(int effect_id, const char *control_symbol, float value);
 int effects_get_parameter(int effect_id, const char *control_symbol, float *value);
-int effects_flush_parameters(int effect_id, int param_count, const flushed_param_t *params);
+int effects_flush_parameters(int effect_id, int reset, int param_count, const flushed_param_t *params);
 int effects_set_property(int effect_id, const char *uri, const char *value);
 int effects_get_property(int effect_id, const char *uri);
 int effects_monitor_parameter(int effect_id, const char *control_symbol, const char *op, float value);

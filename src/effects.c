@@ -6358,12 +6358,10 @@ int effects_get_parameter(int effect_id, const char *control_symbol, float *valu
     return ERR_INSTANCE_NON_EXISTS;
 }
 
-int effects_flush_parameters(int effect_id, int param_count, const flushed_param_t *params)
+int effects_flush_parameters(int effect_id, int reset, int param_count, const flushed_param_t *params)
 {
     if (!InstanceExist(effect_id))
         return ERR_INSTANCE_NON_EXISTS;
-    if (param_count == 0)
-        return ERR_ASSIGNMENT_INVALID_OP;
 
     effect_t *effect = &(g_effects[effect_id]);
     port_t *port;
@@ -6371,7 +6369,7 @@ int effects_flush_parameters(int effect_id, int param_count, const flushed_param
 
     if (effect->reset_index >= 0)
     {
-        *(effect->ports[effect->reset_index]->buffer) = 1.0f;
+        *(effect->ports[effect->reset_index]->buffer) = reset;
     }
 
     for (int i = 0; i < param_count; i++)
@@ -6397,7 +6395,7 @@ int effects_flush_parameters(int effect_id, int param_count, const flushed_param
     // reset a 2nd time in case plugin was processing while we changed parameters
     if (effect->reset_index >= 0)
     {
-        *(effect->ports[effect->reset_index]->buffer) = 1.0f;
+        *(effect->ports[effect->reset_index]->buffer) = reset;
     }
 
     return SUCCESS;
