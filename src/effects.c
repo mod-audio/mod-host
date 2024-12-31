@@ -84,6 +84,7 @@ typedef unsigned int uint;
 #include <lv2/uri-map/uri-map.h>
 #include <lv2/worker/worker.h>
 #include "lv2/control-input-port-change-request.h"
+#include "lv2/kxstudio-properties.h"
 #include "lv2/lv2-hmi.h"
 #include "lv2/mod-license.h"
 
@@ -146,8 +147,6 @@ typedef struct {
 #endif
 
 #define LILV_NS_MOD "http://moddevices.com/ns/mod#"
-
-#define KX_TIME__TicksPerBeat "http://kxstudio.sf.net/ns/lv2ext/props#TimePositionTicksPerBeat"
 
 // custom jack flag used for cv
 // needed because we prefer jack2 which doesn't have metadata yet
@@ -413,6 +412,7 @@ typedef struct EFFECT_T {
     int32_t control_index; // control/event input
     int32_t enabled_index;
     int32_t freewheel_index;
+    int32_t reset_index;
     int32_t bpb_index;
     int32_t bpm_index;
     int32_t speed_index;
@@ -504,6 +504,7 @@ typedef struct LILV_NODES_T {
     LilvNode *preset;
     LilvNode *rawMIDIClockAccess;
     LilvNode *rdfs_range;
+    LilvNode *reset;
     LilvNode *sample_rate;
     LilvNode *state_interface;
     LilvNode *state_load_default_state;
@@ -4149,6 +4150,7 @@ int effects_init(void* client)
         effect->control_index = -1;
         effect->enabled_index = -1;
         effect->freewheel_index = -1;
+        effect->reset_index = -1;
         effect->bpb_index = -1;
         effect->bpm_index = -1;
         effect->speed_index = -1;
@@ -4255,6 +4257,7 @@ int effects_init(void* client)
     g_lilv_nodes.preset = lilv_new_uri(g_lv2_data, LV2_PRESETS__Preset);
     g_lilv_nodes.rawMIDIClockAccess = lilv_new_uri(g_lv2_data, LILV_NS_MOD "rawMIDIClockAccess");
     g_lilv_nodes.rdfs_range = lilv_new_uri(g_lv2_data, LILV_NS_RDFS "range");
+    g_lilv_nodes.reset = lilv_new_uri(g_lv2_data, LV2_KXSTUDIO_PROPERTIES__Reset);
     g_lilv_nodes.sample_rate = lilv_new_uri(g_lv2_data, LV2_CORE__sampleRate);
     g_lilv_nodes.state_interface = lilv_new_uri(g_lv2_data, LV2_STATE__interface);
     g_lilv_nodes.state_load_default_state = lilv_new_uri(g_lv2_data, LV2_STATE__loadDefaultState);
@@ -4320,7 +4323,7 @@ int effects_init(void* client)
     g_urids.time_beatUnit        = urid_to_id(g_symap, LV2_TIME__beatUnit);
     g_urids.time_beatsPerBar     = urid_to_id(g_symap, LV2_TIME__beatsPerBar);
     g_urids.time_beatsPerMinute  = urid_to_id(g_symap, LV2_TIME__beatsPerMinute);
-    g_urids.time_ticksPerBeat    = urid_to_id(g_symap, KX_TIME__TicksPerBeat);
+    g_urids.time_ticksPerBeat    = urid_to_id(g_symap, LV2_KXSTUDIO_PROPERTIES__TimePositionTicksPerBeat);
     g_urids.time_frame           = urid_to_id(g_symap, LV2_TIME__frame);
     g_urids.time_speed           = urid_to_id(g_symap, LV2_TIME__speed);
 
@@ -4601,6 +4604,7 @@ int effects_finish(int close_client)
     lilv_node_free(g_lilv_nodes.preset);
     lilv_node_free(g_lilv_nodes.rawMIDIClockAccess);
     lilv_node_free(g_lilv_nodes.rdfs_range);
+    lilv_node_free(g_lilv_nodes.reset);
     lilv_node_free(g_lilv_nodes.sample_rate);
     lilv_node_free(g_lilv_nodes.state_interface);
     lilv_node_free(g_lilv_nodes.state_load_default_state);
@@ -5207,7 +5211,9 @@ int effects_add(const char *uri, int instance, int activate)
 
     // special ports
     {
-        const LilvPort* enabled_port = lilv_plugin_get_port_by_designation(plugin, g_lilv_nodes.input, g_lilv_nodes.enabled);
+        const LilvPort* enabled_port = lilv_plugin_get_port_by_designation(plugin,
+                                                                           g_lilv_nodes.input,
+                                                                           g_lilv_nodes.enabled);
         if (enabled_port)
         {
             effect->enabled_index = lilv_port_get_index(plugin, enabled_port);
@@ -5218,7 +5224,9 @@ int effects_add(const char *uri, int instance, int activate)
             effect->enabled_index = -1;
         }
 
-        const LilvPort* freewheel_port = lilv_plugin_get_port_by_designation(plugin, g_lilv_nodes.input, g_lilv_nodes.freeWheeling);
+        const LilvPort* freewheel_port = lilv_plugin_get_port_by_designation(plugin,
+                                                                             g_lilv_nodes.input,
+                                                                             g_lilv_nodes.freeWheeling);
         if (freewheel_port)
         {
             effect->freewheel_index = lilv_port_get_index(plugin, freewheel_port);
@@ -5229,7 +5237,22 @@ int effects_add(const char *uri, int instance, int activate)
             effect->freewheel_index = -1;
         }
 
-        const LilvPort* bpb_port = lilv_plugin_get_port_by_designation(plugin, g_lilv_nodes.input, g_lilv_nodes.timeBeatsPerBar);
+        const LilvPort* reset_port = lilv_plugin_get_port_by_designation(plugin,
+                                                                         g_lilv_nodes.input,
+                                                                         g_lilv_nodes.reset);
+        if (reset_port)
+        {
+            effect->reset_index = lilv_port_get_index(plugin, reset_port);
+            *(effect->ports[effect->reset_index]->buffer) = 0.0f;
+        }
+        else
+        {
+            effect->reset_index = -1;
+        }
+
+        const LilvPort* bpb_port = lilv_plugin_get_port_by_designation(plugin,
+                                                                       g_lilv_nodes.input,
+                                                                       g_lilv_nodes.timeBeatsPerBar);
         if (bpb_port)
         {
             effect->bpb_index = lilv_port_get_index(plugin, bpb_port);
@@ -5240,7 +5263,9 @@ int effects_add(const char *uri, int instance, int activate)
             effect->bpb_index = -1;
         }
 
-        const LilvPort* bpm_port = lilv_plugin_get_port_by_designation(plugin, g_lilv_nodes.input, g_lilv_nodes.timeBeatsPerMinute);
+        const LilvPort* bpm_port = lilv_plugin_get_port_by_designation(plugin,
+                                                                       g_lilv_nodes.input,
+                                                                       g_lilv_nodes.timeBeatsPerMinute);
         if (bpm_port)
         {
             effect->bpm_index = lilv_port_get_index(plugin, bpm_port);
@@ -5251,7 +5276,9 @@ int effects_add(const char *uri, int instance, int activate)
             effect->bpm_index = -1;
         }
 
-        const LilvPort* speed_port = lilv_plugin_get_port_by_designation(plugin, g_lilv_nodes.input, g_lilv_nodes.timeSpeed);
+        const LilvPort* speed_port = lilv_plugin_get_port_by_designation(plugin,
+                                                                         g_lilv_nodes.input,
+                                                                         g_lilv_nodes.timeSpeed);
         if (speed_port)
         {
             effect->speed_index = lilv_port_get_index(plugin, speed_port);
@@ -5596,6 +5623,10 @@ int effects_preset_load(int effect_id, const char *uri)
             if (effect->freewheel_index >= 0)
             {
                 *(effect->ports[effect->freewheel_index]->buffer) = 0.0f;
+            }
+            if (effect->reset_index >= 0)
+            {
+                *(effect->ports[effect->reset_index]->buffer) = 0.0f;
             }
             if (effect->bpb_index >= 0)
             {
