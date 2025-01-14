@@ -45,6 +45,14 @@
 #define MOD_MONITOR_STEREO_HANDLING
 #endif
 
+#if defined(_DARKGLASS_DEVICE_PABLITO)
+#define MOD_MONITOR_VOLUME_MUTE -60.f
+#define MOD_MONITOR_VOLUME_WAIT 0.02f
+#else
+#define MOD_MONITOR_VOLUME_MUTE -30.f
+#define MOD_MONITOR_VOLUME_WAIT 0.03f
+#endif
+
 #if defined(_MOD_DEVICE_DUOX) || defined(_MOD_DEVICE_DWARF)
 #define MOD_IO_PROCESSING_ENABLED
 #endif
@@ -352,7 +360,8 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
 
     mon->apply_volume = floats_differ_enough(smooth_volume, 1.0f);
     mon->smooth_volume = smooth_volume;
-    mon->muted = smooth_volume <= db2lin(-30.f) || !floats_differ_enough(smooth_volume, db2lin(-30.0f));
+    mon->muted = smooth_volume <= db2lin(MOD_MONITOR_VOLUME_MUTE) ||
+               ! floats_differ_enough(smooth_volume, db2lin(MOD_MONITOR_VOLUME_MUTE));
 
     if (mon->wait_volume && fabsf(volume - smooth_volume) < 0.000001f)
     {
@@ -435,7 +444,7 @@ int jack_initialize(jack_client_t* client, const char* load_init)
    #elif defined(_MOD_DEVICE_DUOX)
     const uint32_t numports = mon->extra_active ? 4 : 2;
    #elif defined(_DARKGLASS_DEVICE_PABLITO)
-    const uint32_t numports = 2;
+    const uint32_t numports = 6;
    #else
     uint32_t numports = 0;
 
@@ -671,9 +680,10 @@ bool monitor_client_setup_volume(float volume)
 
     // local variables for calculations before changing the real struct values
     const float final_volume = db2lin(volume);
-    const float step_volume = fabsf(final_volume - mon->smooth_volume) / (0.03f * jack_get_sample_rate(mon->client));
+    const float step_volume = fabsf(final_volume - mon->smooth_volume)
+                            / (MOD_MONITOR_VOLUME_WAIT * jack_get_sample_rate(mon->client));
     const bool apply_volume = floats_differ_enough(final_volume, 1.0f);
-    const bool unmute = volume > -30.f;
+    const bool unmute = volume > MOD_MONITOR_VOLUME_MUTE;
 
     mon->volume = final_volume;
     mon->step_volume = step_volume;
