@@ -46,6 +46,14 @@
 ************************************************************************************************************************
 */
 
+#if defined(_DARKGLASS_DEVICE_PABLITO)
+#define MOD_MONITOR_VOLUME_MUTE -60.f
+#define MOD_MONITOR_VOLUME_WAIT 0.02f
+#else
+#define MOD_MONITOR_VOLUME_MUTE -30.f
+#define MOD_MONITOR_VOLUME_WAIT 0.03f
+#endif
+
 
 /*
 ************************************************************************************************************************

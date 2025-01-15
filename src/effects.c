@@ -1742,7 +1742,7 @@ static void* HMIClientThread(void* arg)
                 break;
 #endif
             case sys_serial_event_type_pedalboard_gain:
-                monitor_client_setup_volume(clampf(atof(msg), -30.0f, 20.0f));
+                monitor_client_setup_volume(clampf(atof(msg), MOD_MONITOR_VOLUME_MUTE, 20.0f));
                 break;
             default:
                 break;
@@ -8386,7 +8386,7 @@ int effects_processing_enable(int enable)
 
     // use fade-out while turning off
     case -1:
-        monitor_client_setup_volume(-30.f);
+        monitor_client_setup_volume(MOD_MONITOR_VOLUME_MUTE);
         if (g_processing_enabled)
         {
             monitor_client_wait_volume();
@@ -8396,7 +8396,7 @@ int effects_processing_enable(int enable)
 
     // don't use fade-out while turning off, mute right away
     case -2:
-        monitor_client_setup_volume(-30.f);
+        monitor_client_setup_volume(MOD_MONITOR_VOLUME_MUTE);
         monitor_client_flush_volume();
         g_processing_enabled = false;
         break;

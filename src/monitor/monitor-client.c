@@ -45,14 +45,6 @@
 #define MOD_MONITOR_STEREO_HANDLING
 #endif
 
-#if defined(_DARKGLASS_DEVICE_PABLITO)
-#define MOD_MONITOR_VOLUME_MUTE -60.f
-#define MOD_MONITOR_VOLUME_WAIT 0.02f
-#else
-#define MOD_MONITOR_VOLUME_MUTE -30.f
-#define MOD_MONITOR_VOLUME_WAIT 0.03f
-#endif
-
 #if defined(_MOD_DEVICE_DUOX) || defined(_MOD_DEVICE_DWARF)
 #define MOD_IO_PROCESSING_ENABLED
 #endif
@@ -444,7 +436,7 @@ int jack_initialize(jack_client_t* client, const char* load_init)
    #elif defined(_MOD_DEVICE_DUOX)
     const uint32_t numports = mon->extra_active ? 4 : 2;
    #elif defined(_DARKGLASS_DEVICE_PABLITO)
-    const uint32_t numports = 6;
+    const uint32_t numports = 8;
    #else
     uint32_t numports = 0;
 
