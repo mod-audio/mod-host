@@ -6367,7 +6367,7 @@ int effects_flush_parameters(int effect_id, int reset, int param_count, const fl
     port_t *port;
     float value;
 
-    if (effect->reset_index >= 0)
+    if (effect->reset_index >= 0 && reset != 0)
     {
         *(effect->ports[effect->reset_index]->buffer) = reset;
     }
@@ -6393,7 +6393,7 @@ int effects_flush_parameters(int effect_id, int reset, int param_count, const fl
     }
 
     // reset a 2nd time in case plugin was processing while we changed parameters
-    if (effect->reset_index >= 0)
+    if (effect->reset_index >= 0 && reset != 0)
     {
         *(effect->ports[effect->reset_index]->buffer) = reset;
     }
