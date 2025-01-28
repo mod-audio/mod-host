@@ -85,6 +85,10 @@ ifeq ($(shell pkg-config --atleast-version=1.9.0 jack && echo true), true)
 INCS += -DHAVE_JACK2
 endif
 
+ifeq ($(shell pkg-config --atleast-version=1.9.23 jack && echo true), true)
+INCS += -DHAVE_JACK2_1_9_23
+endif
+
 ifeq ($(HAVE_NE10),true)
 LIBS += -lNE10
 INCS += -DHAVE_NE10

@@ -246,7 +246,10 @@ The commands supported by mod-host are:
         e.g.: cv_unmap 0 "gain"
 
     cpu_load
-        * return current jack cpu load
+        * return current average jack cpu load
+
+    max_cpu_load
+        * return current maximum jack cpu load
 
     load <file_name>
         * load a history command file

@@ -86,6 +86,7 @@
 #define HMI_MAP              "hmi_map %i %s %i %i %i %i %i %s %f %f %i"
 #define HMI_UNMAP            "hmi_unmap %i %s"
 #define CPU_LOAD             "cpu_load"
+#define MAX_CPU_LOAD         "max_cpu_load"
 #define LOAD_COMMANDS        "load %s"
 #define SAVE_COMMANDS        "save %s"
 #define BUNDLE_ADD           "bundle_add %s"

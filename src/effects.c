@@ -7952,6 +7952,15 @@ float effects_jack_cpu_load(void)
     return jack_cpu_load(g_jack_global_client);
 }
 
+float effects_jack_max_cpu_load(void)
+{
+#ifdef HAVE_JACK2_1_9_23
+    return jack_max_cpu_load(g_jack_global_client);
+#else
+    return jack_cpu_load(g_jack_global_client);
+#endif
+}
+
 #define OS_SEP '/'
 
 void effects_bundle_add(const char* bpath)

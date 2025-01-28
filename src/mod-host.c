@@ -509,6 +509,15 @@ static void cpu_load_cb(proto_t *proto)
     protocol_response(buffer, proto);
 }
 
+static void max_cpu_load_cb(proto_t *proto)
+{
+    float value = effects_jack_max_cpu_load();
+    char buffer[128];
+    sprintf(buffer, "resp 0 %.04f", value);
+
+    protocol_response(buffer, proto);
+}
+
 #ifndef SKIP_READLINE
 static void load_cb(proto_t *proto)
 {
@@ -770,6 +779,7 @@ static int mod_host_init(jack_client_t* client, int socket_port, int feedback_po
     protocol_add_command(HMI_MAP, hmi_map_cb);
     protocol_add_command(HMI_UNMAP, hmi_unmap_cb);
     protocol_add_command(CPU_LOAD, cpu_load_cb);
+    protocol_add_command(MAX_CPU_LOAD, max_cpu_load_cb);
 #ifndef SKIP_READLINE
     protocol_add_command(LOAD_COMMANDS, load_cb);
     protocol_add_command(SAVE_COMMANDS, save_cb);
