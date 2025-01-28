@@ -6348,7 +6348,7 @@ int effects_get_parameter(int effect_id, const char *control_symbol, float *valu
         port = FindEffectInputPortBySymbol(&(g_effects[effect_id]), control_symbol);
         if (port)
         {
-           (*value) = *(port->buffer);
+           *value = *(port->buffer);
            return SUCCESS;
         }
 
@@ -6369,7 +6369,8 @@ int effects_flush_parameters(int effect_id, int reset, int param_count, const fl
 
     if (effect->reset_index >= 0 && reset != 0)
     {
-        *(effect->ports[effect->reset_index]->buffer) = reset;
+        port = effect->ports[effect->reset_index];
+        port->prev_value = *(port->buffer) = reset;
     }
 
     for (int i = 0; i < param_count; i++)
@@ -6384,7 +6385,7 @@ int effects_flush_parameters(int effect_id, int reset, int param_count, const fl
             else if (value > port->max_value)
                 value = port->max_value;
 
-            port->prev_value = *port->buffer = params[i].value;
+            port->prev_value = *(port->buffer) = params[i].value;
 
 #ifdef WITH_EXTERNAL_UI_SUPPORT
             port->hints |= HINT_SHOULD_UPDATE;
@@ -6395,7 +6396,8 @@ int effects_flush_parameters(int effect_id, int reset, int param_count, const fl
     // reset a 2nd time in case plugin was processing while we changed parameters
     if (effect->reset_index >= 0 && reset != 0)
     {
-        *(effect->ports[effect->reset_index]->buffer) = reset;
+        port = effect->ports[effect->reset_index];
+        port->prev_value = *(port->buffer) = reset;
     }
 
     return SUCCESS;
@@ -6808,7 +6810,7 @@ int effects_monitor_output_parameter(int effect_id, const char *control_symbol_o
             return SUCCESS;
 
         // set prev_value
-        port->prev_value = (*port->buffer);
+        port->prev_value = *(port->buffer);
         port->hints |= HINT_MONITORED;
 
         // simulate an output monitor event here, to report current value
