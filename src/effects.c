@@ -745,6 +745,7 @@ static int g_audio_monitor_count;
 static jack_port_t *g_midi_in_port;
 static jack_position_t g_jack_pos;
 static bool g_jack_rolling;
+static uint32_t g_jack_xruns;
 static volatile double g_transport_bpb;
 static volatile double g_transport_bpm;
 static volatile bool g_transport_reset;
@@ -752,6 +753,8 @@ static volatile enum TransportSyncMode g_transport_sync_mode;
 static bool g_aggregated_midi_enabled;
 static bool g_processing_enabled;
 static bool g_verbose_debug;
+static bool g_cpu_load_enabled;
+static volatile bool g_cpu_load_trigger;
 
 // Wall clock time since program startup
 static uint64_t g_monotonic_frame_count = 0;
@@ -844,6 +847,7 @@ static void AllocatePortBuffers(effect_t* effect, int in_size, int out_size);
 static int BufferSize(jack_nframes_t nframes, void* data);
 static void FreeWheelMode(int starting, void* data);
 static void PortRegistration(jack_port_id_t port_id, int reg, void* data);
+static int XRun(void* data);
 static void RunPostPonedEvents(int ignored_effect_id);
 static void* PostPonedEventsThread(void* arg);
 #ifdef __MOD_DEVICES__
@@ -1121,6 +1125,15 @@ static void PortRegistration(jack_port_id_t port_id, int reg, void* data)
     UNUSED_PARAM(data);
 }
 
+static int XRun(void *data)
+{
+    ++g_jack_xruns;
+
+    return 0;
+
+    UNUSED_PARAM(data);
+}
+
 static bool ShouldIgnorePostPonedEffectEvent(int effect_id, postponed_cached_effect_events* cached_events)
 {
     if (effect_id == cached_events->last_effect_id)
@@ -1225,7 +1238,14 @@ static void RunPostPonedEvents(int ignored_effect_id)
     list_splice_init(&g_rtsafe_list, &queue);
     pthread_mutex_unlock(&g_rtsafe_mutex);
 
-    if (list_empty(&queue))
+    // fetch this value only once per run
+    const bool cpu_load_trigger = g_jack_global_client != NULL && g_cpu_load_trigger;
+
+    if (cpu_load_trigger)
+    {
+        g_cpu_load_trigger = false;
+    }
+    else if (list_empty(&queue))
     {
         // nothing to do
         if (g_verbose_debug) {
@@ -1260,7 +1280,7 @@ static void RunPostPonedEvents(int ignored_effect_id)
     INIT_LIST_HEAD(&cached_output_mon.symbols.siblings);
 
     // if all we have are jack_midi_connect requests, do not send feedback to server
-    bool got_only_jack_midi_requests = true;
+    bool got_only_jack_midi_requests = !cpu_load_trigger;
 
     if (g_verbose_debug) {
         puts("DEBUG: RunPostPonedEvents() Before the queue iteration");
@@ -1578,6 +1598,18 @@ static void RunPostPonedEvents(int ignored_effect_id)
         case POSTPONED_LOG_MESSAGE:
             break;
         }
+    }
+
+    if (cpu_load_trigger)
+    {
+        snprintf(buf, FEEDBACK_BUF_SIZE, "cpu_load %f %f %d", jack_cpu_load(g_jack_global_client),
+                                                             #ifdef HAVE_JACK2_1_9_23
+                                                              jack_max_cpu_load(g_jack_global_client),
+                                                             #else
+                                                              0.f,
+                                                             #endif
+                                                              g_jack_xruns);
+        socket_send_feedback_debug(buf);
     }
 
     if (g_verbose_debug) {
@@ -2876,6 +2908,18 @@ static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
 
     if (UpdateGlobalJackPosition(pos_flag, false))
         needs_post = true;
+
+    if (g_cpu_load_enabled)
+    {
+        const uint32_t cpu_update_rate = g_sample_rate / 2;
+        const uint32_t frame_check = g_monotonic_frame_count % cpu_update_rate;
+
+        if (frame_check + nframes >= cpu_update_rate)
+        {
+            g_cpu_load_trigger = true;
+            needs_post = true;
+        }
+    }
 
     if (needs_post)
         sem_post(&g_postevents_semaphore);
@@ -4194,6 +4238,7 @@ int effects_init(void* client)
     jack_set_process_callback(g_jack_global_client, ProcessGlobalClient, NULL);
     jack_set_buffer_size_callback(g_jack_global_client, BufferSize, NULL);
     jack_set_port_registration_callback(g_jack_global_client, PortRegistration, NULL);
+    jack_set_xrun_callback(g_jack_global_client, XRun, NULL);
 
 #ifdef HAVE_HYLIA
     /* Init hylia */
@@ -8365,6 +8410,16 @@ int effects_aggregated_midi_enable(int enable)
 #endif // HAVE_JACK2
 
     g_aggregated_midi_enabled = enable != 0;
+    return SUCCESS;
+}
+
+int effects_cpu_load_enable(int enable)
+{
+    if (g_jack_global_client == NULL)
+        return ERR_INVALID_OPERATION;
+
+    g_cpu_load_enabled = enable != 0;
+    effects_output_data_ready();
     return SUCCESS;
 }
 

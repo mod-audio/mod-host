@@ -610,6 +610,8 @@ static void feature_enable(proto_t *proto)
 
     if (!strcmp(feature, "aggregated-midi"))
         resp = effects_aggregated_midi_enable(enabled);
+    else if (!strcmp(feature, "cpu-load"))
+        resp = effects_cpu_load_enable(enabled);
     else if (!strcmp(feature, "freewheeling"))
         resp = effects_freewheeling_enable(enabled);
     else if (!strcmp(feature, "processing"))

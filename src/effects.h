@@ -188,6 +188,7 @@ int effects_state_load(const char *dir);
 int effects_state_save(const char *dir);
 int effects_state_set_tmpdir(const char *dir);
 int effects_aggregated_midi_enable(int enable);
+int effects_cpu_load_enable(int enable);
 int effects_freewheeling_enable(int enable);
 int effects_processing_enable(int enable);
 int effects_monitor_audio_levels(const char *source_port_name, int enable);

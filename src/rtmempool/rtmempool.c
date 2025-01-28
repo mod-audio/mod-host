@@ -1,7 +1,7 @@
 /*
  * RealTime Memory Pool, heavily based on work by Nedko Arnaudov
  * Copyright (C) 2006-2009 Nedko Arnaudov <nedko@arnaudov.name>
- * Copyright (C) 2013-2016 Filipe Coelho <falktx@falktx.com>
+ * Copyright (C) 2013-2025 Filipe Coelho <falktx@falktx.com>
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -87,7 +87,7 @@ bool rtsafe_memory_pool_create(RtMemPool_Handle* handlePtr,
 
     pthread_mutexattr_t atts;
     pthread_mutexattr_init(&atts);
-#ifdef __ARM_ARCH_7A__
+#ifdef __MOD_DEVICES__
     pthread_mutexattr_setprotocol(&atts, PTHREAD_PRIO_INHERIT);
 #endif
     pthread_mutex_init(&poolPtr->mutex, &atts);
