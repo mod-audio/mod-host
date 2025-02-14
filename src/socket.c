@@ -348,7 +348,7 @@ void socket_run(int exit_on_failure)
 
         if (count > 0) /* Data received */
         {
-            if (count == g_buffer_size)
+            if (count == g_buffer_size && buffer[count - 1] != '\0')
             {
                 /* if message is bigger than our buffer, dynamically allocate more data until we receive it all */
                 int new_count, new_buffer_size;
@@ -379,15 +379,7 @@ void socket_run(int exit_on_failure)
                         count += new_count;
 
                         if (msgbuffer[count - 1] == '\0')
-                        {
-                            // ignore leftover null bytes
-                            while (count > 1 && msgbuffer[count - 1] == '\0')
-                                --count;
-
-                            // make sure to keep 1 null byte at the end of the string
-                            ++count;
                             break;
-                        }
                     }
                     else if (new_count < 0) /* Error */
                     {
@@ -410,6 +402,13 @@ void socket_run(int exit_on_failure)
 
             if (g_receive_cb)
             {
+                // ignore leftover null bytes
+                while (count > 1 && msgbuffer[count - 1] == '\0')
+                    --count;
+
+                // make sure to keep 1 null byte at the end of the string
+                ++count;
+
                 msg.data = msgbuffer;
 
                 while (count > 0)
