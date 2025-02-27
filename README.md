@@ -91,7 +91,7 @@ Options
     -i, --interactive
         interactive shell mode
 
-    -n, --nofork 
+    -n, --nofork
         run in non-forking mode
 
     -V, --version
@@ -195,6 +195,10 @@ The commands supported by mod-host are:
     monitor_output <instance_number> <param_symbol>
         * request monitoring of an output control port (on the feedback port)
         e.g.: monitor_output 0 "meter"
+
+    monitor_output_off <instance_number> <param_symbol>
+        * turn off monitoring of an output control port (on the feedback port)
+        e.g.: monitor_output_off 0 "meter"
 
     midi_learn <instance_number> <param_symbol> <minimum> <maximum>
         * start MIDI learn for a control port

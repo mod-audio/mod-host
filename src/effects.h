@@ -155,7 +155,7 @@ int effects_flush_parameters(int effect_id, int reset, int param_count, const fl
 int effects_set_property(int effect_id, const char *uri, const char *value);
 int effects_get_property(int effect_id, const char *uri);
 int effects_monitor_parameter(int effect_id, const char *control_symbol, const char *op, float value);
-int effects_monitor_output_parameter(int effect_id, const char *control_symbol);
+int effects_monitor_output_parameter(int effect_id, const char *control_symbol, int enable);
 int effects_bypass(int effect_id, int value);
 int effects_get_parameter_symbols(int effect_id, int output_ports, const char** symbols);
 int effects_get_presets_uris(int effect_id, const char **uris);

@@ -6838,7 +6838,7 @@ int effects_monitor_parameter(int effect_id, const char *control_symbol, const c
     return SUCCESS;
 }
 
-int effects_monitor_output_parameter(int effect_id, const char *control_symbol_or_uri)
+int effects_monitor_output_parameter(int effect_id, const char *control_symbol_or_uri, int enable)
 {
     port_t *port;
 
@@ -6850,6 +6850,42 @@ int effects_monitor_output_parameter(int effect_id, const char *control_symbol_o
 
     if (port != NULL)
     {
+        if (enable == 0)
+        {
+            // check if not monitored
+            if ((port->hints & HINT_MONITORED) == 0)
+                return SUCCESS;
+
+            // remove monitored flag
+            port->hints &= ~HINT_MONITORED;
+
+            // stop postpone events thread
+            if (g_postevents_running == 1)
+            {
+                g_postevents_running = 0;
+                sem_post(&g_postevents_semaphore);
+                pthread_join(g_postevents_thread, NULL);
+            }
+
+            // flush events for all effects except this one
+            RunPostPonedEvents(effect_id);
+
+            // start thread again
+            if (g_postevents_running == 0)
+            {
+                if (g_verbose_debug)
+                {
+                    puts("DEBUG: effects_monitor_output_parameter restarted RunPostPonedEvents thread");
+                    fflush(stdout);
+                }
+
+                g_postevents_running = 1;
+                pthread_create(&g_postevents_thread, NULL, PostPonedEventsThread, NULL);
+            }
+
+            return SUCCESS;
+        }
+
         // check if already monitored
         if (port->hints & HINT_MONITORED)
             return SUCCESS;
@@ -6882,7 +6918,7 @@ int effects_monitor_output_parameter(int effect_id, const char *control_symbol_o
         if (property == NULL)
             return ERR_LV2_INVALID_PARAM_SYMBOL;
 
-        property->monitored = true;
+        property->monitored = enable != 0;
     }
 
     // activate output monitor
