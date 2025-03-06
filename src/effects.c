@@ -2649,9 +2649,9 @@ static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
                             // set a sane low limit
                             if (dvalue <= 20.0)
                                 g_transport_bpm = 20;
-                            // >280 BPM over MIDI is unreasonable
-                            else if (dvalue >= 280.0)
-                                g_transport_bpm = 280.0;
+                            // >300 BPM over MIDI is unreasonable
+                            else if (dvalue >= 300.0)
+                                g_transport_bpm = 300.0;
                             // we are good!
                             else
                                 g_transport_bpm = dvalue;
@@ -7271,7 +7271,7 @@ int effects_licensee(int effect_id, char **licensee_ptr)
 int effects_set_beats_per_minute(double bpm)
 {
   int result = SUCCESS;
-  if ((20.0 <= bpm) && (bpm <= 280.0)) {
+  if ((20.0 <= bpm) && (bpm <= 300.0)) {
     // Change the current global value and set a flag that it was changed.
     g_transport_bpm = bpm;
     g_transport_reset = true;
