@@ -438,7 +438,7 @@ int jack_initialize(jack_client_t* client, const char* load_init)
    #elif defined(_MOD_DEVICE_DUOX)
     const uint32_t numports = mon->extra_active ? 4 : 2;
    #elif defined(_DARKGLASS_DEVICE_PABLITO)
-    const uint32_t numports = 8;
+    const uint32_t numports = 10;
    #else
     uint32_t numports = 0;
 
