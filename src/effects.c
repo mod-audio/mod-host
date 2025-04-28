@@ -242,6 +242,7 @@ enum PluginHints {
     HINT_HAS_MIDI_INPUT  = 1 << 3,
     HINT_HAS_STATE       = 1 << 4,
     HINT_STATE_UNSAFE    = 1 << 5, // state restore needs mutex protection
+    HINT_IS_LIVE         = 1 << 6, // needs to be always running, cannot have processing disabled
 };
 
 enum TransportSyncMode {
@@ -484,6 +485,7 @@ typedef struct LILV_NODES_T {
     LilvNode *hmi_interface;
     LilvNode *input;
     LilvNode *integer;
+    LilvNode *is_live;
     LilvNode *license_interface;
     LilvNode *logarithmic;
     LilvNode *maximum;
@@ -1795,8 +1797,9 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
     if (arg == NULL) return 0;
     effect = arg;
 
-    if (!g_processing_enabled || (
-        (effect->hints & HINT_STATE_UNSAFE) && pthread_mutex_trylock(&effect->state_restore_mutex) != 0))
+    if ((effect->hints & HINT_IS_LIVE) == 0 &&
+        (!g_processing_enabled || (
+         (effect->hints & HINT_STATE_UNSAFE) && pthread_mutex_trylock(&effect->state_restore_mutex) != 0)))
     {
         for (i = 0; i < effect->output_audio_ports_count; i++)
         {
@@ -4273,6 +4276,7 @@ int effects_init(void* client)
     g_lilv_nodes.input = lilv_new_uri(g_lv2_data, LILV_URI_INPUT_PORT);
     g_lilv_nodes.integer = lilv_new_uri(g_lv2_data, LV2_CORE__integer);
     g_lilv_nodes.license_interface = lilv_new_uri(g_lv2_data, MOD_LICENSE__interface);
+    g_lilv_nodes.is_live = lilv_new_uri(g_lv2_data, LV2_CORE__isLive);
     g_lilv_nodes.logarithmic = lilv_new_uri(g_lv2_data, LV2_PORT_PROPS__logarithmic);
     g_lilv_nodes.maximum = lilv_new_uri(g_lv2_data, LV2_CORE__maximum);
     g_lilv_nodes.midiEvent = lilv_new_uri(g_lv2_data, LV2_MIDI__MidiEvent);
@@ -4632,6 +4636,7 @@ int effects_finish(int close_client)
     lilv_node_free(g_lilv_nodes.integer);
     lilv_node_free(g_lilv_nodes.license_interface);
     lilv_node_free(g_lilv_nodes.logarithmic);
+    lilv_node_free(g_lilv_nodes.is_live);
     lilv_node_free(g_lilv_nodes.maximum);
     lilv_node_free(g_lilv_nodes.midiEvent);
     lilv_node_free(g_lilv_nodes.minimum);
@@ -4821,6 +4826,10 @@ int effects_add(const char *uri, int instance, int activate)
         control_in_size = 0;
         effect->control_index = -1;
     }
+
+    /* Query plugin features */
+    if (lilv_plugin_has_feature(effect->lilv_plugin, g_lilv_nodes.is_live))
+        effect->hints |= HINT_IS_LIVE;
 
     /* Query plugin extensions/interfaces */
     if (lilv_plugin_has_extension_data(effect->lilv_plugin, g_lilv_nodes.worker_interface))

@@ -399,7 +399,7 @@ int jack_initialize(jack_client_t* client, const char* load_init)
     }
 
     /* allocate monitor client */
-    monitor_client_t *const mon = calloc(sizeof(monitor_client_t), 1);
+    monitor_client_t *const mon = calloc(1, sizeof(monitor_client_t));
 
     if (!mon)
     {
