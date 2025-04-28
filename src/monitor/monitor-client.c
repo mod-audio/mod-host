@@ -513,7 +513,13 @@ int jack_initialize(jack_client_t* client, const char* load_init)
 
     const char* const ourclientname = jack_get_client_name(client);
 
-   #ifdef _MOD_DEVICE_DWARF
+   #if defined(_DARKGLASS_DEVICE_PABLITO)
+    snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:out_5", ourclientname);
+    jack_connect(client, ourportname, "system:playback_5");
+
+    snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:out_6", ourclientname);
+    jack_connect(client, ourportname, "system:playback_6");
+   #elif defined(_MOD_DEVICE_DWARF)
     snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:out_2", ourclientname);
     jack_connect(client, ourportname, "system:playback_1");
 
