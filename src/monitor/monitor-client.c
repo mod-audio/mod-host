@@ -514,6 +514,12 @@ int jack_initialize(jack_client_t* client, const char* load_init)
     const char* const ourclientname = jack_get_client_name(client);
 
    #if defined(_DARKGLASS_DEVICE_PABLITO)
+    snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:in_9", ourclientname);
+    jack_connect(client, "anagram-output:out1", ourportname);
+
+    snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:in_10", ourclientname);
+    jack_connect(client, "anagram-output:out2", ourportname);
+
     snprintf(ourportname, MAX_CHAR_BUF_SIZE, "%s:out_5", ourclientname);
     jack_connect(client, ourportname, "system:playback_5");
 
