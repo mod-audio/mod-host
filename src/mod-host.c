@@ -366,6 +366,13 @@ static void monitor_audio_levels_cb(proto_t *proto)
     protocol_response_int(resp, proto);
 }
 
+static void monitor_midi_control_cb(proto_t *proto)
+{
+    int resp;
+    resp = effects_monitor_midi_control(atoi(proto->list[1]), atoi(proto->list[2]));
+    protocol_response_int(resp, proto);
+}
+
 static void monitor_midi_program_cb(proto_t *proto)
 {
     int resp;
@@ -777,6 +784,7 @@ static int mod_host_init(jack_client_t* client, int socket_port, int feedback_po
     protocol_add_command(MONITOR_OUTPUT, monitor_output_cb);
     protocol_add_command(MONITOR_OUTPUT_OFF, monitor_output_off_cb);
     protocol_add_command(MONITOR_AUDIO_LEVELS, monitor_audio_levels_cb);
+    protocol_add_command(MONITOR_MIDI_CONTROL, monitor_midi_control_cb);
     protocol_add_command(MONITOR_MIDI_PROGRAM, monitor_midi_program_cb);
     protocol_add_command(MIDI_LEARN, midi_learn_cb);
     protocol_add_command(MIDI_MAP, midi_map_cb);
