@@ -2850,7 +2850,7 @@ static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
 
                 if (posteventptr)
                 {
-                    posteventptr->event.type = POSTPONED_MIDI_MAP;
+                    posteventptr->event.type = POSTPONED_MIDI_CONTROL_CHANGE;
                     posteventptr->event.control_change.channel = channel;
                     posteventptr->event.control_change.control = controller;
                     posteventptr->event.control_change.value = mvalue;
