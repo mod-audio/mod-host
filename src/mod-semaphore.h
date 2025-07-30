@@ -15,9 +15,9 @@
 #include <syscall.h>
 #include <unistd.h>
 #else
-#include <semaphore.h>
 #include <time.h>
 #include <sys/time.h>
+#include <semaphore.h>
 #endif
 
 #ifdef __APPLE__
