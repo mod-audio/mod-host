@@ -781,9 +781,22 @@ static LV2_Atom_Forge g_lv2_atom_forge;
 static LV2_Log_Log g_lv2_log;
 static LV2_Options_Option g_options[9];
 static LV2_State_Free_Path g_state_freePath;
-static LV2_URI_Map_Feature g_uri_map;
 static LV2_URID_Map g_urid_map;
 static LV2_URID_Unmap g_urid_unmap;
+
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(__GNUC__) && (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 6))
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+static LV2_URI_Map_Feature g_uri_map;
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#elif defined(__GNUC__) && (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 6))
+#pragma GCC diagnostic pop
+#endif
 
 static LV2_Feature g_buf_size_features[3] = {
     { LV2_BUF_SIZE__powerOf2BlockLength, NULL },
@@ -8750,7 +8763,7 @@ int effects_show_external_ui(int effect_id)
         const LilvNode *binary_node = lilv_ui_get_binary_uri(ui);
         const LilvNode *bundle_node = lilv_ui_get_bundle_uri(ui);
 
-        void *libhandle = dlopen(lilv_uri_to_path(lilv_node_as_string(binary_node)), RTLD_NOW|RTLD_LOCAL);
+        void *libhandle = dlopen(lilv_file_uri_parse(lilv_node_as_string(binary_node), NULL), RTLD_NOW|RTLD_LOCAL);
         if (libhandle == NULL)
             continue;
 
@@ -8762,7 +8775,7 @@ int effects_show_external_ui(int effect_id)
         uint32_t index = 0;
 
         LV2UI_DescriptorFunction descfn;
-        if ((descfn = dlsym(libhandle, "lv2ui_descriptor")) == NULL)
+        if ((descfn = (LV2UI_DescriptorFunction)dlsym(libhandle, "lv2ui_descriptor")) == NULL)
             goto cleanup;
 
         while ((desc = descfn(index++)) != NULL)
@@ -8797,7 +8810,7 @@ int effects_show_external_ui(int effect_id)
             LV2UI_Widget widget;
             handle = desc->instantiate(desc,
                                        lilv_node_as_uri(lilv_plugin_get_uri(effect->lilv_plugin)),
-                                       lilv_uri_to_path(lilv_node_as_string(bundle_node)),
+                                       lilv_file_uri_parse(lilv_node_as_string(bundle_node), NULL),
                                        ExternalControllerWriteFunction,
                                        effect, &widget, features);
 

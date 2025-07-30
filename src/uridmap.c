@@ -46,12 +46,6 @@ const char* unmap_urid(LV2_URID_Unmap_Handle handle, LV2_URID urid)
     return uri;
 }
 
-uint32_t uri_to_id(LV2_URI_Map_Callback_Data callback_data, const char* map, const char* uri)
-{
-    UNUSED_PARAM(map);
-    return map_urid(callback_data, uri);
-}
-
 LV2_URID urid_to_id(LV2_URID_Map_Handle handle, const char* uri)
 {
     return map_urid(handle, uri);
@@ -61,3 +55,23 @@ const char* id_to_urid(LV2_URID_Unmap_Handle handle, LV2_URID urid)
 {
     return unmap_urid(handle, urid);
 }
+
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#elif defined(__GNUC__) && (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 6))
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#endif
+
+uint32_t uri_to_id(LV2_URI_Map_Callback_Data callback_data, const char* map, const char* uri)
+{
+    UNUSED_PARAM(map);
+    return map_urid(callback_data, uri);
+}
+
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#elif defined(__GNUC__) && (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 6))
+#pragma GCC diagnostic pop
+#endif
