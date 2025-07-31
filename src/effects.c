@@ -955,7 +955,7 @@ static void ExternalControllerWriteFunction(LV2UI_Controller controller,
 
 #if defined(__APPLE__) || defined(_WIN32)
 // FIXME missing on macOS and Windows
-static char* strchrnul(const char *s, int c)
+static char* _strchrnul(const char *s, int c)
 {
     char *r = strchr(s, c);
 
@@ -964,6 +964,7 @@ static char* strchrnul(const char *s, int c)
 
     return r;
 }
+#define strchrnul _strchrnul
 #endif
 
 #ifdef _WIN32
@@ -986,6 +987,7 @@ static char* realpath(const char *name, char *resolved)
 
     return _fullpath(retname, name, PATH_MAX);
 }
+#define realpath _realpath
 #endif
 
 static void InstanceDelete(int effect_id)
