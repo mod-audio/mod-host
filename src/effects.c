@@ -2601,7 +2601,7 @@ static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
 {
     jack_midi_event_t event;
     uint8_t channel, controller;
-    uint8_t status_nibble, channel_nibble;
+    uint8_t status_nibble;
     uint16_t mvalue;
     float value;
     double dvalue;
@@ -2709,10 +2709,14 @@ static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
         // Handle MIDI program change
         if (status_nibble == 0xC0)
         {
-            channel_nibble = (event.buffer[0] & 0x0F);
+            channel = (event.buffer[0] & 0x0F);
 
-            if (g_monitored_midi_programs[channel_nibble] && event.size == 2)
+            if (g_monitored_midi_programs[channel] && event.size == 2)
             {
+#ifdef _DARKGLASS_PABLITO
+                if (event.buffer[1] == 0 || event.buffer[1] == 127)
+                    continue;
+#endif
                 // Append to the queue
                 postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
 
@@ -2720,7 +2724,7 @@ static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
                   {
                       posteventptr->event.type = POSTPONED_MIDI_PROGRAM_CHANGE;
                       posteventptr->event.program_change.program = event.buffer[1];
-                      posteventptr->event.program_change.channel = channel_nibble;
+                      posteventptr->event.program_change.channel = channel;
 
                       pthread_mutex_lock(&g_rtsafe_mutex);
                       list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
@@ -2745,12 +2749,25 @@ static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
             controller = event.buffer[1];
             mvalue     = event.buffer[2];
             highres    = false;
+#ifdef _DARKGLASS_PABLITO
+            switch (controller)
+            {
+            case 0:
+            case 7:
+            case 14 ... 32:
+            case 85 ... 87:
+            case 89:
+            case 102 ... 119:
+                continue;
+            }
+#else
         }
         else if (status_nibble == 0xE0)
         {
             controller = MIDI_PITCHBEND_AS_CC;
             mvalue     = (event.buffer[2] << 7) | event.buffer[1];
             highres    = true;
+#endif
         }
         else
         {
