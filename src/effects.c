@@ -156,6 +156,10 @@ typedef struct {
 #define MOD_IO_PROCESSING_ENABLED
 #endif
 
+#ifdef _DARKGLASS_DEVICE_PABLITO
+#define _DARKGLASS_PABLITO
+#endif
+
 /* Local */
 #include "effects.h"
 #include "monitor.h"
