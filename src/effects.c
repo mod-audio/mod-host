@@ -279,6 +279,7 @@ enum PostPonedEventType {
     POSTPONED_PARAM_SET,
     POSTPONED_AUDIO_MONITOR,
     POSTPONED_OUTPUT_MONITOR,
+    POSTPONED_MIDI_CONTROL_CHANGE,
     POSTPONED_MIDI_PROGRAM_CHANGE,
     POSTPONED_MIDI_MAP,
     POSTPONED_TRANSPORT,
@@ -601,6 +602,12 @@ typedef struct POSTPONED_AUDIO_MONITOR_EVENT_T {
     float value;
 } postponed_audio_monitor_event_t;
 
+typedef struct POSTPONED_MIDI_CONTROL_CHANGE_EVENT_T {
+    int8_t channel;
+    int8_t control;
+    int16_t value;
+} postponed_midi_control_change_event_t;
+
 typedef struct POSTPONED_MIDI_PROGRAM_CHANGE_EVENT_T {
     int8_t program;
     int8_t channel;
@@ -644,6 +651,7 @@ typedef struct POSTPONED_EVENT_T {
     union {
         postponed_parameter_event_t parameter;
         postponed_audio_monitor_event_t audio_monitor;
+        postponed_midi_control_change_event_t control_change;
         postponed_midi_program_change_event_t program_change;
         postponed_midi_map_event_t midi_map;
         postponed_transport_event_t transport;
@@ -817,7 +825,8 @@ static LV2_Feature g_urid_unmap_feature = { LV2_URID__unmap, &g_urid_unmap };
 /* MIDI Learn */
 static pthread_mutex_t g_midi_learning_mutex;
 
-/* MIDI program monitoring */
+/* MIDI control and program monitoring */
+static bool g_monitored_midi_controls[16];
 static bool g_monitored_midi_programs[16];
 
 #ifdef HAVE_HYLIA
@@ -1383,6 +1392,14 @@ static void RunPostPonedEvents(int ignored_effect_id)
                                                                                  eventptr->event.midi_map.value,
                                                                                  eventptr->event.midi_map.minimum,
                                                                                  eventptr->event.midi_map.maximum);
+            socket_send_feedback_debug(buf);
+            break;
+
+        case POSTPONED_MIDI_CONTROL_CHANGE:
+            snprintf(buf, FEEDBACK_BUF_SIZE, "midi_control_change %i %i %i",
+                     eventptr->event.control_change.channel,
+                     eventptr->event.control_change.control,
+                     eventptr->event.control_change.value);
             socket_send_feedback_debug(buf);
             break;
 
@@ -2849,6 +2866,24 @@ static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
                     posteventptr->event.midi_map.value      = value;
                     posteventptr->event.midi_map.minimum    = minimum;
                     posteventptr->event.midi_map.maximum    = maximum;
+
+                    pthread_mutex_lock(&g_rtsafe_mutex);
+                    list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
+                    pthread_mutex_unlock(&g_rtsafe_mutex);
+
+                    needs_post = true;
+                }
+            }
+            else if (g_monitored_midi_programs[channel])
+            {
+                postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
+
+                if (posteventptr)
+                {
+                    posteventptr->event.type = POSTPONED_MIDI_CONTROL_CHANGE;
+                    posteventptr->event.control_change.channel = channel;
+                    posteventptr->event.control_change.control = controller;
+                    posteventptr->event.control_change.value = mvalue;
 
                     pthread_mutex_lock(&g_rtsafe_mutex);
                     list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
@@ -4537,6 +4572,7 @@ int effects_init(void* client)
     }
     g_midi_learning = NULL;
 
+    memset(g_monitored_midi_controls, 0, sizeof(g_monitored_midi_controls));
     memset(g_monitored_midi_programs, 0, sizeof(g_monitored_midi_programs));
 
 #ifdef HAVE_CONTROLCHAIN
@@ -8624,6 +8660,15 @@ int effects_monitor_audio_levels(const char *source_port_name, int enable)
         }
     }
 
+    return SUCCESS;
+}
+
+int effects_monitor_midi_control(int channel, int enable)
+{
+    if (channel < 0 || channel > 15)
+        return ERR_INVALID_OPERATION;
+
+    g_monitored_midi_controls[channel] = enable != 0;
     return SUCCESS;
 }
 
