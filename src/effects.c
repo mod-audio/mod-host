@@ -2779,6 +2779,26 @@ static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
             case 85 ... 87:
             case 89:
             case 102 ... 119:
+                channel = (event.buffer[0] & 0x0F);
+
+                if (g_monitored_midi_programs[channel])
+                {
+                    postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
+
+                    if (posteventptr)
+                    {
+                        posteventptr->event.type = POSTPONED_MIDI_CONTROL_CHANGE;
+                        posteventptr->event.control_change.channel = channel;
+                        posteventptr->event.control_change.control = controller;
+                        posteventptr->event.control_change.value = mvalue;
+
+                        pthread_mutex_lock(&g_rtsafe_mutex);
+                        list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
+                        pthread_mutex_unlock(&g_rtsafe_mutex);
+
+                        needs_post = true;
+                    }
+                }
                 continue;
             }
 #else
