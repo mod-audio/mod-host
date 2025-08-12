@@ -2775,7 +2775,7 @@ static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
             {
             case 0:
             case 7:
-            case 14 ... 32:
+            case 14 ... 16:
             case 85 ... 87:
             case 89:
             case 102 ... 119:
@@ -2797,6 +2797,41 @@ static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
                         pthread_mutex_unlock(&g_rtsafe_mutex);
 
                         needs_post = true;
+                    }
+                }
+                continue;
+            case 17 ... 32:
+                channel = (event.buffer[0] & 0x0F);
+                for (int j = 0; j < MAX_MIDI_CC_ASSIGN; j++)
+                {
+                    if (g_midi_cc_list[j].effect_id == ASSIGNMENT_NULL)
+                        break;
+                    if (g_midi_cc_list[j].effect_id == ASSIGNMENT_UNUSED)
+                        continue;
+
+                    if (g_midi_cc_list[j].channel    == channel &&
+                        g_midi_cc_list[j].controller == controller)
+                    {
+                        handled = true;
+                        value = UpdateValueFromMidi(&g_midi_cc_list[j], mvalue, highres);
+
+                        postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
+
+                        if (posteventptr)
+                        {
+                            posteventptr->event.type = POSTPONED_PARAM_SET;
+                            posteventptr->event.parameter.effect_id = g_midi_cc_list[j].effect_id;
+                            posteventptr->event.parameter.symbol    = g_midi_cc_list[j].symbol;
+                            posteventptr->event.parameter.value     = value;
+
+                            pthread_mutex_lock(&g_rtsafe_mutex);
+                            list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
+                            pthread_mutex_unlock(&g_rtsafe_mutex);
+
+                            needs_post = true;
+                        }
+
+                        break;
                     }
                 }
                 continue;
@@ -5933,13 +5968,18 @@ int effects_remove(int effect_id)
         g_midi_learning = NULL;
         pthread_mutex_unlock(&g_midi_learning_mutex);
 
-        for (int j = 0; j < MAX_MIDI_CC_ASSIGN; j++)
+        for (int j = MAX_MIDI_CC_ASSIGN, unused = ASSIGNMENT_NULL; --j >= 0;)
         {
+            if (g_midi_cc_list[j].effect_id >= MAX_PLUGIN_INSTANCES && g_midi_cc_list[j].effect_id < MAX_INSTANCES)
+            {
+                unused = ASSIGNMENT_UNUSED;
+                continue;
+            }
             g_midi_cc_list[j].channel = -1;
             g_midi_cc_list[j].controller = 0;
             g_midi_cc_list[j].minimum = 0.0f;
             g_midi_cc_list[j].maximum = 1.0f;
-            g_midi_cc_list[j].effect_id = ASSIGNMENT_NULL;
+            g_midi_cc_list[j].effect_id = unused;
             g_midi_cc_list[j].symbol = NULL;
             g_midi_cc_list[j].port = NULL;
         }
