@@ -2771,6 +2771,7 @@ static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
             mvalue     = event.buffer[2];
             highres    = false;
 #ifdef _DARKGLASS_PABLITO
+            channel    = (event.buffer[0] & 0x0F);
             switch (controller)
             {
             case 0:
@@ -2779,8 +2780,6 @@ static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
             case 85 ... 87:
             case 89:
             case 102 ... 119:
-                channel = (event.buffer[0] & 0x0F);
-
                 if (g_monitored_midi_programs[channel])
                 {
                     postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
@@ -2800,8 +2799,11 @@ static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
                     }
                 }
                 continue;
+
             case 17 ... 32:
-                channel = (event.buffer[0] & 0x0F);
+                if (! g_monitored_midi_programs[channel])
+                    continue;
+
                 for (int j = 0; j < MAX_MIDI_CC_ASSIGN; j++)
                 {
                     if (g_midi_cc_list[j].effect_id == ASSIGNMENT_NULL)
@@ -2809,8 +2811,7 @@ static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
                     if (g_midi_cc_list[j].effect_id == ASSIGNMENT_UNUSED)
                         continue;
 
-                    if (g_midi_cc_list[j].channel    == channel &&
-                        g_midi_cc_list[j].controller == controller)
+                    if (g_midi_cc_list[j].controller == controller)
                     {
                         handled = true;
                         value = UpdateValueFromMidi(&g_midi_cc_list[j], mvalue, highres);
@@ -2860,9 +2861,16 @@ static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
             if (g_midi_cc_list[j].effect_id == ASSIGNMENT_UNUSED)
                 continue;
 
+#ifdef _DARKGLASS_PABLITO
+            if (! g_monitored_midi_programs[channel])
+                continue;
+#else
+            if (g_midi_cc_list[j].channel != channel)
+                continue;
+#endif
+
             // TODO: avoid race condition against effects_midi_unmap
-            if (g_midi_cc_list[j].channel    == channel &&
-                g_midi_cc_list[j].controller == controller)
+            if (g_midi_cc_list[j].controller == controller)
             {
                 handled = true;
                 value = UpdateValueFromMidi(&g_midi_cc_list[j], mvalue, highres);
