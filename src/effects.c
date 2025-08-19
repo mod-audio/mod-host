@@ -2774,33 +2774,9 @@ static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
             channel    = (event.buffer[0] & 0x0F);
             switch (controller)
             {
-            case 0:
-            case 7:
-            case 14 ... 16:
-            case 85 ... 87:
-            case 89:
-            case 102 ... 119:
-                if (g_monitored_midi_programs[channel])
-                {
-                    postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
-
-                    if (posteventptr)
-                    {
-                        posteventptr->event.type = POSTPONED_MIDI_CONTROL_CHANGE;
-                        posteventptr->event.control_change.channel = channel;
-                        posteventptr->event.control_change.control = controller;
-                        posteventptr->event.control_change.value = mvalue;
-
-                        pthread_mutex_lock(&g_rtsafe_mutex);
-                        list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
-                        pthread_mutex_unlock(&g_rtsafe_mutex);
-
-                        needs_post = true;
-                    }
-                }
-                continue;
-
+            // these can be assigned to parameters, handle them first
             case 17 ... 32:
+            case 89:
                 if (! g_monitored_midi_programs[channel])
                     continue;
 
@@ -2833,6 +2809,35 @@ static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
                         }
 
                         break;
+                    }
+                }
+
+                if (needs_post)
+                    continue;
+
+            // fall-through
+            // if the special parameter CCs are not handled, report up as regular MIDI CC
+            case 0:
+            case 7:
+            case 14 ... 16:
+            case 85 ... 87:
+            case 102 ... 119:
+                if (g_monitored_midi_programs[channel])
+                {
+                    postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
+
+                    if (posteventptr)
+                    {
+                        posteventptr->event.type = POSTPONED_MIDI_CONTROL_CHANGE;
+                        posteventptr->event.control_change.channel = channel;
+                        posteventptr->event.control_change.control = controller;
+                        posteventptr->event.control_change.value = mvalue;
+
+                        pthread_mutex_lock(&g_rtsafe_mutex);
+                        list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
+                        pthread_mutex_unlock(&g_rtsafe_mutex);
+
+                        needs_post = true;
                     }
                 }
                 continue;
