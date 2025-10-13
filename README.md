@@ -327,12 +327,16 @@ If status is a negative number an error has occurred. The table below shows the 
 | -204    | ERR\_JACK\_PORT\_REGISTER        |
 | -205    | ERR\_JACK\_PORT\_CONNECTION      |
 | -206    | ERR\_JACK\_PORT\_DISCONNECTION   |
+| -207    | ERR\_JACK\_VALUE\_OUT\_OF\_RANGE |
 | -301    | ERR\_ASSIGNMENT\_ALREADY\_EXISTS |
 | -302    | ERR\_ASSIGNMENT\_INVALID\_OP     |
 | -303    | ERR\_ASSIGNMENT\_LIST\_FULL      |
 | -304    | ERR\_ASSIGNMENT\_FAILED          |
+| -304    | ERR\_ASSIGNMENT\_UNUSED          |
 | -401    | ERR\_CONTROL\_CHAIN\_UNAVAILABLE |
 | -402    | ERR\_LINK\_UNAVAILABLE           |
+| -403    | ERR\_HMI\_UNAVAILABLE            |
+| -404    | ERR\_EXTERNAL\_UI\_UNAVAILABLE   |
 | -901    | ERR\_MEMORY\_ALLOCATION          |
 | -902    | ERR\_INVALID\_OPERATION          |
 
