@@ -112,7 +112,7 @@ The commands supported by mod-host are:
         instance_number must be any value between 0 ~ 9990, inclusively
 
     remove <instance_number>
-        * remove an LV2 plugin instance (and also the jack client)
+        * remove an LV2 plugin instance, and also the jack client
         e.g.: remove 0
         when instance_number is -1 all plugins will be removed
 
@@ -294,6 +294,45 @@ The commands supported by mod-host are:
 
     output_data_ready
         * report feedback port ready for more messages
+
+    multi_add <instance_count> <lv2_uri,instance_number...>
+        * add an LV2 plugin encapsulated as a jack client, in activated state (multiple instance variant)
+        e.g.: multi_add 2 "http://lv2plug.in/plugins/eg-amp" 0 "http://lv2plug.in/plugins/eg-amp" 1
+        instance_number must be any value between 0 ~ 9990, inclusively
+        !EXPERIMENTAL!
+
+    multi_remove <instance_count> <instance_number...>
+        * remove an LV2 plugin instance, and also the jack client (multiple instance variant)
+        e.g.: multi_remove 2 0 1
+        !EXPERIMENTAL!
+
+    multi_activate <activate_value> <instance_count> <instance_number...>
+        * toggle effect activated state (multiple instance variant)
+        e.g.: multi_activate 0 2 0 1
+        if activate_value = 1 activate effect
+        if activate_value = 0 deactivate effect
+
+    multi_preload <instance_count> <lv2_uri,instance_number...>
+        * add an LV2 plugin encapsulated as a jack client, in deactivated state (multiple instance variant)
+        e.g.: multi_preload 2 "http://lv2plug.in/plugins/eg-amp" 0 "http://lv2plug.in/plugins/eg-amp" 1
+        instance_number must be any value between 0 ~ 9990, inclusively
+        !EXPERIMENTAL!
+
+    multi_bypass <bypass_value> <instance_count> <instance_number...>
+        * toggle effect processing (multiple instance variant)
+        e.g.: multi_bypass 0 2 0 1
+        if bypass_value = 1 bypass effect
+        if bypass_value = 0 process effect
+
+    multi_param_set <param_symbol> <param_value> <instance_count> <instance_number...>
+        * set the value of a control port (multiple instance variant)
+        * must be instances of the same plugin
+        e.g.: multi_param_set "gain" 2.5 2 0 1
+
+    multi_params_flush <reset_value> <instance_count> <instance_number...> <param_count> <params...>
+        * flush several param values at once and trigger reset if available (multiple instance variant)
+        * reset value must be according to reset property spec
+        e.g.: multi_params_flush 1 2 0 1 2 "gain" 0.0 "distortion" 0.5
 
     help
         * show a help message

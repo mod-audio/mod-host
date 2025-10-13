@@ -699,6 +699,17 @@ typedef struct RAW_MIDI_PORT_ITEM {
     struct list_head siblings;
 } raw_midi_port_item;
 
+typedef struct CACHED_EFFECT_FLUSH_T {
+    effect_t *effect;
+    port_t **ports;
+} cached_effect_flush_t;
+
+typedef struct EFFECTS_ADD_THREAD_DATA_T {
+    const char *uri;
+    int effect_id;
+    int activate;
+} effects_add_thread_data_t;
+
 
 /*
 ************************************************************************************************************************
@@ -951,6 +962,11 @@ static void ExternalControllerWriteFunction(LV2UI_Controller controller,
                                             uint32_t port_protocol,
                                             const void *buffer);
 #endif
+
+static void* effects_add_thread(void* arg);
+static void* effects_activate_thread(void* arg);
+static void* effects_deactivate_thread(void* arg);
+static void* effects_remove_inner_loop_thread(void* arg);
 
 /*
 ************************************************************************************************************************
@@ -5740,7 +5756,6 @@ int effects_add(const char *uri, int instance, int activate)
     jack_set_buffer_size_callback(jack_client, BufferSize, effect);
     jack_set_freewheel_callback(jack_client, FreeWheelMode, effect);
 
-
     if (activate)
     {
         lilv_instance_activate(lilv_instance);
@@ -5784,6 +5799,50 @@ error:
     lilv_node_free(plugin_uri);
     effects_remove(instance);
     return error;
+}
+
+static void* effects_add_thread(void* arg)
+{
+    effects_add_thread_data_t *data = arg;
+
+    effects_add(data->uri, data->effect_id, data->activate);
+
+    return NULL;
+}
+
+int effects_add_multi(int activate, int num_effects, int *effects, const char *const *uris)
+{
+    int num_threads = 0;
+    pthread_t *threads = malloc(sizeof(pthread_t) * num_effects);
+    effects_add_thread_data_t *data = malloc(sizeof(effects_add_thread_data_t) * num_effects);
+
+    if (!threads || !data)
+    {
+        free(threads);
+        free(data);
+        return ERR_MEMORY_ALLOCATION;
+    }
+
+    for (int i = 0; i < num_effects; ++i)
+    {
+        effects_add_thread_data_t *arg = &data[i];
+        arg->uri = uris[i];
+        arg->effect_id = effects[i];
+        arg->activate = activate;
+
+        if (pthread_create(&threads[num_threads], NULL, effects_add_thread, arg) == 0)
+            ++num_threads;
+        else
+            effects_add(uris[i], effects[i], activate);
+    }
+
+    for (int i = 0; i < num_threads; ++i)
+        pthread_join(threads[i], NULL);
+
+    free(threads);
+    free(data);
+
+    return SUCCESS;
 }
 
 int effects_preset_load(int effect_id, const char *uri)
@@ -5913,68 +5972,9 @@ int effects_preset_show(const char *uri, char **state_str)
     return ERR_LV2_INVALID_PRESET_URI;
 }
 
-int effects_remove(int effect_id)
+// remove addressings, midi learn and other stuff related to a plugin
+static void effects_remove_inner_pre(int effect_id)
 {
-    int start, end;
-    effect_t *effect;
-    char state_filename[g_lv2_scratch_dir != NULL ? PATH_MAX : 1];
-
-    // stop postpone events thread
-    if (g_postevents_running == 1)
-    {
-        g_postevents_running = 0;
-        sem_post(&g_postevents_semaphore);
-        pthread_join(g_postevents_thread, NULL);
-    }
-
-    // disconnect system ports
-    if (effect_id == REMOVE_ALL)
-    {
-        /* Disconnect the system connections */
-        if (g_capture_ports != NULL)
-        {
-            for (int i = 0; g_capture_ports[i]; i++)
-            {
-                jack_port_t *port = jack_port_by_name(g_jack_global_client, g_capture_ports[i]);
-                if (! port)
-                    continue;
-
-                const char **capture_connections = jack_port_get_connections(port);
-                if (capture_connections)
-                {
-                    for (int j = 0; capture_connections[j]; j++)
-                    {
-                        if (strstr(capture_connections[j], "system"))
-                            jack_disconnect(g_jack_global_client, g_capture_ports[i], capture_connections[j]);
-                    }
-
-                    jack_free(capture_connections);
-                }
-            }
-        }
-
-        start = 0;
-        end = MAX_PLUGIN_INSTANCES;
-    }
-    else
-    {
-        start = effect_id;
-        end = start + 1;
-    }
-
-    // stop plugins processing
-    for (int j = start; j < end; j++)
-    {
-        if (InstanceExist(j))
-        {
-            effect = &g_effects[j];
-
-            if (jack_deactivate(effect->jack_client) != 0)
-                return ERR_JACK_CLIENT_DEACTIVATION;
-        }
-    }
-
-    // remove addressings, midi learn and other stuff related to plugins
     if (effect_id == REMOVE_ALL)
     {
         pthread_mutex_lock(&g_midi_learning_mutex);
@@ -6148,149 +6148,228 @@ int effects_remove(int effect_id)
             }
         }
 #endif
+    }
+}
 
-        // flush events for all effects except this one
-        RunPostPonedEvents(effect_id);
+// cleanup the plugin (inner loop)
+static void effects_remove_inner_loop(int effect_id)
+{
+    effect_t *effect = &g_effects[effect_id];
+
+#ifdef WITH_EXTERNAL_UI_SUPPORT
+    if (effect->ui_libhandle != NULL)
+    {
+        if (effect->ui_desc != NULL && effect->ui_handle != NULL && effect->ui_desc->cleanup != NULL)
+            effect->ui_desc->cleanup(effect->ui_handle);
+
+        dlclose(effect->ui_libhandle);
+    }
+#endif
+
+    FreeFeatures(effect);
+
+    if (effect->event_ports)
+    {
+        for (uint32_t i = 0; i < effect->event_ports_count; i++)
+        {
+            lv2_evbuf_free(effect->event_ports[i]->evbuf);
+        }
     }
 
-    // now finally cleanup the plugin(s)
+    if (effect->ports)
+    {
+        for (uint32_t i = 0; i < effect->ports_count; i++)
+        {
+            if (effect->ports[i])
+            {
+#ifdef __MOD_DEVICES__
+                if (effect->ports[i]->hmi_addressing != NULL)
+                {
+                    if (g_hmi_data != NULL)
+                    {
+                        char msg[24];
+                        snprintf(msg, sizeof(msg), "%i", effect->ports[i]->hmi_addressing->actuator_id);
+                        msg[sizeof(msg)-1] = '\0';
+
+                        pthread_mutex_lock(&g_hmi_mutex);
+                        sys_serial_write(&g_hmi_data->server,
+                                            sys_serial_event_type_unassign,
+                                            effect->ports[i]->hmi_addressing->page,
+                                            effect->ports[i]->hmi_addressing->subpage, msg);
+                        pthread_mutex_unlock(&g_hmi_mutex);
+                    }
+
+                    effect->ports[i]->hmi_addressing->actuator_id = -1;
+                }
+#endif
+
+                // TODO destroy port mutexes
+                free(effect->ports[i]->buffer);
+                lilv_scale_points_free(effect->ports[i]->scale_points);
+                free(effect->ports[i]);
+            }
+        }
+        free(effect->ports);
+    }
+
+    if (effect->properties)
+    {
+        for (uint32_t i = 0; i < effect->properties_count; i++)
+        {
+            if (effect->properties[i])
+            {
+                lilv_node_free(effect->properties[i]->uri);
+                lilv_node_free(effect->properties[i]->type);
+                free(effect->properties[i]);
+            }
+        }
+        free(effect->properties);
+    }
+
+    if (effect->lilv_instance)
+    {
+        if (effect->activated)
+            lilv_instance_deactivate(effect->lilv_instance);
+
+        lilv_instance_free(effect->lilv_instance);
+    }
+
+    if (effect->jack_client)
+        jack_client_close(effect->jack_client);
+
+    free(effect->audio_ports);
+    free(effect->input_audio_ports);
+    free(effect->output_audio_ports);
+
+    free(effect->control_ports);
+    free(effect->input_control_ports);
+    free(effect->output_control_ports);
+
+    free(effect->cv_ports);
+    free(effect->input_cv_ports);
+    free(effect->output_cv_ports);
+
+    free(effect->event_ports);
+    free(effect->input_event_ports);
+    free(effect->output_event_ports);
+
+    if (effect->events_in_buffer)
+        jack_ringbuffer_free(effect->events_in_buffer);
+    if (effect->events_in_buffer_helper)
+        free(effect->events_in_buffer_helper);
+    if (effect->events_out_buffer)
+        jack_ringbuffer_free(effect->events_out_buffer);
+
+    if (effect->presets)
+    {
+        for (uint32_t i = 0; i < effect->presets_count; i++)
+        {
+            lilv_free(effect->presets[i]->uri);
+            free(effect->presets[i]);
+        }
+        free(effect->presets);
+    }
+
+    if (effect->hints & HINT_HAS_STATE)
+    {
+        if (g_lv2_scratch_dir != NULL)
+        {
+            // recursively delete state folder
+            char state_filename[g_lv2_scratch_dir != NULL ? PATH_MAX : 1];
+            memset(state_filename, 0, sizeof(state_filename));
+            snprintf(state_filename, PATH_MAX-1, "%s/effect-%d",
+                        g_lv2_scratch_dir, effect->instance);
+            RecursivelyRemovePluginPath(state_filename);
+        }
+
+        if (effect->hints & HINT_STATE_UNSAFE)
+            pthread_mutex_destroy(&effect->state_restore_mutex);
+    }
+
+    InstanceDelete(effect_id);
+}
+
+static void* effects_remove_inner_loop_thread(void* arg)
+{
+    int effect_id = *(int*)arg;
+
+    effects_remove_inner_loop(effect_id);
+
+    return NULL;
+}
+
+int effects_remove(int effect_id)
+{
+    int start, end;
+    effect_t *effect;
+
+    // stop postpone events thread
+    if (g_postevents_running == 1)
+    {
+        g_postevents_running = 0;
+        sem_post(&g_postevents_semaphore);
+        pthread_join(g_postevents_thread, NULL);
+    }
+
+    // disconnect system ports
+    if (effect_id == REMOVE_ALL)
+    {
+        /* Disconnect the system connections */
+        if (g_capture_ports != NULL)
+        {
+            for (int i = 0; g_capture_ports[i]; i++)
+            {
+                jack_port_t *port = jack_port_by_name(g_jack_global_client, g_capture_ports[i]);
+                if (! port)
+                    continue;
+
+                const char **capture_connections = jack_port_get_connections(port);
+                if (capture_connections)
+                {
+                    for (int j = 0; capture_connections[j]; j++)
+                    {
+                        if (strstr(capture_connections[j], "system"))
+                            jack_disconnect(g_jack_global_client, g_capture_ports[i], capture_connections[j]);
+                    }
+
+                    jack_free(capture_connections);
+                }
+            }
+        }
+
+        start = 0;
+        end = MAX_PLUGIN_INSTANCES;
+    }
+    else
+    {
+        start = effect_id;
+        end = start + 1;
+    }
+
+    // stop plugins processing
     for (int j = start; j < end; j++)
     {
         if (InstanceExist(j))
         {
             effect = &g_effects[j];
 
-#ifdef WITH_EXTERNAL_UI_SUPPORT
-            if (effect->ui_libhandle != NULL)
-            {
-                if (effect->ui_desc != NULL && effect->ui_handle != NULL && effect->ui_desc->cleanup != NULL)
-                    effect->ui_desc->cleanup(effect->ui_handle);
-
-                dlclose(effect->ui_libhandle);
-            }
-#endif
-
-            FreeFeatures(effect);
-
-            if (effect->event_ports)
-            {
-                for (uint32_t i = 0; i < effect->event_ports_count; i++)
-                {
-                    lv2_evbuf_free(effect->event_ports[i]->evbuf);
-                }
-            }
-
-            if (effect->ports)
-            {
-                for (uint32_t i = 0; i < effect->ports_count; i++)
-                {
-                    if (effect->ports[i])
-                    {
-#ifdef __MOD_DEVICES__
-                        if (effect->ports[i]->hmi_addressing != NULL)
-                        {
-                            if (g_hmi_data != NULL)
-                            {
-                                char msg[24];
-                                snprintf(msg, sizeof(msg), "%i", effect->ports[i]->hmi_addressing->actuator_id);
-                                msg[sizeof(msg)-1] = '\0';
-
-                                pthread_mutex_lock(&g_hmi_mutex);
-                                sys_serial_write(&g_hmi_data->server,
-                                                 sys_serial_event_type_unassign,
-                                                 effect->ports[i]->hmi_addressing->page,
-                                                 effect->ports[i]->hmi_addressing->subpage, msg);
-                                pthread_mutex_unlock(&g_hmi_mutex);
-                            }
-
-                            effect->ports[i]->hmi_addressing->actuator_id = -1;
-                        }
-#endif
-
-                        // TODO destroy port mutexes
-                        free(effect->ports[i]->buffer);
-                        lilv_scale_points_free(effect->ports[i]->scale_points);
-                        free(effect->ports[i]);
-                    }
-                }
-                free(effect->ports);
-            }
-
-            if (effect->properties)
-            {
-                for (uint32_t i = 0; i < effect->properties_count; i++)
-                {
-                    if (effect->properties[i])
-                    {
-                        lilv_node_free(effect->properties[i]->uri);
-                        lilv_node_free(effect->properties[i]->type);
-                        free(effect->properties[i]);
-                    }
-                }
-                free(effect->properties);
-            }
-
-            if (effect->lilv_instance)
-            {
-                if (effect->activated)
-                    lilv_instance_deactivate(effect->lilv_instance);
-
-                lilv_instance_free(effect->lilv_instance);
-            }
-
-            if (effect->jack_client)
-                jack_client_close(effect->jack_client);
-
-            free(effect->audio_ports);
-            free(effect->input_audio_ports);
-            free(effect->output_audio_ports);
-
-            free(effect->control_ports);
-            free(effect->input_control_ports);
-            free(effect->output_control_ports);
-
-            free(effect->cv_ports);
-            free(effect->input_cv_ports);
-            free(effect->output_cv_ports);
-
-            free(effect->event_ports);
-            free(effect->input_event_ports);
-            free(effect->output_event_ports);
-
-            if (effect->events_in_buffer)
-                jack_ringbuffer_free(effect->events_in_buffer);
-            if (effect->events_in_buffer_helper)
-                free(effect->events_in_buffer_helper);
-            if (effect->events_out_buffer)
-                jack_ringbuffer_free(effect->events_out_buffer);
-
-            if (effect->presets)
-            {
-                for (uint32_t i = 0; i < effect->presets_count; i++)
-                {
-                    lilv_free(effect->presets[i]->uri);
-                    free(effect->presets[i]);
-                }
-                free(effect->presets);
-            }
-
-            if (effect->hints & HINT_HAS_STATE)
-            {
-                if (g_lv2_scratch_dir != NULL)
-                {
-                    // recursively delete state folder
-                    memset(state_filename, 0, sizeof(state_filename));
-                    snprintf(state_filename, PATH_MAX-1, "%s/effect-%d",
-                             g_lv2_scratch_dir, effect->instance);
-                    RecursivelyRemovePluginPath(state_filename);
-                }
-
-                if (effect->hints & HINT_STATE_UNSAFE)
-                    pthread_mutex_destroy(&effect->state_restore_mutex);
-            }
-
-            InstanceDelete(j);
+            if (jack_deactivate(effect->jack_client) != 0)
+                return ERR_JACK_CLIENT_DEACTIVATION;
         }
+    }
+
+    // remove addressings, midi learn and other stuff related to plugins
+    effects_remove_inner_pre(effect_id);
+
+    // flush events for all effects except this one
+    if (effect_id != REMOVE_ALL)
+        RunPostPonedEvents(effect_id);
+
+    // now finally cleanup the plugin(s)
+    for (int j = start; j < end; j++)
+    {
+        if (InstanceExist(j))
+            effects_remove_inner_loop(j);
     }
 
     // clear param_set cache
@@ -6312,7 +6391,138 @@ int effects_remove(int effect_id)
     return SUCCESS;
 }
 
-#if 0
+int effects_remove_multi(int num_effects, int *effects)
+{
+    if (num_effects <= 0)
+        return ERR_INVALID_OPERATION;
+
+    if (num_effects == 1)
+        return effects_remove(*effects);
+
+    int num_threads = 0;
+    pthread_t *threads = malloc(sizeof(pthread_t) * num_effects);
+    effect_t *effect;
+
+    if (!threads)
+        return ERR_MEMORY_ALLOCATION;
+
+    // stop postpone events thread
+    if (g_postevents_running == 1)
+    {
+        g_postevents_running = 0;
+        sem_post(&g_postevents_semaphore);
+        pthread_join(g_postevents_thread, NULL);
+    }
+
+    // stop plugins processing
+    for (int i = 0, effect_id; i < num_effects; ++i)
+    {
+        effect_id = effects[i];
+        effect = &g_effects[effect_id];
+
+        if (effect->jack_client == NULL)
+            continue;
+
+        if (effect->activated)
+        {
+            if (pthread_create(&threads[num_threads], NULL, effects_deactivate_thread, effect->jack_client) == 0)
+                ++num_threads;
+            else
+                jack_deactivate(effect->jack_client);
+        }
+    }
+
+    for (int i = 0; i < num_threads; ++i)
+        pthread_join(threads[i], NULL);
+
+    // remove addressings, midi learn and other stuff related to plugins
+    for (int i = 0, effect_id; i < num_effects; ++i)
+    {
+        effect_id = effects[i];
+        if (InstanceExist(effect_id))
+            effects_remove_inner_pre(effect_id);
+    }
+
+    // flush events for all effects
+    RunPostPonedEvents(-3);
+
+    // cleanup the plugins
+    num_threads = 0;
+    for (int i = 0, effect_id; i < num_effects; ++i)
+    {
+        effect_id = effects[i];
+        if (!InstanceExist(effect_id))
+            continue;
+
+        if (pthread_create(&threads[num_threads], NULL, effects_remove_inner_loop_thread, &effects[i]) == 0)
+            ++num_threads;
+        else
+            effects_remove_inner_loop(effect_id);
+    }
+
+    for (int i = 0; i < num_threads; ++i)
+        pthread_join(threads[i], NULL);
+
+    // start thread again
+    if (g_postevents_running == 0)
+    {
+        if (g_verbose_debug)
+        {
+            puts("DEBUG: effects_remove restarted RunPostPonedEvents thread");
+            fflush(stdout);
+        }
+
+        g_postevents_running = 1;
+        pthread_create(&g_postevents_thread, NULL, PostPonedEventsThread, NULL);
+    }
+
+    free(threads);
+
+    return SUCCESS;
+}
+
+int effects_activate(int effect_id, int value)
+{
+    if (!InstanceExist(effect_id))
+    {
+        return ERR_INSTANCE_NON_EXISTS;
+    }
+
+    effect_t *effect = &g_effects[effect_id];
+
+    if (value)
+    {
+        if (! effect->activated)
+        {
+            effect->activated = true;
+            lilv_instance_activate(effect->lilv_instance);
+
+            if (jack_activate(effect->jack_client) != 0)
+            {
+                fprintf(stderr, "can't activate jack_client\n");
+                return ERR_JACK_CLIENT_ACTIVATION;
+            }
+        }
+    }
+    else
+    {
+        if (effect->activated)
+        {
+            effect->activated = false;
+
+            if (jack_deactivate(effect->jack_client) != 0)
+            {
+                fprintf(stderr, "can't deactivate jack_client\n");
+                return ERR_JACK_CLIENT_DEACTIVATION;
+            }
+
+            lilv_instance_deactivate(effect->lilv_instance);
+        }
+    }
+
+    return SUCCESS;
+}
+
 static void* effects_activate_thread(void* arg)
 {
     jack_client_t *jack_client = arg;
@@ -6332,24 +6542,32 @@ static void* effects_deactivate_thread(void* arg)
 
     return NULL;
 }
-#endif
 
-int effects_activate(int effect_id, int value)
+int effects_activate_multi(int value, int num_effects, int *effects)
 {
-    if (!InstanceExist(effect_id))
-    {
-        return ERR_INSTANCE_NON_EXISTS;
-    }
-#if 0
-    if (effect_id > effect_id_end)
-    {
+    if (num_effects <= 0)
         return ERR_INVALID_OPERATION;
-    }
 
-    if (effect_id == effect_id_end)
+    if (num_effects == 1)
+        return effects_activate(*effects, value);
+
+    int num_threads = 0;
+    pthread_t *threads = malloc(sizeof(pthread_t) * num_effects);
+
+    if (!threads)
+        return ERR_MEMORY_ALLOCATION;
+
+    effect_t *effect;
+
+    // create threads to activate all clients
+    // reduces time spent waiting for jack operations to complete, triggering in parallel
+    for (int i = 0, effect_id; i < num_effects; ++i)
     {
-#endif
-        effect_t *effect = &g_effects[effect_id];
+        effect_id = effects[i];
+        effect = &g_effects[effect_id];
+
+        if (effect->jack_client == NULL)
+            continue;
 
         if (value)
         {
@@ -6358,84 +6576,45 @@ int effects_activate(int effect_id, int value)
                 effect->activated = true;
                 lilv_instance_activate(effect->lilv_instance);
 
-                if (jack_activate(effect->jack_client) != 0)
-                {
-                    fprintf(stderr, "can't activate jack_client\n");
-                    return ERR_JACK_CLIENT_ACTIVATION;
-                }
+                if (pthread_create(&threads[num_threads], NULL, effects_activate_thread, effect->jack_client) == 0)
+                    ++num_threads;
+                else
+                    jack_activate(effect->jack_client);
             }
         }
         else
         {
             if (effect->activated)
             {
-                effect->activated = false;
-
-                if (jack_deactivate(effect->jack_client) != 0)
-                {
-                    fprintf(stderr, "can't deactivate jack_client\n");
-                    return ERR_JACK_CLIENT_DEACTIVATION;
-                }
-
-                lilv_instance_deactivate(effect->lilv_instance);
+                if (pthread_create(&threads[num_threads], NULL, effects_deactivate_thread, effect->jack_client) == 0)
+                    ++num_threads;
+                else
+                    jack_deactivate(effect->jack_client);
             }
         }
-#if 0
     }
-    else
+
+    // wait for all threads to be done
+    for (int i = 0; i < num_threads; ++i)
+        pthread_join(threads[i], NULL);
+
+    free(threads);
+
+    // if deactivating, do the last lv2 deactivate step now
+    if (! value)
     {
-        int num_threads = 0;
-        pthread_t *threads = malloc(sizeof(pthread_t) * (effect_id_end - effect_id));
-
-        // create threads to activate all clients
-        for (int i = effect_id; i <= effect_id_end; ++i)
+        for (int i = 0, effect_id; i < num_effects; ++i)
         {
-            effect_t *effect = &g_effects[i];
+            effect_id = effects[i];
+            effect = &g_effects[effect_id];
 
-            if (effect->jack_client == NULL)
+            if (! effect->activated || effect->jack_client == NULL)
                 continue;
 
-            if (value)
-            {
-                if (! effect->activated)
-                {
-                    effect->activated = true;
-                    lilv_instance_activate(effect->lilv_instance);
-
-                    pthread_create(&threads[num_threads++], NULL, effects_activate_thread, effect->jack_client);
-                }
-            }
-            else
-            {
-                if (effect->activated)
-                {
-                    pthread_create(&threads[num_threads++], NULL, effects_deactivate_thread, effect->jack_client);
-                }
-            }
-        }
-
-        // wait for all threads to be done
-        for (int i = 0; i < num_threads; ++i)
-            pthread_join(threads[i], NULL);
-
-        free(threads);
-
-        // if deactivating, do the last lv2 deactivate step now
-        if (! value)
-        {
-            for (int i = effect_id; i <= effect_id_end; ++i)
-            {
-                effect_t *effect = &g_effects[i];
-
-                if (! effect->activated || effect->jack_client == NULL)
-                    continue;
-
-                effect->activated = false;
-                lilv_instance_deactivate(effect->lilv_instance);
-            }
+            effect->activated = false;
+            lilv_instance_deactivate(effect->lilv_instance);
         }
     }
-#endif
 
     return SUCCESS;
 }
@@ -6538,6 +6717,48 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
     return ERR_INSTANCE_NON_EXISTS;
 }
 
+int effects_set_parameter_multi(const char *control_symbol, float value, int num_effects, int *effects)
+{
+    if (num_effects <= 0)
+        return ERR_INVALID_OPERATION;
+
+    if (num_effects == 1)
+        return effects_set_parameter(*effects, control_symbol, value);
+
+    port_t **ports = malloc(sizeof(port_t*) * num_effects);
+
+    if (ports == NULL)
+        return ERR_MEMORY_ALLOCATION;
+
+    int num_ports = 0;
+    for (int i = 0, effect_id; i < num_effects; i++)
+    {
+        effect_id = effects[i];
+        if (InstanceExist(effect_id))
+        {
+            if ((ports[num_ports] = FindEffectInputPortBySymbol(&(g_effects[effect_id]), control_symbol)))
+                ++num_ports;
+        }
+    }
+
+    // the critical loop, must be as fast and small as possible
+    port_t *port;
+    for (int i = 0; i < num_ports; i++)
+    {
+        port = ports[i];
+        port->prev_value = *port->buffer = value;
+    }
+
+#ifdef WITH_EXTERNAL_UI_SUPPORT
+    for (int i = 0; i < num_ports; i++)
+        ports[i]->hints |= HINT_SHOULD_UPDATE;
+#endif
+
+    free(ports);
+
+    return SUCCESS;
+}
+
 int effects_get_parameter(int effect_id, const char *control_symbol, float *value)
 {
     const port_t *port;
@@ -6564,7 +6785,6 @@ int effects_flush_parameters(int effect_id, int reset, int param_count, const fl
 
     effect_t *effect = &(g_effects[effect_id]);
     port_t *port;
-    float value;
 
     if (effect->reset_index >= 0 && reset != 0)
     {
@@ -6577,15 +6797,7 @@ int effects_flush_parameters(int effect_id, int reset, int param_count, const fl
         port = FindEffectInputPortBySymbol(effect, params[i].symbol);
         if (port)
         {
-            value = params[i].value;
-
-            if (value < port->min_value)
-                value = port->max_value;
-            else if (value > port->max_value)
-                value = port->max_value;
-
             port->prev_value = *(port->buffer) = params[i].value;
-
 #ifdef WITH_EXTERNAL_UI_SUPPORT
             port->hints |= HINT_SHOULD_UPDATE;
 #endif
@@ -6598,6 +6810,89 @@ int effects_flush_parameters(int effect_id, int reset, int param_count, const fl
         port = effect->ports[effect->reset_index];
         port->prev_value = *(port->buffer) = reset;
     }
+
+    return SUCCESS;
+}
+
+int effects_flush_parameters_multi(int reset, int param_count, const flushed_param_t *params, int num_effects, int *effects)
+{
+    if (num_effects <= 0)
+        return ERR_INVALID_OPERATION;
+
+    if (num_effects == 1)
+        return effects_flush_parameters(*effects, reset, param_count, params);
+
+    effect_t *effect;
+    port_t *port;
+
+    int num_cached_effects = 0;
+    cached_effect_flush_t *cached_effects = malloc(sizeof(cached_effect_flush_t) * num_effects);
+
+    if (cached_effects == NULL)
+        return ERR_MEMORY_ALLOCATION;
+
+    for (int i = 0, effect_id; i < num_effects; i++)
+    {
+        effect_id = effects[i];
+        if (InstanceExist(effect_id))
+        {
+            effect = &(g_effects[effect_id]);
+
+            cached_effect_flush_t *cached_effect = &cached_effects[num_cached_effects++];
+            cached_effect->effect = effect;
+            cached_effect->ports = malloc(sizeof(port_t*) * param_count);
+
+            for (int j = 0; j < param_count; j++)
+                cached_effect->ports[j] = FindEffectInputPortBySymbol(effect, params[j].symbol);
+        }
+    }
+
+    for (int i = 0; i < num_cached_effects; i++)
+    {
+        effect = cached_effects[i].effect;
+        if (effect->reset_index >= 0 && reset != 0)
+        {
+            port = effect->ports[effect->reset_index];
+            port->prev_value = *(port->buffer) = reset;
+        }
+    }
+
+    // the critical loop, must be as fast and small as possible
+    for (int j = 0; j < param_count; j++)
+    {
+        for (int i = 0; i < num_cached_effects; i++)
+        {
+            if ((port = cached_effects[i].ports[j]))
+                port->prev_value = *(port->buffer) = params[j].value;
+        }
+    }
+
+#ifdef WITH_EXTERNAL_UI_SUPPORT
+    for (int i = 0; i < num_cached_effects; i++)
+    {
+        for (int j = 0; j < param_count; j++)
+        {
+            if ((port = cached_effects[i].ports[j]))
+                port->hints |= HINT_SHOULD_UPDATE;
+        }
+    }
+#endif
+
+    // reset a 2nd time in case plugin was processing while we changed parameters
+    for (int i = 0; i < num_cached_effects; i++)
+    {
+        effect = cached_effects[i].effect;
+        if (effect->reset_index >= 0 && reset != 0)
+        {
+            port = effect->ports[effect->reset_index];
+            port->prev_value = *(port->buffer) = reset;
+        }
+    }
+
+    for (int i = 0; i < num_cached_effects; i++)
+        free(cached_effects[i].ports);
+
+    free(cached_effects);
 
     return SUCCESS;
 }
@@ -7093,7 +7388,36 @@ int effects_bypass(int effect_id, int value)
 
     if (effect->enabled_index >= 0)
     {
-        *(effect->ports[effect->enabled_index]->buffer) = value ? 0.0f : 1.0f;
+        port_t *port = effect->ports[effect->enabled_index];
+        port->prev_value = *port->buffer = value ? 0.0f : 1.0f;
+    }
+
+    return SUCCESS;
+}
+
+int effects_bypass_multi(int value, int num_effects, int *effects)
+{
+    if (num_effects <= 0)
+        return ERR_INVALID_OPERATION;
+
+    effect_t *effect;
+    port_t *port;
+    float valuef = value ? 1.0f : 0.0f;
+
+    for (int i = 0, effect_id; i < num_effects; i++)
+    {
+        effect_id = effects[i];
+        if (InstanceExist(effect_id))
+        {
+            effect = &g_effects[effect_id];
+            effect->bypass_port.prev_value = effect->bypass = valuef;
+
+            if (effect->enabled_index >= 0)
+            {
+                port = effect->ports[effect->enabled_index];
+                port->prev_value = *port->buffer = valuef;
+            }
+        }
     }
 
     return SUCCESS;
