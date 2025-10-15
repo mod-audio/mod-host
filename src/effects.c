@@ -7435,7 +7435,8 @@ int effects_bypass_multi(int value, int num_effects, int *effects)
 
     effect_t *effect;
     port_t *port;
-    float valuef = value ? 1.0f : 0.0f;
+    float bypass_value = value ? 1.0f : 0.0f;
+    float enabled_value = value ? 0.0f : 1.0f;
 
     for (int i = 0, effect_id; i < num_effects; i++)
     {
@@ -7443,12 +7444,12 @@ int effects_bypass_multi(int value, int num_effects, int *effects)
         if (InstanceExist(effect_id))
         {
             effect = &g_effects[effect_id];
-            effect->bypass_port.prev_value = effect->bypass = valuef;
+            effect->bypass_port.prev_value = bypass_value;
 
             if (effect->enabled_index >= 0)
             {
                 port = effect->ports[effect->enabled_index];
-                port->prev_value = *port->buffer = valuef;
+                port->prev_value = *port->buffer = enabled_value;
             }
         }
     }
