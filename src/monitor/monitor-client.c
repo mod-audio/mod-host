@@ -155,9 +155,9 @@ static float ProcessMonitorLoopStereo(monitor_client_t *const mon, jack_nframes_
     const bool in1_connected = mon->connected & (1 << offset);
     const bool in2_connected = mon->connected & (1 << (offset + 1));
 
-   #ifdef _MOD_DEVICE_DUOX
+   #if defined(_MOD_DEVICE_DUOX)
     sf_compressor_state_st* const compressor = offset == 2 ? &mon->compressor2 : &mon->compressor;
-   #else
+   #elif defined(MOD_IO_PROCESSING_ENABLED)
     sf_compressor_state_st* const compressor = &mon->compressor;
    #endif
 
