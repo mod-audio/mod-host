@@ -110,10 +110,6 @@ typedef unsigned int uint;
 #endif
 
 #include "mod-host.h"
-#ifdef __MOD_DEVICES__
-#include "sys_host.h"
-#include "dsp/gate_core.h"
-#endif
 
 #ifndef HAVE_NEW_LILV
 #define lilv_free(x) free(x)
@@ -153,6 +149,7 @@ typedef struct {
 #define JackPortIsControlVoltage 0x100
 
 #if defined(_MOD_DEVICE_DUOX) || defined(_MOD_DEVICE_DWARF)
+#define MOD_HMI_CONTROL_ENABLED
 #define MOD_IO_PROCESSING_ENABLED
 #endif
 
@@ -175,6 +172,14 @@ typedef struct {
 #include "rtmempool/rtmempool.h"
 #include "filter.h"
 #include "mod-memset.h"
+
+#ifdef MOD_HMI_CONTROL_ENABLED
+#include "sys_host.h"
+#endif
+
+#ifdef __MOD_DEVICES__
+#include "dsp/gate_core.h"
+#endif
 
 /*
 ************************************************************************************************************************
@@ -306,7 +311,7 @@ enum UpdatePositionFlag {
 ************************************************************************************************************************
 */
 
-#ifdef __MOD_DEVICES__
+#ifdef MOD_HMI_CONTROL_ENABLED
 typedef struct HMI_ADDRESSING_T hmi_addressing_t;
 #endif
 typedef struct PORT_T port_t;
@@ -346,7 +351,7 @@ typedef struct PORT_T {
     LilvScalePoints* scale_points;
     cv_source_t* cv_source;
     pthread_mutex_t cv_source_mutex;
-#ifdef __MOD_DEVICES__
+#ifdef MOD_HMI_CONTROL_ENABLED
     hmi_addressing_t* hmi_addressing;
 #endif
 } port_t;
@@ -589,11 +594,13 @@ typedef struct ASSIGNMENT_T {
     bool supports_set_value;
 } assignment_t;
 
+#ifdef MOD_HMI_CONTROL_ENABLED
 typedef struct HMI_ADDRESSING_T {
     int actuator_id;
     uint8_t page;
     uint8_t subpage;
 } hmi_addressing_t;
+#endif
 
 typedef struct POSTPONED_PARAMETER_EVENT_T {
     int effect_id;
@@ -852,23 +859,25 @@ static hylia_t* g_hylia_instance;
 static hylia_time_info_t g_hylia_timeinfo;
 #endif
 
-#ifdef __MOD_DEVICES__
+#ifdef MOD_HMI_CONTROL_ENABLED
 /* HMI integration */
 static int g_hmi_shmfd;
 static sys_serial_shm_data* g_hmi_data;
 static ZixThread g_hmi_client_thread;
 static pthread_mutex_t g_hmi_mutex;
 static hmi_addressing_t g_hmi_addressings[MAX_HMI_ADDRESSINGS];
+#endif
 
 /* internal processing */
+#ifdef MOD_HMI_CONTROL_ENABLED
 static int g_compressor_mode = 0;
 static int g_compressor_release = 100;
+#endif
 #ifdef MOD_IO_PROCESSING_ENABLED
 static int g_noisegate_channel = 0;
 static int g_noisegate_decay = 10;
 static int g_noisegate_threshold = -60;
 static gate_t g_noisegate;
-#endif
 #endif
 
 static const char* const g_bypass_port_symbol = BYPASS_PORT_SYMBOL;
@@ -892,7 +901,7 @@ static void PortRegistration(jack_port_id_t port_id, int reg, void* data);
 static int XRun(void* data);
 static void RunPostPonedEvents(int ignored_effect_id);
 static void* PostPonedEventsThread(void* arg);
-#ifdef __MOD_DEVICES__
+#ifdef MOD_HMI_CONTROL_ENABLED
 static void* HMIClientThread(void* arg);
 #endif
 static int ProcessPlugin(jack_nframes_t nframes, void *arg);
@@ -915,7 +924,7 @@ static void FreeFeatures(effect_t *effect);
 static void FreePluginString(void* handle, char *str);
 static void ConnectToAllHardwareMIDIPorts(void);
 static void ConnectToMIDIThroughPorts(void);
-#ifdef __MOD_DEVICES__
+#ifdef MOD_HMI_CONTROL_ENABLED
 static void HMIWidgetsSetLedWithBlink(LV2_HMI_WidgetControl_Handle handle,
                                       LV2_HMI_Addressing addressing,
                                       LV2_HMI_LED_Colour led_color,
@@ -1777,7 +1786,7 @@ static void* PostPonedEventsThread(void* arg)
     UNUSED_PARAM(arg);
 }
 
-#ifdef __MOD_DEVICES__
+#ifdef MOD_HMI_CONTROL_ENABLED
 static void* HMIClientThread(void* arg)
 {
     sys_serial_shm_data_channel* const data = (sys_serial_shm_data_channel*)arg;
@@ -3546,7 +3555,7 @@ static void ConnectToMIDIThroughPorts(void)
     }
 }
 
-#ifdef __MOD_DEVICES__
+#ifdef MOD_HMI_CONTROL_ENABLED
 static void HMIWidgetsSetLedWithBlink(LV2_HMI_WidgetControl_Handle handle,
                                       LV2_HMI_Addressing addressing_ptr,
                                       LV2_HMI_LED_Colour led_color,
@@ -4250,7 +4259,7 @@ int effects_init(void* client)
     pthread_mutex_init(&g_audio_monitor_mutex, &mutex_atts);
     pthread_mutex_init(&g_midi_learning_mutex, &mutex_atts);
     pthread_mutex_init(&g_multi_thread_mutex, &mutex_atts);
-#ifdef __MOD_DEVICES__
+#ifdef MOD_HMI_CONTROL_ENABLED
     pthread_mutex_init(&g_hmi_mutex, &mutex_atts);
 #endif
 
@@ -4602,7 +4611,7 @@ int effects_init(void* client)
     g_options[8].type = 0;
     g_options[8].value = NULL;
 
-#ifdef __MOD_DEVICES__
+#ifdef MOD_HMI_CONTROL_ENABLED
     g_hmi_wc.size                    = sizeof(g_hmi_wc);
     g_hmi_wc.set_led_with_blink      = HMIWidgetsSetLedWithBlink;
     g_hmi_wc.set_led_with_brightness = HMIWidgetsSetLedWithBrightness;
@@ -4630,10 +4639,10 @@ int effects_init(void* client)
 
     for (int i = 0; i < MAX_HMI_ADDRESSINGS; i++)
         g_hmi_addressings[i].actuator_id = -1;
+#endif
 
 #ifdef MOD_IO_PROCESSING_ENABLED
     gate_init(&g_noisegate);
-#endif
 #endif
 
     g_license.handle = NULL;
@@ -4756,7 +4765,7 @@ int effects_finish(int close_client)
 
     effects_remove(REMOVE_ALL);
 
-#ifdef __MOD_DEVICES__
+#ifdef MOD_HMI_CONTROL_ENABLED
     if (g_hmi_data != NULL)
     {
         sys_serial_shm_data* hmi_data = g_hmi_data;
@@ -4834,7 +4843,7 @@ int effects_finish(int close_client)
     pthread_mutex_destroy(&g_audio_monitor_mutex);
     pthread_mutex_destroy(&g_midi_learning_mutex);
     pthread_mutex_destroy(&g_multi_thread_mutex);
-#ifdef __MOD_DEVICES__
+#ifdef MOD_HMI_CONTROL_ENABLED
     pthread_mutex_destroy(&g_hmi_mutex);
 #endif
 
@@ -6055,7 +6064,7 @@ static void effects_remove_inner_pre(int effect_id)
         }
 #endif
 
-#ifdef __MOD_DEVICES__
+#ifdef MOD_HMI_CONTROL_ENABLED
         for (int i = 0; i < MAX_HMI_ADDRESSINGS; i++)
             g_hmi_addressings[i].actuator_id = -1;
 
@@ -6065,10 +6074,10 @@ static void effects_remove_inner_pre(int effect_id)
             sys_serial_write(&g_hmi_data->server, sys_serial_event_type_special_req, 0, 0, "pages");
             pthread_mutex_unlock(&g_hmi_mutex);
         }
+#endif
 
         // this resets volume back 0dB if needed
         // monitor_client_setup_volume(0.0f);
-#endif
 
         // reset all events
         struct list_head queue, *it, *it2;
@@ -6205,7 +6214,7 @@ static void effects_remove_inner_loop(int effect_id)
         {
             if (effect->ports[i])
             {
-#ifdef __MOD_DEVICES__
+#ifdef MOD_HMI_CONTROL_ENABLED
                 if (effect->ports[i]->hmi_addressing != NULL)
                 {
                     if (g_hmi_data != NULL)
@@ -8391,7 +8400,7 @@ int effects_cv_unmap(int effect_id, const char *control_symbol)
 int effects_hmi_map(int effect_id, const char *control_symbol, int hw_id, int page, int subpage,
                     int caps, int flags, const char *label, float minimum, float maximum, int steps)
 {
-#ifdef __MOD_DEVICES__
+#ifdef MOD_HMI_CONTROL_ENABLED
     if (!InstanceExist(effect_id))
         return ERR_INSTANCE_NON_EXISTS;
     if (effect_id >= MAX_PLUGIN_INSTANCES)
@@ -8483,7 +8492,7 @@ int effects_hmi_map(int effect_id, const char *control_symbol, int hw_id, int pa
 
 int effects_hmi_unmap(int effect_id, const char *control_symbol)
 {
-#ifdef __MOD_DEVICES__
+#ifdef MOD_HMI_CONTROL_ENABLED
     if (!InstanceExist(effect_id))
         return ERR_INSTANCE_NON_EXISTS;
 
