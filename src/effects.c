@@ -93,7 +93,7 @@ typedef unsigned int uint;
 #include "lv2/mod-license.h"
 
 // do not enable external-ui support in embed targets
-#if !(defined(_MOD_DEVICE_DUO) || defined(_MOD_DEVICE_DUOX) || defined(_MOD_DEVICE_DWARF))
+#if !(defined(_DARKGLASS_DEVICE_PABLITO) || defined(_MOD_DEVICE_DUO) || defined(_MOD_DEVICE_DUOX) || defined(_MOD_DEVICE_DWARF))
 #define WITH_EXTERNAL_UI_SUPPORT
 #endif
 
