@@ -94,7 +94,18 @@ zix_thread_create(ZixThread* thread,
 {
     pthread_attr_t attr;
     pthread_attr_init(&attr);
-    pthread_attr_setstacksize(&attr, stack_size);
+
+    if (stack_size != 0)
+        pthread_attr_setstacksize(&attr, stack_size);
+
+#ifdef _DARKGLASS_DEVICE_PABLITO
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    for (int i = 0; i < 4; ++i)
+        CPU_SET(i, &cpuset);
+
+    pthread_attr_setaffinity_np(&attr, sizeof(cpuset), &cpuset);
+#endif
 
     const int ret = pthread_create(thread, &attr, function, arg);
     pthread_attr_destroy(&attr);

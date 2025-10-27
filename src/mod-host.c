@@ -36,7 +36,6 @@
 #include <unistd.h>
 #include <getopt.h>
 #include <jack/jack.h>
-#include <pthread.h>
 #include <signal.h>
 
 #ifndef SKIP_READLINE
@@ -64,6 +63,7 @@
 #include "protocol.h"
 #include "completer.h"
 #include "monitor.h"
+#include "zix/thread.h"
 #include "info.h"
 
 
@@ -85,7 +85,7 @@
 /* Wherever we should be running */
 static volatile int running;
 /* Thread that calls socket_run() for the JACK internal client */
-static pthread_t intclient_socket_thread;
+static ZixThread intclient_socket_thread;
 
 /*
 ************************************************************************************************************************
@@ -1285,7 +1285,7 @@ int jack_initialize(jack_client_t* client, const char* load_init)
         return 1;
 
     running = 1;
-    pthread_create(&intclient_socket_thread, NULL, intclient_socket_run, NULL);
+    zix_thread_create(&intclient_socket_thread, 0, intclient_socket_run, NULL);
 
     return 0;
 }
@@ -1297,7 +1297,7 @@ void jack_finish(void* arg)
 {
     running = 0;
     socket_finish();
-    pthread_join(intclient_socket_thread, NULL);
+    zix_thread_join(intclient_socket_thread, NULL);
     effects_finish(0);
     protocol_remove_commands();
 

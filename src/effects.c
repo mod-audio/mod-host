@@ -745,7 +745,7 @@ static pthread_mutex_t  g_rtsafe_mutex;
 static volatile int  g_postevents_running; // 0: stopped, 1: running, -1: stopped & about to close mod-host
 static volatile bool g_postevents_ready;
 static sem_t         g_postevents_semaphore;
-static pthread_t     g_postevents_thread;
+static ZixThread     g_postevents_thread;
 
 /* raw-midi-clock-access ports */
 static struct list_head g_raw_midi_port_list;
@@ -856,7 +856,7 @@ static hylia_time_info_t g_hylia_timeinfo;
 /* HMI integration */
 static int g_hmi_shmfd;
 static sys_serial_shm_data* g_hmi_data;
-static pthread_t g_hmi_client_thread;
+static ZixThread g_hmi_client_thread;
 static pthread_mutex_t g_hmi_mutex;
 static hmi_addressing_t g_hmi_addressings[MAX_HMI_ADDRESSINGS];
 
@@ -4619,7 +4619,7 @@ int effects_init(void* client)
         {
             g_hmi_wc.handle = g_hmi_data;
             sys_serial_write(&g_hmi_data->server, sys_serial_event_type_special_req, 0, 0, "restart");
-            pthread_create(&g_hmi_client_thread, NULL, HMIClientThread, &g_hmi_data->client);
+            zix_thread_create(&g_hmi_client_thread, 0, HMIClientThread, &g_hmi_data->client);
         }
         else
         {
@@ -4684,7 +4684,7 @@ int effects_init(void* client)
     /* Start the thread that consumes from the event queue */
     g_postevents_running = 1;
     g_postevents_ready = true;
-    pthread_create(&g_postevents_thread, NULL, PostPonedEventsThread, NULL);
+    zix_thread_create(&g_postevents_thread, 0, PostPonedEventsThread, NULL);
 
     /* get transport state */
     UpdateGlobalJackPosition(UPDATE_POSITION_SKIP, false);
@@ -4749,7 +4749,7 @@ int effects_finish(int close_client)
 {
     g_postevents_running = -1;
     sem_post(&g_postevents_semaphore);
-    pthread_join(g_postevents_thread, NULL);
+    zix_thread_join(g_postevents_thread, NULL);
 
     if (close_client)
         monitor_client_stop();
@@ -4763,7 +4763,7 @@ int effects_finish(int close_client)
         g_hmi_data = NULL;
 
         sem_post(&hmi_data->client.sem);
-        pthread_join(g_hmi_client_thread, NULL);
+        zix_thread_join(g_hmi_client_thread, NULL);
 
         sys_serial_close(g_hmi_shmfd, hmi_data);
     }
@@ -5836,7 +5836,7 @@ static void* effects_add_thread(void* arg)
 int effects_add_multi(int activate, int num_effects, int *effects, const char *const *uris)
 {
     int num_threads = 0;
-    pthread_t *threads = malloc(sizeof(pthread_t) * num_effects);
+    ZixThread *threads = malloc(sizeof(ZixThread) * num_effects);
     effects_add_thread_data_t *data = malloc(sizeof(effects_add_thread_data_t) * num_effects);
 
     if (!threads || !data)
@@ -5853,14 +5853,14 @@ int effects_add_multi(int activate, int num_effects, int *effects, const char *c
         arg->effect_id = effects[i];
         arg->activate = activate;
 
-        if (pthread_create(&threads[num_threads], NULL, effects_add_thread, arg) == 0)
+        if (zix_thread_create(&threads[num_threads], 0, effects_add_thread, arg) == 0)
             ++num_threads;
         else
             effects_add(uris[i], effects[i], activate);
     }
 
     for (int i = 0; i < num_threads; ++i)
-        pthread_join(threads[i], NULL);
+        zix_thread_join(threads[i], NULL);
 
     free(threads);
     free(data);
@@ -6341,7 +6341,7 @@ int effects_remove(int effect_id)
     {
         g_postevents_running = 0;
         sem_post(&g_postevents_semaphore);
-        pthread_join(g_postevents_thread, NULL);
+        zix_thread_join(g_postevents_thread, NULL);
     }
 
     // disconnect system ports
@@ -6418,7 +6418,7 @@ int effects_remove(int effect_id)
         }
 
         g_postevents_running = 1;
-        pthread_create(&g_postevents_thread, NULL, PostPonedEventsThread, NULL);
+        zix_thread_create(&g_postevents_thread, 0, PostPonedEventsThread, NULL);
     }
 
     return SUCCESS;
@@ -6433,7 +6433,7 @@ int effects_remove_multi(int num_effects, int *effects)
         return effects_remove(*effects);
 
     int num_threads = 0;
-    pthread_t *threads = malloc(sizeof(pthread_t) * num_effects);
+    ZixThread *threads = malloc(sizeof(ZixThread) * num_effects);
     effect_t *effect;
 
     if (!threads)
@@ -6444,7 +6444,7 @@ int effects_remove_multi(int num_effects, int *effects)
     {
         g_postevents_running = 0;
         sem_post(&g_postevents_semaphore);
-        pthread_join(g_postevents_thread, NULL);
+        zix_thread_join(g_postevents_thread, NULL);
     }
 
     // stop plugins processing
@@ -6458,7 +6458,7 @@ int effects_remove_multi(int num_effects, int *effects)
 
         if (effect->activated)
         {
-            if (pthread_create(&threads[num_threads], NULL, effects_deactivate_thread, effect->jack_client) == 0)
+            if (zix_thread_create(&threads[num_threads], sizeof(void*), effects_deactivate_thread, effect->jack_client) == 0)
                 ++num_threads;
             else
                 jack_deactivate(effect->jack_client);
@@ -6466,7 +6466,7 @@ int effects_remove_multi(int num_effects, int *effects)
     }
 
     for (int i = 0; i < num_threads; ++i)
-        pthread_join(threads[i], NULL);
+        zix_thread_join(threads[i], NULL);
 
     // remove addressings, midi learn and other stuff related to plugins
     for (int i = 0, effect_id; i < num_effects; ++i)
@@ -6487,14 +6487,14 @@ int effects_remove_multi(int num_effects, int *effects)
         if (!InstanceExist(effect_id))
             continue;
 
-        if (pthread_create(&threads[num_threads], NULL, effects_remove_inner_loop_thread, &effects[i]) == 0)
+        if (zix_thread_create(&threads[num_threads], PATH_MAX + sizeof(void*), effects_remove_inner_loop_thread, &effects[i]) == 0)
             ++num_threads;
         else
             effects_remove_inner_loop(effect_id);
     }
 
     for (int i = 0; i < num_threads; ++i)
-        pthread_join(threads[i], NULL);
+        zix_thread_join(threads[i], NULL);
 
     // start thread again
     if (g_postevents_running == 0)
@@ -6506,7 +6506,7 @@ int effects_remove_multi(int num_effects, int *effects)
         }
 
         g_postevents_running = 1;
-        pthread_create(&g_postevents_thread, NULL, PostPonedEventsThread, NULL);
+        zix_thread_create(&g_postevents_thread, 0, PostPonedEventsThread, NULL);
     }
 
     free(threads);
@@ -6585,7 +6585,7 @@ int effects_activate_multi(int value, int num_effects, int *effects)
         return effects_activate(*effects, value);
 
     int num_threads = 0;
-    pthread_t *threads = malloc(sizeof(pthread_t) * num_effects);
+    ZixThread *threads = malloc(sizeof(ZixThread) * num_effects);
 
     if (!threads)
         return ERR_MEMORY_ALLOCATION;
@@ -6609,7 +6609,7 @@ int effects_activate_multi(int value, int num_effects, int *effects)
                 effect->activated = true;
                 lilv_instance_activate(effect->lilv_instance);
 
-                if (pthread_create(&threads[num_threads], NULL, effects_activate_thread, effect->jack_client) == 0)
+                if (zix_thread_create(&threads[num_threads], sizeof(void*), effects_activate_thread, effect->jack_client) == 0)
                     ++num_threads;
                 else
                     jack_activate(effect->jack_client);
@@ -6619,7 +6619,7 @@ int effects_activate_multi(int value, int num_effects, int *effects)
         {
             if (effect->activated)
             {
-                if (pthread_create(&threads[num_threads], NULL, effects_deactivate_thread, effect->jack_client) == 0)
+                if (zix_thread_create(&threads[num_threads], sizeof(void*), effects_deactivate_thread, effect->jack_client) == 0)
                     ++num_threads;
                 else
                     jack_deactivate(effect->jack_client);
@@ -6629,7 +6629,7 @@ int effects_activate_multi(int value, int num_effects, int *effects)
 
     // wait for all threads to be done
     for (int i = 0; i < num_threads; ++i)
-        pthread_join(threads[i], NULL);
+        zix_thread_join(threads[i], NULL);
 
     free(threads);
 
@@ -7346,7 +7346,7 @@ int effects_monitor_output_parameter(int effect_id, const char *control_symbol_o
             {
                 g_postevents_running = 0;
                 sem_post(&g_postevents_semaphore);
-                pthread_join(g_postevents_thread, NULL);
+                zix_thread_join(g_postevents_thread, NULL);
             }
 
             // flush events for all effects except this one
@@ -7362,7 +7362,7 @@ int effects_monitor_output_parameter(int effect_id, const char *control_symbol_o
                 }
 
                 g_postevents_running = 1;
-                pthread_create(&g_postevents_thread, NULL, PostPonedEventsThread, NULL);
+                zix_thread_create(&g_postevents_thread, 0, PostPonedEventsThread, NULL);
             }
 
             return SUCCESS;
