@@ -55,6 +55,10 @@ typedef unsigned int uint;
 #include <dlfcn.h>
 #endif
 
+#if defined(_DARKGLASS_DEVICE_PABLITO) || defined(_MOD_DEVICE_DUO) || defined(_MOD_DEVICE_DUOX) || defined(_MOD_DEVICE_DWARF)
+#include <sys/resource.h>
+#endif
+
 /* Jack */
 #include <jack/jack.h>
 #include <jack/intclient.h>
@@ -1761,6 +1765,10 @@ static void RunPostPonedEvents(int ignored_effect_id)
 
 static void* PostPonedEventsThread(void* arg)
 {
+#if defined(_DARKGLASS_DEVICE_PABLITO) || defined(_MOD_DEVICE_DUO) || defined(_MOD_DEVICE_DUOX) || defined(_MOD_DEVICE_DWARF)
+    setpriority(PRIO_PROCESS, gettid(), -18);
+#endif
+
     while (g_postevents_running == 1)
     {
         if (sem_timedwait_secs(&g_postevents_semaphore, 1) != 0)

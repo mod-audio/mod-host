@@ -57,6 +57,10 @@
 #define lilv_free(x) free(x)
 #endif
 
+#if defined(_DARKGLASS_DEVICE_PABLITO) || defined(_MOD_DEVICE_DUO) || defined(_MOD_DEVICE_DUOX) || defined(_MOD_DEVICE_DWARF)
+#include <sys/resource.h>
+#endif
+
 #include "mod-host.h"
 #include "effects.h"
 #include "socket.h"
@@ -1073,6 +1077,10 @@ static int mod_host_init(jack_client_t* client, int socket_port, int feedback_po
 
 static void* intclient_socket_run(void* ptr)
 {
+#if defined(_DARKGLASS_DEVICE_PABLITO) || defined(_MOD_DEVICE_DUO) || defined(_MOD_DEVICE_DUOX) || defined(_MOD_DEVICE_DWARF)
+    setpriority(PRIO_PROCESS, gettid(), -19);
+#endif
+
     while (running)
         socket_run(0);
 
