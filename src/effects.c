@@ -88,6 +88,7 @@ typedef unsigned int uint;
 #include <lv2/uri-map/uri-map.h>
 #include <lv2/worker/worker.h>
 #include "lv2/control-input-port-change-request.h"
+#include "lv2/control-port-state-update.h"
 #include "lv2/kxstudio-properties.h"
 #include "lv2/lv2-hmi.h"
 #include "lv2/mod-license.h"
@@ -232,20 +233,22 @@ enum PortType {
 
 enum PortHints {
     // controls
-    HINT_ENUMERATION   = 1 << 0,
-    HINT_INTEGER       = 1 << 1,
-    HINT_TOGGLE        = 1 << 2,
-    HINT_TRIGGER       = 1 << 3,
-    HINT_LOGARITHMIC   = 1 << 4,
-    HINT_MONITORED     = 1 << 5, // outputs only
-    HINT_SHOULD_UPDATE = 1 << 6, // inputs only, for external UIs
+    HINT_ENUMERATION    = 1 << 0,
+    HINT_INTEGER        = 1 << 1,
+    HINT_TOGGLE         = 1 << 2,
+    HINT_TRIGGER        = 1 << 3,
+    HINT_LOGARITHMIC    = 1 << 4,
+    HINT_MONITORED      = 1 << 5, // outputs only
+    HINT_SHOULD_UPDATE  = 1 << 6, // inputs only, for external UIs
+    HINT_STATE_INACTIVE = 1 << 7,
+    HINT_STATE_BLOCKED  = 1 << 8,
     // cv
-    HINT_CV_MOD        = 1 << 0, // uses mod cvport
-    HINT_CV_RANGES     = 1 << 1, // port info includes ranges
+    HINT_CV_MOD         = 1 << 0, // uses mod cvport
+    HINT_CV_RANGES      = 1 << 1, // port info includes ranges
     // events
-    HINT_TRANSPORT     = 1 << 0,
-    HINT_MIDI_EVENT    = 1 << 1,
-    HINT_OLD_EVENT_API = 1 << 2,
+    HINT_TRANSPORT      = 1 << 0,
+    HINT_MIDI_EVENT     = 1 << 1,
+    HINT_OLD_EVENT_API  = 1 << 2,
 };
 
 enum PluginHints {
@@ -280,6 +283,7 @@ enum {
     STATE_FREE_PATH_FEATURE,
     STATE_MAKE_PATH_FEATURE,
     CTRLPORT_REQUEST_FEATURE,
+    CTRLPORT_STATE_FEATURE,
     WORKER_FEATURE,
 #ifdef WITH_EXTERNAL_UI_SUPPORT
     UI_DATA_ACCESS,
@@ -290,6 +294,7 @@ enum {
 
 enum PostPonedEventType {
     POSTPONED_PARAM_SET,
+    POSTPONED_PARAM_STATE,
     POSTPONED_AUDIO_MONITOR,
     POSTPONED_OUTPUT_MONITOR,
     POSTPONED_MIDI_CONTROL_CHANGE,
@@ -612,6 +617,12 @@ typedef struct POSTPONED_PARAMETER_EVENT_T {
     float value;
 } postponed_parameter_event_t;
 
+typedef struct POSTPONED_PARAMETER_STATE_T {
+    int effect_id;
+    const char* symbol;
+    int state;
+} postponed_parameter_state_t;
+
 typedef struct POSTPONED_AUDIO_MONITOR_EVENT_T {
     int index;
     float value;
@@ -665,6 +676,7 @@ typedef struct POSTPONED_EVENT_T {
     enum PostPonedEventType type;
     union {
         postponed_parameter_event_t parameter;
+        postponed_parameter_state_t state;
         postponed_audio_monitor_event_t audio_monitor;
         postponed_midi_control_change_event_t control_change;
         postponed_midi_program_change_event_t program_change;
@@ -960,7 +972,11 @@ static char *GetLicenseFile(MOD_License_Handle handle, const char *license_uri);
 static int LogPrintf(LV2_Log_Handle handle, LV2_URID type, const char *fmt, ...);
 static int LogVPrintf(LV2_Log_Handle handle, LV2_URID type, const char *fmt, va_list ap);
 static LV2_ControlInputPort_Change_Status RequestControlPortChange(LV2_ControlInputPort_Change_Request_Handle handle,
-                                                                   uint32_t index, float value);
+                                                                   uint32_t index,
+                                                                   float value);
+static LV2_Control_Port_State_Update_Status UpdateControlPortState(LV2_Control_Port_State_Update_Handle handle,
+                                                                   uint32_t index,
+                                                                   LV2_Control_Port_State state);
 static char* MakePluginStatePathFromSratchDir(LV2_State_Make_Path_Handle handle, const char *path);
 static char* MakePluginStatePathDuringLoadSave(LV2_State_Make_Path_Handle handle, const char *path);
 #ifdef HAVE_CONTROLCHAIN
@@ -1383,6 +1399,16 @@ static void RunPostPonedEvents(int ignored_effect_id)
             // save for fast checkup next time
             cached_param_set.last_effect_id = eventptr->event.parameter.effect_id;
             strncpy(cached_param_set.last_symbol, eventptr->event.parameter.symbol, MAX_CHAR_BUF_SIZE);
+            break;
+
+        case POSTPONED_PARAM_STATE:
+            if (eventptr->event.parameter.effect_id == ignored_effect_id)
+                continue;
+
+            snprintf(buf, FEEDBACK_BUF_SIZE, "param_state %i %s %i", eventptr->event.state.effect_id,
+                                                                     eventptr->event.state.symbol,
+                                                                     eventptr->event.state.state);
+            socket_send_feedback_debug(buf);
             break;
 
         case POSTPONED_AUDIO_MONITOR:
@@ -3275,6 +3301,16 @@ static void GetFeatures(effect_t *effect)
     ctrlportReqChange_feature->URI = LV2_CONTROL_INPUT_PORT_CHANGE_REQUEST_URI;
     ctrlportReqChange_feature->data = ctrlportReqChange;
 
+    /* Control Port state update feature, includes custom pointer */
+    LV2_Control_Port_State_Update *ctrlportStateUpdate
+        = (LV2_Control_Port_State_Update*) malloc(sizeof(LV2_Control_Port_State_Update));
+    ctrlportStateUpdate->handle = effect;
+    ctrlportStateUpdate->update_state = UpdateControlPortState;
+
+    LV2_Feature *ctrlportStateUpdate_feature = (LV2_Feature*) malloc(sizeof(LV2_Feature));
+    ctrlportReqChange_feature->URI = LV2_CONTROL_PORT_STATE_UPDATE_URI;
+    ctrlportReqChange_feature->data = ctrlportStateUpdate;
+
     /* Worker Feature, must be last as it can be null */
     LV2_Feature *work_schedule_feature = NULL;
 
@@ -3307,6 +3343,7 @@ static void GetFeatures(effect_t *effect)
     features[STATE_FREE_PATH_FEATURE]   = &g_state_freePath_feature;
     features[STATE_MAKE_PATH_FEATURE]   = state_make_path_feature;
     features[CTRLPORT_REQUEST_FEATURE]  = ctrlportReqChange_feature;
+    features[CTRLPORT_STATE_FEATURE]    = ctrlportStateUpdate_feature;
     features[WORKER_FEATURE]            = work_schedule_feature;
 #ifdef WITH_EXTERNAL_UI_SUPPORT
     features[UI_DATA_ACCESS]            = NULL;
@@ -3476,6 +3513,11 @@ static void FreeFeatures(effect_t *effect)
         {
             free(effect->features[CTRLPORT_REQUEST_FEATURE]->data);
             free((void*)effect->features[CTRLPORT_REQUEST_FEATURE]);
+        }
+        if (effect->features[CTRLPORT_STATE_FEATURE])
+        {
+            free(effect->features[CTRLPORT_STATE_FEATURE]->data);
+            free((void*)effect->features[CTRLPORT_STATE_FEATURE]);
         }
         if (effect->features[WORKER_FEATURE])
         {
@@ -3983,7 +4025,8 @@ static int LogVPrintf(LV2_Log_Handle handle, LV2_URID type, const char* fmt, va_
 }
 
 static LV2_ControlInputPort_Change_Status RequestControlPortChange(LV2_ControlInputPort_Change_Request_Handle handle,
-                                                                   uint32_t index, float value)
+                                                                   uint32_t index,
+                                                                   float value)
 {
     effect_t *effect = (effect_t*)handle;
 
@@ -4003,6 +4046,65 @@ static LV2_ControlInputPort_Change_Status RequestControlPortChange(LV2_ControlIn
         sem_post(&g_postevents_semaphore);
 
     return LV2_CONTROL_INPUT_PORT_CHANGE_SUCCESS;
+}
+
+static LV2_Control_Port_State_Update_Status UpdateControlPortState(LV2_Control_Port_State_Update_Handle handle,
+                                                                   uint32_t index,
+                                                                   LV2_Control_Port_State state)
+{
+    effect_t *effect = (effect_t*)handle;
+
+    if (index >= effect->ports_count)
+        return LV2_CONTROL_PORT_STATE_UPDATE_ERR_INVALID_INDEX;
+
+    port_t *port = effect->ports[index];
+
+    if (port->type != TYPE_CONTROL)
+        return LV2_CONTROL_PORT_STATE_UPDATE_ERR_INVALID_INDEX;
+
+    LV2_Control_Port_State curstate;
+    if (port->hints & HINT_STATE_BLOCKED)
+        curstate = LV2_CONTROL_PORT_STATE_BLOCKED;
+    else if (port->hints & HINT_STATE_INACTIVE)
+        curstate = LV2_CONTROL_PORT_STATE_INACTIVE;
+    else
+        curstate = LV2_CONTROL_PORT_STATE_NONE;
+
+    if (curstate == state)
+        return LV2_CONTROL_PORT_STATE_UPDATE_SUCCESS;
+
+    postponed_event_list_data* const posteventptr =
+        rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
+
+    if (posteventptr == NULL)
+        return LV2_CONTROL_PORT_STATE_UPDATE_ERR_UNKNOWN;
+
+    switch (state)
+    {
+    case LV2_CONTROL_PORT_STATE_NONE:
+        port->hints &= ~(HINT_STATE_INACTIVE|HINT_STATE_BLOCKED);
+        break;
+    case LV2_CONTROL_PORT_STATE_INACTIVE:
+        port->hints |= HINT_STATE_INACTIVE;
+        port->hints &= ~HINT_STATE_BLOCKED;
+        break;
+    case LV2_CONTROL_PORT_STATE_BLOCKED:
+        port->hints |= HINT_STATE_INACTIVE|HINT_STATE_BLOCKED;
+        break;
+    }
+
+    posteventptr->event.type = POSTPONED_PARAM_STATE;
+    posteventptr->event.state.effect_id = effect->instance;
+    posteventptr->event.state.symbol    = port->symbol;
+    posteventptr->event.state.state     = state;
+
+    pthread_mutex_lock(&g_rtsafe_mutex);
+    list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
+    pthread_mutex_unlock(&g_rtsafe_mutex);
+
+    sem_post(&g_postevents_semaphore);
+
+    return LV2_CONTROL_PORT_STATE_UPDATE_SUCCESS;
 }
 
 static char* MakePluginStatePathFromSratchDir(LV2_State_Make_Path_Handle handle, const char *path)
@@ -8691,6 +8793,7 @@ int effects_state_load(const char *dir)
         &g_state_freePath_feature,
         &feature_makePath,
         NULL, // ctrlPortReq
+        NULL, // ctrlPortStateUpdate
         NULL, // worker
         NULL
     };
@@ -8720,6 +8823,7 @@ int effects_state_load(const char *dir)
 
         makePath.handle = effect;
         features[CTRLPORT_REQUEST_FEATURE] = effect->features[CTRLPORT_REQUEST_FEATURE];
+        features[CTRLPORT_STATE_FEATURE] = effect->features[CTRLPORT_STATE_FEATURE];
         features[WORKER_FEATURE] = effect->features[WORKER_FEATURE];
 
         if (effect->hints & HINT_STATE_UNSAFE)
@@ -8784,6 +8888,7 @@ int effects_state_save(const char *dir)
         &g_state_freePath_feature,
         &feature_makePath,
         NULL, // ctrlPortReq
+        NULL, // ctrlPortStateUpdate
         NULL, // worker
         NULL
     };
@@ -8807,6 +8912,7 @@ int effects_state_save(const char *dir)
 
             makePath.handle = effect;
             features[CTRLPORT_REQUEST_FEATURE] = effect->features[CTRLPORT_REQUEST_FEATURE];
+            features[CTRLPORT_STATE_FEATURE] = effect->features[CTRLPORT_STATE_FEATURE];
             features[WORKER_FEATURE] = effect->features[WORKER_FEATURE];
 
             effect->state_dir = dir;
