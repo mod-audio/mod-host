@@ -272,7 +272,7 @@ enum {
     URID_MAP_FEATURE,
     URID_UNMAP_FEATURE,
     OPTIONS_FEATURE,
-#ifdef __MOD_DEVICES__
+#ifdef MOD_HMI_CONTROL_ENABLED
     HMI_WC_FEATURE,
 #endif
     LICENSE_FEATURE,
@@ -819,7 +819,7 @@ static char *g_lv2_scratch_dir;
 static Symap* g_symap;
 static lilv_nodes_t g_lilv_nodes;
 static urids_t g_urids;
-#ifdef __MOD_DEVICES__
+#ifdef MOD_HMI_CONTROL_ENABLED
 static LV2_HMI_WidgetControl g_hmi_wc;
 #endif
 static MOD_License_Feature g_license;
@@ -849,7 +849,7 @@ static LV2_Feature g_buf_size_features[3] = {
     { LV2_BUF_SIZE__fixedBlockLength, NULL },
     { LV2_BUF_SIZE__boundedBlockLength, NULL }
 };
-#ifdef __MOD_DEVICES__
+#ifdef MOD_HMI_CONTROL_ENABLED
 static LV2_Feature g_hmi_wc_feature = { LV2_HMI__WidgetControl, &g_hmi_wc };
 #endif
 static LV2_Feature g_license_feature = { MOD_LICENSE__feature, &g_license };
@@ -3308,8 +3308,8 @@ static void GetFeatures(effect_t *effect)
     ctrlportStateUpdate->update_state = UpdateControlPortState;
 
     LV2_Feature *ctrlportStateUpdate_feature = (LV2_Feature*) malloc(sizeof(LV2_Feature));
-    ctrlportReqChange_feature->URI = LV2_CONTROL_PORT_STATE_UPDATE_URI;
-    ctrlportReqChange_feature->data = ctrlportStateUpdate;
+    ctrlportStateUpdate_feature->URI = LV2_CONTROL_PORT_STATE_UPDATE_URI;
+    ctrlportStateUpdate_feature->data = ctrlportStateUpdate;
 
     /* Worker Feature, must be last as it can be null */
     LV2_Feature *work_schedule_feature = NULL;
@@ -3332,7 +3332,7 @@ static void GetFeatures(effect_t *effect)
     features[URID_MAP_FEATURE]          = &g_urid_map_feature;
     features[URID_UNMAP_FEATURE]        = &g_urid_unmap_feature;
     features[OPTIONS_FEATURE]           = &g_options_feature;
-#ifdef __MOD_DEVICES__
+#ifdef MOD_HMI_CONTROL_ENABLED
     features[HMI_WC_FEATURE]            = &g_hmi_wc_feature;
 #endif
     features[LICENSE_FEATURE]           = &g_license_feature;
@@ -8782,7 +8782,7 @@ int effects_state_load(const char *dir)
         &g_urid_map_feature,
         &g_urid_unmap_feature,
         &g_options_feature,
-#ifdef __MOD_DEVICES__
+#ifdef MOD_HMI_CONTROL_ENABLED
         &g_hmi_wc_feature,
 #endif
         &g_license_feature,
@@ -8877,7 +8877,7 @@ int effects_state_save(const char *dir)
         &g_urid_map_feature,
         &g_urid_unmap_feature,
         &g_options_feature,
-#ifdef __MOD_DEVICES__
+#ifdef MOD_HMI_CONTROL_ENABLED
         &g_hmi_wc_feature,
 #endif
         &g_license_feature,
