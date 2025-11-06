@@ -100,6 +100,7 @@
 #define TRANSPORT            "transport %i %f %f"
 #define TRANSPORT_SYNC       "transport_sync %s"
 #define SHOW_EXTERNAL_UI     "show_external_ui %i"
+#define HIDE_EXTERNAL_UI     "hide_external_ui %i"
 #define OUTPUT_DATA_READY    "output_data_ready"
 #define MULTI_ADD            "multi_add %i ..."
 #define MULTI_REMOVE         "multi_remove %i ..."
