@@ -143,6 +143,10 @@ The commands supported by mod-host are:
         * connect two jack ports
         e.g.: connect "system:capture_1" "effect_0:in"
 
+    connect_matching <matching_port> <destination_port>
+        * connect the same connected ports of a port to another, so they match.
+        e.g.: connect "effect_0:in" "effect_1:in"
+
     disconnect <origin_port> <destination_port>
         * disconnect two jack ports
         e.g.: disconnect "system:capture_1" "effect_0:in"

@@ -6784,6 +6784,23 @@ int effects_connect(const char *portA, const char *portB)
     return ret;
 }
 
+int effects_connect_matching(const char *matching, const char *port)
+{
+    const jack_port_t *jport = jack_port_by_name(g_jack_global_client, matching);
+    if (!jport)
+        return ERR_JACK_PORT_CONNECTION;
+
+    const char **jports = jack_port_get_connections(jport);
+    if (jports)
+    {
+        for (int i = 0; jports[i]; ++i)
+            jack_connect(g_jack_global_client, jports[i], port);
+        jack_free(jports);
+    }
+
+    return SUCCESS;
+}
+
 int effects_disconnect(const char *portA, const char *portB)
 {
     int ret;
