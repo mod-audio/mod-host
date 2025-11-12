@@ -1247,15 +1247,16 @@ static bool ShouldIgnorePostPonedEffectEvent(int effect_id, postponed_cached_eff
     return false;
 }
 
-static bool ShouldIgnorePostPonedSymbolEvent(postponed_parameter_event_t* ev,
+static bool ShouldIgnorePostPonedSymbolEvent(int effect_id,
+                                             const char* symbol,
                                              postponed_cached_symbol_events* cached_events)
 {
     // symbol must not be null
-    if (ev->symbol == NULL)
+    if (symbol == NULL)
         return false;
 
-    if (ev->effect_id == cached_events->last_effect_id &&
-        strncmp(ev->symbol, cached_events->last_symbol, MAX_CHAR_BUF_SIZE) == 0)
+    if (effect_id == cached_events->last_effect_id &&
+        strncmp(symbol, cached_events->last_symbol, MAX_CHAR_BUF_SIZE) == 0)
     {
         // already received this event, like just now
         return true;
@@ -1268,8 +1269,8 @@ static bool ShouldIgnorePostPonedSymbolEvent(postponed_parameter_event_t* ev,
     {
         postponed_cached_symbol_list_data* const psymbol = list_entry(it, postponed_cached_symbol_list_data, siblings);
 
-        if (ev->effect_id == psymbol->effect_id &&
-            strncmp(ev->symbol, psymbol->symbol, MAX_CHAR_BUF_SIZE) == 0)
+        if (effect_id == psymbol->effect_id &&
+            strncmp(symbol, psymbol->symbol, MAX_CHAR_BUF_SIZE) == 0)
         {
             // haha! found you little bastard!
             return true;
@@ -1282,8 +1283,8 @@ static bool ShouldIgnorePostPonedSymbolEvent(postponed_parameter_event_t* ev,
 
     if (psymbol)
     {
-        psymbol->effect_id = ev->effect_id;
-        strncpy(psymbol->symbol, ev->symbol, MAX_CHAR_BUF_SIZE);
+        psymbol->effect_id = effect_id;
+        strncpy(psymbol->symbol, symbol, MAX_CHAR_BUF_SIZE);
         psymbol->symbol[MAX_CHAR_BUF_SIZE] = '\0';
         list_add_tail(&psymbol->siblings, &cached_events->symbols.siblings);
     }
@@ -1342,19 +1343,23 @@ static void RunPostPonedEvents(int ignored_effect_id)
     bool got_midi_program = false;
     bool got_transport = false;
     postponed_cached_effect_events cached_audio_monitor, cached_process_out_buf;
-    postponed_cached_symbol_events cached_param_set, cached_output_mon;
+    postponed_cached_symbol_events cached_param_set, cached_param_state, cached_output_mon;
 
     cached_audio_monitor.last_effect_id = -1;
     cached_process_out_buf.last_effect_id = -1;
     cached_param_set.last_effect_id = -1;
     cached_param_set.last_symbol[0] = '\0';
     cached_param_set.last_symbol[MAX_CHAR_BUF_SIZE] = '\0';
+    cached_param_state.last_effect_id = -1;
+    cached_param_state.last_symbol[0] = '\0';
+    cached_param_state.last_symbol[MAX_CHAR_BUF_SIZE] = '\0';
     cached_output_mon.last_effect_id = -1;
     cached_output_mon.last_symbol[0] = '\0';
     cached_output_mon.last_symbol[MAX_CHAR_BUF_SIZE] = '\0';
     INIT_LIST_HEAD(&cached_audio_monitor.effects.siblings);
     INIT_LIST_HEAD(&cached_process_out_buf.effects.siblings);
     INIT_LIST_HEAD(&cached_param_set.symbols.siblings);
+    INIT_LIST_HEAD(&cached_param_state.symbols.siblings);
     INIT_LIST_HEAD(&cached_output_mon.symbols.siblings);
 
     // if all we have are jack_midi_connect requests, do not send feedback to server
@@ -1388,7 +1393,9 @@ static void RunPostPonedEvents(int ignored_effect_id)
         case POSTPONED_PARAM_SET:
             if (eventptr->event.parameter.effect_id == ignored_effect_id)
                 continue;
-            if (ShouldIgnorePostPonedSymbolEvent(&eventptr->event.parameter, &cached_param_set))
+            if (ShouldIgnorePostPonedSymbolEvent(eventptr->event.parameter.effect_id,
+                                                 eventptr->event.parameter.symbol,
+                                                 &cached_param_set))
                 continue;
 
             snprintf(buf, FEEDBACK_BUF_SIZE, "param_set %i %s %f", eventptr->event.parameter.effect_id,
@@ -1402,13 +1409,21 @@ static void RunPostPonedEvents(int ignored_effect_id)
             break;
 
         case POSTPONED_PARAM_STATE:
-            if (eventptr->event.parameter.effect_id == ignored_effect_id)
+            if (eventptr->event.state.effect_id == ignored_effect_id)
+                continue;
+            if (ShouldIgnorePostPonedSymbolEvent(eventptr->event.state.effect_id,
+                                                 eventptr->event.state.symbol,
+                                                 &cached_param_state))
                 continue;
 
             snprintf(buf, FEEDBACK_BUF_SIZE, "param_state %i %s %i", eventptr->event.state.effect_id,
                                                                      eventptr->event.state.symbol,
                                                                      eventptr->event.state.state);
             socket_send_feedback_debug(buf);
+
+            // save for fast checkup next time
+            cached_param_state.last_effect_id = eventptr->event.state.effect_id;
+            strncpy(cached_param_state.last_symbol, eventptr->event.state.symbol, MAX_CHAR_BUF_SIZE);
             break;
 
         case POSTPONED_AUDIO_MONITOR:
@@ -1431,7 +1446,9 @@ static void RunPostPonedEvents(int ignored_effect_id)
         case POSTPONED_OUTPUT_MONITOR:
             if (eventptr->event.parameter.effect_id == ignored_effect_id)
                 continue;
-            if (ShouldIgnorePostPonedSymbolEvent(&eventptr->event.parameter, &cached_output_mon))
+            if (ShouldIgnorePostPonedSymbolEvent(eventptr->event.parameter.effect_id,
+                                                 eventptr->event.parameter.symbol,
+                                                 &cached_output_mon))
                 continue;
 
             snprintf(buf, FEEDBACK_BUF_SIZE, "output_set %i %s %f", eventptr->event.parameter.effect_id,
@@ -1728,6 +1745,11 @@ static void RunPostPonedEvents(int ignored_effect_id)
         free(peffect);
     }
     list_for_each_safe(it, it2, &cached_param_set.symbols.siblings)
+    {
+        psymbol = list_entry(it, postponed_cached_symbol_list_data, siblings);
+        free(psymbol);
+    }
+    list_for_each_safe(it, it2, &cached_param_state.symbols.siblings)
     {
         psymbol = list_entry(it, postponed_cached_symbol_list_data, siblings);
         free(psymbol);
