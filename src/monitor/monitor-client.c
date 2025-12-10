@@ -465,6 +465,7 @@ int jack_initialize(jack_client_t* client, const char* load_init)
     if (!mon->in_ports || !mon->out_ports)
     {
         fprintf(stderr, "out of memory\n");
+        free(mon);
         return 1;
     }
 

@@ -4371,8 +4371,7 @@ int effects_init(void* client)
     INIT_LIST_HEAD(&g_rtsafe_list);
     INIT_LIST_HEAD(&g_raw_midi_port_list);
 
-    if (!rtsafe_memory_pool_create(&g_rtsafe_mem_pool, "mod-host", sizeof(postponed_event_list_data),
-                                   MAX_POSTPONED_EVENTS))
+    if (!rtsafe_memory_pool_create(&g_rtsafe_mem_pool, sizeof(postponed_event_list_data), MAX_POSTPONED_EVENTS))
     {
         fprintf(stderr, "can't allocate realtime-safe memory pool\n");
         if (client == NULL)
@@ -5211,7 +5210,6 @@ int effects_add(const char *uri, int instance, int activate)
     event_ports_count = 0;
     input_event_ports_count = 0;
     output_event_ports_count = 0;
-    worker_buf_size = 0;
     effect->presets_count = 0;
     effect->presets = NULL;
     effect->monitors_count = 0;

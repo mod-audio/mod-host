@@ -46,7 +46,6 @@ typedef void* RtMemPool_Handle;
  * @return Success status, true if successful
  */
 bool rtsafe_memory_pool_create(RtMemPool_Handle* handlePtr,
-                               const char* poolName,
                                size_t dataSize,
                                size_t maxPreallocated);
 

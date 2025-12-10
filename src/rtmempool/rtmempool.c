@@ -33,30 +33,17 @@ typedef struct list_head k_list_head;
 
 typedef struct _RtMemPool
 {
-    char name[RTSAFE_MEMORY_POOL_NAME_MAX];
-
-    size_t dataSize;
-    size_t maxPreallocated;
-
     k_list_head used;
-    unsigned int usedCount;
-
     k_list_head unused;
-    unsigned int unusedCount;
-
     pthread_mutex_t mutex;
-
 } RtMemPool;
 
 // ------------------------------------------------------------------------------------------------
 
 bool rtsafe_memory_pool_create(RtMemPool_Handle* handlePtr,
-                               const char* poolName,
                                size_t dataSize,
                                size_t maxPreallocated)
 {
-    assert(poolName == NULL || strlen(poolName) < RTSAFE_MEMORY_POOL_NAME_MAX);
-
     k_list_head* nodePtr;
     RtMemPool* poolPtr;
 
@@ -67,23 +54,8 @@ bool rtsafe_memory_pool_create(RtMemPool_Handle* handlePtr,
         return false;
     }
 
-    if (poolName != NULL)
-    {
-        strcpy(poolPtr->name, poolName);
-    }
-    else
-    {
-        sprintf(poolPtr->name, "%p", poolPtr);
-    }
-
-    poolPtr->dataSize = dataSize;
-    poolPtr->maxPreallocated = maxPreallocated;
-
     INIT_LIST_HEAD(&poolPtr->used);
-    poolPtr->usedCount = 0;
-
     INIT_LIST_HEAD(&poolPtr->unused);
-    poolPtr->unusedCount = 0;
 
     pthread_mutexattr_t atts;
     pthread_mutexattr_init(&atts);
@@ -93,9 +65,9 @@ bool rtsafe_memory_pool_create(RtMemPool_Handle* handlePtr,
     pthread_mutex_init(&poolPtr->mutex, &atts);
     pthread_mutexattr_destroy(&atts);
 
-    while (poolPtr->unusedCount < poolPtr->maxPreallocated)
+    for (unsigned int unusedCount = 0; unusedCount < maxPreallocated; unusedCount++)
     {
-        nodePtr = malloc(sizeof(k_list_head) + poolPtr->dataSize);
+        nodePtr = malloc(sizeof(k_list_head) + dataSize);
 
         if (nodePtr == NULL)
         {
@@ -103,7 +75,6 @@ bool rtsafe_memory_pool_create(RtMemPool_Handle* handlePtr,
         }
 
         list_add_tail(nodePtr, &poolPtr->unused);
-        poolPtr->unusedCount++;
     }
 
     *handlePtr = (RtMemPool_Handle)poolPtr;
@@ -120,21 +91,10 @@ void rtsafe_memory_pool_destroy(RtMemPool_Handle handle)
     k_list_head* nodePtr;
     RtMemPool* poolPtr = (RtMemPool*)handle;
 
-    // caller should deallocate all chunks prior releasing pool itself
-    if (poolPtr->usedCount != 0)
+    while (! list_empty(&poolPtr->unused))
     {
-        assert(0);
-    }
-
-    while (poolPtr->unusedCount != 0)
-    {
-        assert(! list_empty(&poolPtr->unused));
-
         nodePtr = poolPtr->unused.next;
-
         list_del(nodePtr);
-        poolPtr->unusedCount--;
-
         free(nodePtr);
     }
 
@@ -166,9 +126,6 @@ void* rtsafe_memory_pool_allocate_atomic(RtMemPool_Handle handle)
     nodePtr = poolPtr->unused.next;
     list_del(nodePtr);
 
-    poolPtr->unusedCount--;
-    poolPtr->usedCount++;
-
     list_add_tail(nodePtr, &poolPtr->used);
 
     pthread_mutex_unlock(&poolPtr->mutex);
@@ -189,8 +146,6 @@ void rtsafe_memory_pool_deallocate(RtMemPool_Handle handle, void* memoryPtr)
 
     list_del((k_list_head*)memoryPtr - 1);
     list_add_tail((k_list_head*)memoryPtr - 1, &poolPtr->unused);
-    poolPtr->usedCount--;
-    poolPtr->unusedCount++;
 
     pthread_mutex_unlock(&poolPtr->mutex);
 }
