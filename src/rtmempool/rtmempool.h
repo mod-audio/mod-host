@@ -39,7 +39,6 @@ typedef void* RtMemPool_Handle;
  *
  * <b>may/will sleep</b>
  *
- * @param poolName pool name, for debug purposes, max RTSAFE_MEMORY_POOL_NAME_MAX chars, including terminating zero char. May be NULL.
  * @param dataSize memory chunk size
  * @param maxPreallocated max chunks preallocated
  *

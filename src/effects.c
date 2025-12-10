@@ -727,12 +727,6 @@ typedef struct CACHED_EFFECT_FLUSH_T {
     port_t **ports;
 } cached_effect_flush_t;
 
-typedef struct EFFECTS_ADD_THREAD_DATA_T {
-    const char *uri;
-    int effect_id;
-    int activate;
-} effects_add_thread_data_t;
-
 
 /*
 ************************************************************************************************************************
@@ -867,9 +861,6 @@ static pthread_mutex_t g_midi_learning_mutex;
 static bool g_monitored_midi_controls[16];
 static bool g_monitored_midi_programs[16];
 
-/* multi-threading */
-static pthread_mutex_t g_multi_thread_mutex;
-
 #ifdef HAVE_HYLIA
 static hylia_t* g_hylia_instance;
 static hylia_time_info_t g_hylia_timeinfo;
@@ -995,10 +986,8 @@ static void ExternalControllerWriteFunction(LV2UI_Controller controller,
                                             const void *buffer);
 #endif
 
-static void* effects_add_thread(void* arg);
 static void* effects_activate_thread(void* arg);
 static void* effects_deactivate_thread(void* arg);
-static void* effects_remove_inner_loop_thread(void* arg);
 
 /*
 ************************************************************************************************************************
@@ -3489,8 +3478,6 @@ static const void* GetPortValueForState(const char* symbol, void* user_data, uin
 
 static void LoadPresets(effect_t *effect)
 {
-    pthread_mutex_lock(&g_multi_thread_mutex);
-
     LilvNodes* presets = lilv_plugin_get_related(effect->lilv_plugin, g_lilv_nodes.preset);
     uint32_t presets_count = lilv_nodes_size(presets);
     effect->presets_count = presets_count;
@@ -3505,8 +3492,6 @@ static void LoadPresets(effect_t *effect)
         j++;
     }
     lilv_nodes_free(presets);
-
-    pthread_mutex_unlock(&g_multi_thread_mutex);
 }
 
 // ignore const cast for this function, need to free const features array
@@ -4389,7 +4374,6 @@ int effects_init(void* client)
     pthread_mutex_init(&g_raw_midi_port_mutex, &mutex_atts);
     pthread_mutex_init(&g_audio_monitor_mutex, &mutex_atts);
     pthread_mutex_init(&g_midi_learning_mutex, &mutex_atts);
-    pthread_mutex_init(&g_multi_thread_mutex, &mutex_atts);
 #ifdef MOD_HMI_CONTROL_ENABLED
     pthread_mutex_init(&g_hmi_mutex, &mutex_atts);
 #endif
@@ -4973,7 +4957,6 @@ int effects_finish(int close_client)
     pthread_mutex_destroy(&g_raw_midi_port_mutex);
     pthread_mutex_destroy(&g_audio_monitor_mutex);
     pthread_mutex_destroy(&g_midi_learning_mutex);
-    pthread_mutex_destroy(&g_multi_thread_mutex);
 #ifdef MOD_HMI_CONTROL_ENABLED
     pthread_mutex_destroy(&g_hmi_mutex);
 #endif
@@ -5058,8 +5041,6 @@ int effects_add(const char *uri, int instance, int activate)
     }
     effect->jack_client = jack_client;
 
-    pthread_mutex_lock(&g_multi_thread_mutex);
-
     /* Get the plugin */
     plugin_uri = lilv_new_uri(g_lv2_data, uri);
     plugin = lilv_plugins_get_by_uri(g_plugins, plugin_uri);
@@ -5079,7 +5060,6 @@ int effects_add(const char *uri, int instance, int activate)
         if (!plugin)
 #endif
         {
-            pthread_mutex_unlock(&g_multi_thread_mutex);
             fprintf(stderr, "can't get plugin\n");
             error = ERR_LV2_INVALID_URI;
             goto error;
@@ -5102,7 +5082,6 @@ int effects_add(const char *uri, int instance, int activate)
 
     if (!lilv_instance)
     {
-        pthread_mutex_unlock(&g_multi_thread_mutex);
         fprintf(stderr, "can't get lilv instance\n");
         error = ERR_LV2_INSTANTIATION;
         goto error;
@@ -5256,7 +5235,6 @@ int effects_add(const char *uri, int instance, int activate)
             audio_buffer = (float *) mod_calloc(g_sample_rate, sizeof(float));
             if (!audio_buffer)
             {
-                pthread_mutex_unlock(&g_multi_thread_mutex);
                 fprintf(stderr, "can't get audio buffer\n");
                 error = ERR_MEMORY_ALLOCATION;
                 goto error;
@@ -5270,7 +5248,6 @@ int effects_add(const char *uri, int instance, int activate)
             jack_port = jack_port_register(jack_client, port_name, JACK_DEFAULT_AUDIO_TYPE, jack_flags, 0);
             if (jack_port == NULL)
             {
-                pthread_mutex_unlock(&g_multi_thread_mutex);
                 fprintf(stderr, "can't get jack port\n");
                 error = ERR_JACK_PORT_REGISTER;
                 goto error;
@@ -5289,7 +5266,6 @@ int effects_add(const char *uri, int instance, int activate)
             control_buffer = (float *) malloc(sizeof(float));
             if (!control_buffer)
             {
-                pthread_mutex_unlock(&g_multi_thread_mutex);
                 fprintf(stderr, "can't get control buffer\n");
                 error = ERR_MEMORY_ALLOCATION;
                 goto error;
@@ -5411,7 +5387,6 @@ int effects_add(const char *uri, int instance, int activate)
             cv_buffer = (float *) mod_calloc(g_sample_rate, sizeof(float));
             if (!cv_buffer)
             {
-                pthread_mutex_unlock(&g_multi_thread_mutex);
                 fprintf(stderr, "can't get cv buffer\n");
                 error = ERR_MEMORY_ALLOCATION;
                 goto error;
@@ -5426,7 +5401,6 @@ int effects_add(const char *uri, int instance, int activate)
             jack_port = jack_port_register(jack_client, port_name, JACK_DEFAULT_AUDIO_TYPE, jack_flags, 0);
             if (jack_port == NULL)
             {
-                pthread_mutex_unlock(&g_multi_thread_mutex);
                 fprintf(stderr, "can't get jack port\n");
                 error = ERR_JACK_PORT_REGISTER;
                 goto error;
@@ -5543,7 +5517,6 @@ int effects_add(const char *uri, int instance, int activate)
             jack_port = jack_port_register(jack_client, port_name, JACK_DEFAULT_MIDI_TYPE, jack_flags, 0);
             if (jack_port == NULL)
             {
-                pthread_mutex_unlock(&g_multi_thread_mutex);
                 fprintf(stderr, "can't get jack port\n");
                 error = ERR_JACK_PORT_REGISTER;
                 goto error;
@@ -5564,13 +5537,11 @@ int effects_add(const char *uri, int instance, int activate)
                     portitemptr->instance = instance;
                     portitemptr->jack_port = jack_port;
 
-                    pthread_mutex_unlock(&g_multi_thread_mutex);
                     pthread_mutex_lock(&g_raw_midi_port_mutex);
 
                     list_add_tail(&portitemptr->siblings, &g_raw_midi_port_list);
 
                     pthread_mutex_unlock(&g_raw_midi_port_mutex);
-                    pthread_mutex_lock(&g_multi_thread_mutex);
                 }
             }
         }
@@ -5862,8 +5833,6 @@ int effects_add(const char *uri, int instance, int activate)
 
     lilv_node_free(plugin_uri);
 
-    pthread_mutex_unlock(&g_multi_thread_mutex);
-
     /* create ring buffer for events from socket/commandline */
     if (control_in_size != 0)
     {
@@ -5955,54 +5924,22 @@ int effects_add(const char *uri, int instance, int activate)
     return instance;
 
 error:
-    pthread_mutex_lock(&g_multi_thread_mutex);
     lilv_node_free(plugin_uri);
-    pthread_mutex_unlock(&g_multi_thread_mutex);
 
     effects_remove(instance);
     return error;
 }
 
-static void* effects_add_thread(void* arg)
-{
-    effects_add_thread_data_t *data = arg;
-
-    effects_add(data->uri, data->effect_id, data->activate);
-
-    return NULL;
-}
-
 int effects_add_multi(int activate, int num_effects, int *effects, const char *const *uris)
 {
-    int num_threads = 0;
-    ZixThread *threads = malloc(sizeof(ZixThread) * num_effects);
-    effects_add_thread_data_t *data = malloc(sizeof(effects_add_thread_data_t) * num_effects);
+    if (num_effects <= 0)
+        return ERR_INVALID_OPERATION;
 
-    if (!threads || !data)
-    {
-        free(threads);
-        free(data);
-        return ERR_MEMORY_ALLOCATION;
-    }
+    if (num_effects == 1)
+        return effects_add(*uris, *effects, activate);
 
     for (int i = 0; i < num_effects; ++i)
-    {
-        effects_add_thread_data_t *arg = &data[i];
-        arg->uri = uris[i];
-        arg->effect_id = effects[i];
-        arg->activate = activate;
-
-        if (zix_thread_create(&threads[num_threads], 0, effects_add_thread, arg) == 0)
-            ++num_threads;
-        else
-            effects_add(uris[i], effects[i], activate);
-    }
-
-    for (int i = 0; i < num_threads; ++i)
-        zix_thread_join(threads[i], NULL);
-
-    free(threads);
-    free(data);
+        effects_add(uris[i], effects[i], activate);
 
     return SUCCESS;
 }
@@ -6368,9 +6305,7 @@ static void effects_remove_inner_loop(int effect_id)
                 // TODO destroy port mutexes
                 free(effect->ports[i]->buffer);
 
-                pthread_mutex_lock(&g_multi_thread_mutex);
                 lilv_scale_points_free(effect->ports[i]->scale_points);
-                pthread_mutex_unlock(&g_multi_thread_mutex);
 
                 free(effect->ports[i]);
             }
@@ -6380,7 +6315,6 @@ static void effects_remove_inner_loop(int effect_id)
 
     if (effect->properties)
     {
-        pthread_mutex_lock(&g_multi_thread_mutex);
         for (uint32_t i = 0; i < effect->properties_count; i++)
         {
             if (effect->properties[i])
@@ -6389,7 +6323,6 @@ static void effects_remove_inner_loop(int effect_id)
                 lilv_node_free(effect->properties[i]->type);
             }
         }
-        pthread_mutex_unlock(&g_multi_thread_mutex);
 
         for (uint32_t i = 0; i < effect->properties_count; i++)
             free(effect->properties[i]);
@@ -6432,10 +6365,8 @@ static void effects_remove_inner_loop(int effect_id)
 
     if (effect->presets)
     {
-        pthread_mutex_lock(&g_multi_thread_mutex);
         for (uint32_t i = 0; i < effect->presets_count; i++)
             lilv_free(effect->presets[i]->uri);
-        pthread_mutex_unlock(&g_multi_thread_mutex);
 
         for (uint32_t i = 0; i < effect->presets_count; i++)
             free(effect->presets[i]);
@@ -6459,15 +6390,6 @@ static void effects_remove_inner_loop(int effect_id)
     }
 
     InstanceDelete(effect_id);
-}
-
-static void* effects_remove_inner_loop_thread(void* arg)
-{
-    int effect_id = *(int*)arg;
-
-    effects_remove_inner_loop(effect_id);
-
-    return NULL;
 }
 
 int effects_remove(int effect_id)
@@ -6619,21 +6541,14 @@ int effects_remove_multi(int num_effects, int *effects)
     RunPostPonedEvents(-3);
 
     // cleanup the plugins
-    num_threads = 0;
     for (int i = 0, effect_id; i < num_effects; ++i)
     {
         effect_id = effects[i];
         if (!InstanceExist(effect_id))
             continue;
 
-        if (zix_thread_create(&threads[num_threads], PATH_MAX + sizeof(void*), effects_remove_inner_loop_thread, &effects[i]) == 0)
-            ++num_threads;
-        else
-            effects_remove_inner_loop(effect_id);
+        effects_remove_inner_loop(effect_id);
     }
-
-    for (int i = 0; i < num_threads; ++i)
-        zix_thread_join(threads[i], NULL);
 
     // start thread again
     if (g_postevents_running == 0)
