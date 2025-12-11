@@ -4875,7 +4875,7 @@ int effects_finish(int close_client)
     sem_post(&g_postevents_semaphore);
     zix_thread_join(g_postevents_thread, NULL);
 
-    if (close_client)
+    if (close_client && g_jack_global_client != NULL && strcmp(jack_get_client_name(g_jack_global_client), "mod-host") == 0)
         monitor_client_stop();
 
     effects_remove(REMOVE_ALL);
