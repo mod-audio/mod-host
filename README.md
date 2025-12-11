@@ -147,6 +147,10 @@ The commands supported by mod-host are:
         * connect the same connected ports of a port to another, so they match.
         e.g.: connect "effect_0:in" "effect_1:in"
 
+    connect_safe <origin_port> <destination_port>
+        * safely connect two jack ports, verifying that they exist beforehand
+        e.g.: connect_safe "system:capture_1" "effect_0:in"
+
     disconnect <origin_port> <destination_port>
         * disconnect two jack ports
         e.g.: disconnect "system:capture_1" "effect_0:in"
@@ -154,6 +158,10 @@ The commands supported by mod-host are:
     disconnect_all <origin_port>
         * disconnect all connections of a jack port
         e.g.: disconnect_all "effect_0:in"
+
+    disconnect_safe <origin_port> <destination_port>
+        * safely disconnect two jack ports, verifying that they exist and have connections beforehand
+        e.g.: disconnect_safe "system:capture_1" "effect_0:in"
 
     bypass <instance_number> <bypass_value>
         * toggle effect processing

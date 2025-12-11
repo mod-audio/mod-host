@@ -6706,9 +6706,16 @@ int effects_activate_multi(int value, int num_effects, int *effects)
     return SUCCESS;
 }
 
-int effects_connect(const char *portA, const char *portB)
+int effects_connect(const char *portA, const char *portB, int check)
 {
     int ret;
+
+    if (check != 0)
+    {
+        if (jack_port_by_name(g_jack_global_client, portA) == NULL ||
+            jack_port_by_name(g_jack_global_client, portB) == NULL)
+            return ERR_JACK_PORT_CONNECTION;
+    }
 
     ret = jack_connect(g_jack_global_client, portA, portB);
     if (ret != 0 && ret != EEXIST) ret = jack_connect(g_jack_global_client, portB, portA);
@@ -6736,9 +6743,20 @@ int effects_connect_matching(const char *matching, const char *port)
     return SUCCESS;
 }
 
-int effects_disconnect(const char *portA, const char *portB)
+int effects_disconnect(const char *portA, const char *portB, int check)
 {
     int ret;
+
+    if (check != 0)
+    {
+        const jack_port_t *jportA = jack_port_by_name(g_jack_global_client, portA);
+        const jack_port_t *jportB = jack_port_by_name(g_jack_global_client, portB);
+        if (jportA == NULL || jportB == NULL)
+            return ERR_JACK_PORT_CONNECTION;
+
+        if (jack_port_connected(jportA) == 0 || jack_port_connected(jportB) == 0)
+            return ERR_JACK_PORT_CONNECTION;
+    }
 
     ret = jack_disconnect(g_jack_global_client, portA, portB);
     if (ret != 0) ret = jack_disconnect(g_jack_global_client, portB, portA);
