@@ -311,12 +311,10 @@ The commands supported by mod-host are:
         * add an LV2 plugin encapsulated as a jack client, in activated state (multiple instance variant)
         e.g.: multi_add 2 "http://lv2plug.in/plugins/eg-amp" 0 "http://lv2plug.in/plugins/eg-amp" 1
         instance_number must be any value between 0 ~ 9990, inclusively
-        !EXPERIMENTAL!
 
     multi_remove <instance_count> <instance_number...>
         * remove an LV2 plugin instance, and also the jack client (multiple instance variant)
         e.g.: multi_remove 2 0 1
-        !EXPERIMENTAL!
 
     multi_activate <activate_value> <instance_count> <instance_number...>
         * toggle effect activated state (multiple instance variant)
@@ -328,7 +326,6 @@ The commands supported by mod-host are:
         * add an LV2 plugin encapsulated as a jack client, in deactivated state (multiple instance variant)
         e.g.: multi_preload 2 "http://lv2plug.in/plugins/eg-amp" 0 "http://lv2plug.in/plugins/eg-amp" 1
         instance_number must be any value between 0 ~ 9990, inclusively
-        !EXPERIMENTAL!
 
     multi_bypass <bypass_value> <instance_count> <instance_number...>
         * toggle effect processing (multiple instance variant)
