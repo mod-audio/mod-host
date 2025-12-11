@@ -33,12 +33,12 @@
 #include <stdlib.h>
 #include <fcntl.h>
 #include <string.h>
-#include <unistd.h>
 #include <getopt.h>
 #include <jack/jack.h>
 #include <signal.h>
 
 #ifndef SKIP_READLINE
+#include <unistd.h>
 #include <readline/readline.h>
 #include <readline/history.h>
 #endif

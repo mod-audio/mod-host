@@ -25,6 +25,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#ifndef SKIP_READLINE
+#include <unistd.h>
+#endif
+
 #include "protocol.h"
 #include "utils.h"
 
@@ -216,7 +220,12 @@ void protocol_parse(msg_t *msg)
             g_commands[index].callback(&proto);
             if (proto.response)
             {
-                SEND_TO_SENDER(msg->sender_id, proto.response, proto.response_size);
+#ifndef SKIP_READLINE
+                if (msg->sender_id == STDOUT_FILENO)
+                    write(msg->sender_id, proto.response, proto.response_size+1);
+                else
+#endif
+                    socket_send(msg->sender_id, proto.response, proto.response_size+1);
                 if (g_verbose) printf("PROTOCOL: response '%s'\n", proto.response);
 
                 FREE(proto.response);
@@ -226,7 +235,12 @@ void protocol_parse(msg_t *msg)
     // Protocol error
     else
     {
-        SEND_TO_SENDER(msg->sender_id, g_error_messages[-index-1], strlen(g_error_messages[-index-1]));
+#ifndef SKIP_READLINE
+        if (msg->sender_id == STDOUT_FILENO)
+            write(msg->sender_id, g_error_messages[-index-1], strlen(g_error_messages[-index-1])+1);
+        else
+#endif
+            socket_send(msg->sender_id, g_error_messages[-index-1], strlen(g_error_messages[-index-1])+1);
         if (g_verbose) printf("PROTOCOL: error '%s'\n", g_error_messages[-index-1]);
     }
 
