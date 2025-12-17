@@ -37,8 +37,11 @@
 #include <jack/jack.h>
 #include <signal.h>
 
-#ifndef SKIP_READLINE
+#ifndef _WIN32
 #include <unistd.h>
+#endif
+
+#ifndef SKIP_READLINE
 #include <readline/readline.h>
 #include <readline/history.h>
 #endif
