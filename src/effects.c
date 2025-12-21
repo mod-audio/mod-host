@@ -4541,6 +4541,9 @@ int effects_init(void* client)
 
     /* Load all LV2 data */
     g_lv2_data = lilv_world_new();
+#ifdef LILV_OPTION_OBJECT_INDEX
+    lilv_world_set_option(g_lv2_data, LILV_OPTION_OBJECT_INDEX, NULL);
+#endif
     lilv_world_load_all(g_lv2_data);
     g_plugins = lilv_world_get_all_plugins(g_lv2_data);
 
