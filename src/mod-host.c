@@ -1003,6 +1003,18 @@ static void term_signal(int sig)
     return; (void)sig;
 }
 
+#ifdef _WIN32
+static BOOL WINAPI win32_signal(DWORD type)
+{
+    if (type == CTRL_C_EVENT)
+    {
+        term_signal(0);
+        return TRUE;
+    }
+    return FALSE;
+}
+#endif
+
 static int mod_host_init(jack_client_t* client, int socket_port, int feedback_port)
 {
 #ifdef HAVE_FFTW335
@@ -1266,6 +1278,7 @@ int main(int argc, char **argv)
 #endif
     {
 #ifdef _WIN32
+        SetConsoleCtrlHandler(win32_signal, TRUE);
 #else
         struct sigaction sig;
         memset(&sig, 0, sizeof(sig));

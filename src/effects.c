@@ -1019,7 +1019,7 @@ static char* _strchrnul(const char *s, int c)
 
 #ifdef _WIN32
 // missing on Windows
-static char* realpath(const char *name, char *resolved)
+static char* _realpath(const char *name, char *resolved)
 {
     if (name == NULL)
         return NULL;
