@@ -911,6 +911,7 @@ static void* PostPonedEventsThread(void* arg);
 #ifdef MOD_HMI_CONTROL_ENABLED
 static void* HMIClientThread(void* arg);
 #endif
+static void PreRunPlugin(effect_t *effect);
 static int ProcessPlugin(jack_nframes_t nframes, void *arg);
 static bool SetPortValue(port_t *port, float value, int effect_id, bool is_bypass, bool from_ui);
 static float UpdateValueFromMidi(midi_cc_t* mcc, uint16_t mvalue, bool highres);
@@ -1137,7 +1138,10 @@ static int BufferSize(jack_nframes_t nframes, void* data)
             effect->options_interface->set(effect->lilv_instance->lv2_handle, options);
 
             if (effect->activated)
+            {
                 lilv_instance_activate(effect->lilv_instance);
+                PreRunPlugin(effect);
+            }
         }
     }
 #ifdef HAVE_HYLIA
@@ -1896,6 +1900,126 @@ static void* HMIClientThread(void* arg)
     return NULL;
 }
 #endif
+
+static void PreRunPlugin(effect_t *effect)
+{
+    if ((effect->hints & HINT_IS_LIVE) == 0 &&
+        (!g_processing_enabled || (
+         (effect->hints & HINT_STATE_UNSAFE) && pthread_mutex_lock(&effect->state_restore_mutex) != 0)))
+    {
+        return;
+    }
+
+    /* common variables */
+    port_t *port;
+    unsigned int i;
+    float value;
+    bool needs_post = false;
+
+    if (effect->hints & HINT_TRANSPORT)
+    {
+        effect->transport_rolling = g_jack_rolling;
+        // effect->transport_frame = pos.frame;
+        effect->transport_bpb = g_transport_bpb;
+        effect->transport_bpm = g_transport_bpm;
+    }
+    if (effect->bpb_index >= 0)
+    {
+        *(effect->ports[effect->bpb_index]->buffer) = g_transport_bpb;
+    }
+    if (effect->bpm_index >= 0)
+    {
+        *(effect->ports[effect->bpm_index]->buffer) = g_transport_bpm;
+    }
+    if (effect->speed_index >= 0)
+    {
+        *(effect->ports[effect->speed_index]->buffer) = g_jack_rolling ? 1.0f : 0.0f;
+    }
+
+    /* Prepare midi/event ports */
+    for (i = 0; i < effect->input_event_ports_count; i++)
+    {
+        port = effect->input_event_ports[i];
+        lv2_evbuf_reset(port->evbuf, true);
+    }
+
+    for (i = 0; i < effect->output_event_ports_count; i++)
+        lv2_evbuf_reset(effect->output_event_ports[i]->evbuf, false);
+
+    /* Bypass */
+    if (effect->bypass > 0.5f && effect->enabled_index < 0)
+    {
+        lilv_instance_run(effect->lilv_instance, 0);
+    }
+    /* Effect process */
+    else
+    {
+        /* Run the effect */
+        lilv_instance_run(effect->lilv_instance, 0);
+
+        /* Notify the plugin the run() cycle is finished */
+        if (effect->worker.iface)
+        {
+            /* Process any replies from the worker. */
+            worker_emit_responses(&effect->worker);
+            if (effect->worker.iface->end_run)
+            {
+                effect->worker.iface->end_run(effect->lilv_instance->lv2_handle);
+            }
+        }
+    }
+
+    if (effect->hints & HINT_TRIGGERS)
+    {
+        for (i = 0; i < effect->input_control_ports_count; i++)
+        {
+            port = effect->input_control_ports[i];
+
+            if ((port->hints & HINT_TRIGGER) && floats_differ_enough(port->prev_value, port->def_value))
+                port->prev_value = *(port->buffer) = port->def_value;
+        }
+    }
+
+    if (effect->hints & HINT_OUTPUT_MONITORS)
+    {
+        for (i = 0; i < effect->output_control_ports_count; i++)
+        {
+            port = effect->output_control_ports[i];
+
+            if ((port->hints & HINT_MONITORED) == 0)
+                continue;
+
+            value = *(port->buffer);
+
+            if (! floats_differ_enough(port->prev_value, value))
+                continue;
+
+            postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
+
+            if (posteventptr == NULL)
+                continue;
+
+            port->prev_value = value;
+
+            posteventptr->event.type = POSTPONED_OUTPUT_MONITOR;
+            posteventptr->event.parameter.effect_id = effect->instance;
+            posteventptr->event.parameter.symbol    = port->symbol;
+            posteventptr->event.parameter.value     = value;
+
+            pthread_mutex_lock(&g_rtsafe_mutex);
+            list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
+            pthread_mutex_unlock(&g_rtsafe_mutex);
+
+            needs_post = true;
+        }
+    }
+
+    if (effect->hints & HINT_STATE_UNSAFE)
+        pthread_mutex_unlock(&effect->state_restore_mutex);
+
+    if (needs_post)
+        sem_post(&g_postevents_semaphore);
+}
 
 static int ProcessPlugin(jack_nframes_t nframes, void *arg)
 {
@@ -5122,7 +5246,7 @@ int effects_add(const char *uri, int instance, int activate)
     if (lilv_plugin_has_extension_data(effect->lilv_plugin, g_lilv_nodes.worker_interface))
     {
         const LV2_Worker_Interface *worker_interface =
-            (const LV2_Worker_Interface*) lilv_instance_get_extension_data(effect->lilv_instance,
+            (const LV2_Worker_Interface*) lilv_instance_get_extension_data(lilv_instance,
                                                                            LV2_WORKER__interface);
 
         worker_init(&effect->worker, lilv_instance, worker_interface, worker_buf_size);
@@ -5131,21 +5255,21 @@ int effects_add(const char *uri, int instance, int activate)
     if (lilv_plugin_has_extension_data(effect->lilv_plugin, g_lilv_nodes.options_interface))
     {
         effect->options_interface =
-            (const LV2_Options_Interface*) lilv_instance_get_extension_data(effect->lilv_instance,
+            (const LV2_Options_Interface*) lilv_instance_get_extension_data(lilv_instance,
                                                                             LV2_OPTIONS__interface);
     }
 
     if (lilv_plugin_has_extension_data(effect->lilv_plugin, g_lilv_nodes.license_interface))
     {
         effect->license_iface =
-            (const MOD_License_Interface*) lilv_instance_get_extension_data(effect->lilv_instance,
+            (const MOD_License_Interface*) lilv_instance_get_extension_data(lilv_instance,
                                                                             MOD_LICENSE__interface);
     }
 
     if (lilv_plugin_has_extension_data(effect->lilv_plugin, g_lilv_nodes.state_interface))
     {
         effect->state_iface =
-            (const LV2_State_Interface*) lilv_instance_get_extension_data(effect->lilv_instance,
+            (const LV2_State_Interface*) lilv_instance_get_extension_data(lilv_instance,
                                                                           LV2_STATE__interface);
         effect->hints |= HINT_HAS_STATE;
 
@@ -5160,7 +5284,7 @@ int effects_add(const char *uri, int instance, int activate)
             LilvState *state = lilv_state_new_from_world(g_lv2_data, &g_urid_map, plugin_uri);
 
             if (state != NULL) {
-                lilv_state_restore(state, effect->lilv_instance, NULL, NULL,
+                lilv_state_restore(state, lilv_instance, NULL, NULL,
                                    LV2_STATE_IS_POD|LV2_STATE_IS_PORTABLE, effect->features);
                 lilv_state_free(state);
             }
@@ -5171,7 +5295,7 @@ int effects_add(const char *uri, int instance, int activate)
     if (lilv_plugin_has_extension_data(effect->lilv_plugin, g_lilv_nodes.hmi_interface))
     {
         effect->hmi_notif =
-            (const LV2_HMI_PluginNotification*) lilv_instance_get_extension_data(effect->lilv_instance,
+            (const LV2_HMI_PluginNotification*) lilv_instance_get_extension_data(lilv_instance,
                                                                                  LV2_HMI__PluginNotification);
     }
 #endif
@@ -5890,6 +6014,7 @@ int effects_add(const char *uri, int instance, int activate)
     if (activate)
     {
         lilv_instance_activate(lilv_instance);
+        PreRunPlugin(effect);
 
         /* Try activate the Jack client */
         if (jack_activate(jack_client) != 0)
@@ -6586,6 +6711,7 @@ int effects_activate(int effect_id, int value)
         {
             effect->activated = true;
             lilv_instance_activate(effect->lilv_instance);
+            PreRunPlugin(effect);
 
             if (jack_activate(effect->jack_client) != 0)
             {
@@ -6615,9 +6741,11 @@ int effects_activate(int effect_id, int value)
 
 static void* effects_activate_thread(void* arg)
 {
-    jack_client_t *jack_client = arg;
+    effect_t *effect = arg;
 
-    if (jack_activate(jack_client) != 0)
+    PreRunPlugin(effect);
+
+    if (jack_activate(effect->jack_client) != 0)
         fprintf(stderr, "can't activate jack_client\n");
 
     return NULL;
@@ -6666,10 +6794,15 @@ int effects_activate_multi(int value, int num_effects, int *effects)
                 effect->activated = true;
                 lilv_instance_activate(effect->lilv_instance);
 
-                if (zix_thread_create(&threads[num_threads], sizeof(void*), effects_activate_thread, effect->jack_client) == 0)
+                if (zix_thread_create(&threads[num_threads], sizeof(void*), effects_activate_thread, effect) == 0)
+                {
                     ++num_threads;
+                }
                 else
+                {
+                    PreRunPlugin(effect);
                     jack_activate(effect->jack_client);
+                }
             }
         }
         else
