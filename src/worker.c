@@ -18,6 +18,8 @@
 
 #include "worker.h"
 
+#include <sched.h>
+
 static LV2_Worker_Status worker_respond(LV2_Worker_Respond_Handle handle, uint32_t size, const void* data)
 {
     worker_t* worker = (worker_t*)handle;
@@ -38,16 +40,23 @@ static void* worker_func(void* data)
 
         while (jack_ringbuffer_read_space(worker->requests) != 0) {
             uint32_t size = 0;
-            jack_ringbuffer_read(worker->requests, (char*)&size, sizeof(size));
+            jack_ringbuffer_peek(worker->requests, (char*)&size, sizeof(size));
 
-            if (!(buf = realloc(buf, size))) {
-                fprintf(stderr, "worker_func: realloc() failed\n");
-                free(buf);
-                return NULL;
+            if (jack_ringbuffer_read_space(worker->requests) < sizeof(size) + size) {
+                sched_yield();
+                continue;
             }
 
-            jack_ringbuffer_read(worker->requests, (char*)buf, size);
-            worker->iface->work(worker->instance->lv2_handle, worker_respond, worker, size, buf);
+            jack_ringbuffer_read_advance(worker->requests, sizeof(size));
+
+            void *const new_buf = realloc(buf, size);
+            if (new_buf) {
+                buf = new_buf;
+                jack_ringbuffer_read(worker->requests, (char*)buf, size);
+                worker->iface->work(worker->instance->lv2_handle, worker_respond, worker, size, buf);
+            } else {
+                jack_ringbuffer_read_advance(worker->requests, size);
+            }
         }
     }
 
@@ -95,14 +104,19 @@ LV2_Worker_Status worker_schedule(LV2_Worker_Schedule_Handle handle, uint32_t si
 void worker_emit_responses(worker_t *worker)
 {
     if (worker->responses) {
-        uint32_t read_space = jack_ringbuffer_read_space(worker->responses);
-        while (read_space) {
+        while (jack_ringbuffer_read_space(worker->responses) != 0) {
             uint32_t size = 0;
-            jack_ringbuffer_read(worker->responses, (char*)&size, sizeof(size));
+            jack_ringbuffer_peek(worker->responses, (char*)&size, sizeof(size));
+
+            if (jack_ringbuffer_read_space(worker->responses) < sizeof(size) + size) {
+                sched_yield();
+                continue;
+            }
+
+            jack_ringbuffer_read_advance(worker->responses, sizeof(size));
             jack_ringbuffer_read(worker->responses, (char*)worker->response, size);
 
             worker->iface->work_response(worker->instance->lv2_handle, size, worker->response);
-            read_space -= sizeof(size) + size;
         }
     }
 }
