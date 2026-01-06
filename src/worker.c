@@ -1,5 +1,6 @@
 /*
   Copyright 2007-2012 David Robillard <http://drobilla.net>
+  Copyright 2016-2026 Filipe Coelho <falktx@falktx.com>
 
   Permission to use, copy, modify, and/or distribute this software for any
   purpose with or without fee is hereby granted, provided that the above
@@ -14,11 +15,16 @@
   OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 */
 
-#include <stdlib.h>
-
 #include "worker.h"
 
 #include <sched.h>
+#include <stdlib.h>
+
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <sys/mman.h>
+#endif
 
 static LV2_Worker_Status worker_respond(LV2_Worker_Respond_Handle handle, uint32_t size, const void* data)
 {
@@ -73,9 +79,18 @@ void worker_init(worker_t *worker, LilvInstance *instance, const LV2_Worker_Inte
     zix_thread_create(&worker->thread, size + sizeof(void*) * 4, worker_func, worker);
     worker->requests  = jack_ringbuffer_create(size);
     worker->responses = jack_ringbuffer_create(size);
-    worker->response  = malloc(size);
     jack_ringbuffer_mlock(worker->requests);
     jack_ringbuffer_mlock(worker->responses);
+
+    const uint32_t max_response_size = jack_ringbuffer_write_space(worker->responses);
+    worker->response = malloc(max_response_size);
+#ifdef _WIN32
+    VirtualLock(worker, sizeof(max_response_size));
+    VirtualLock(worker->response, max_response_size);
+#else
+    mlock(worker, sizeof(*worker));
+    mlock(worker->response, max_response_size);
+#endif
 }
 
 void worker_finish(worker_t *worker)
