@@ -97,6 +97,8 @@ typedef enum {
 #define MAX_POSTPONED_EVENTS    8192
 #define MAX_HMI_ADDRESSINGS     128
 
+#define MAX_SYNC_SCHEDULED_PARAMS 512
+
 // used for local stack variables
 #define MAX_CHAR_BUF_SIZE       255
 
@@ -203,6 +205,7 @@ int effects_monitor_midi_control(int channel, int enable);
 int effects_monitor_midi_program(int channel, int enable);
 void effects_transport(int rolling, double beats_per_bar, double beats_per_minute);
 int effects_transport_sync_mode(const char *mode);
+void effect_sync_scheduled_params(int realtime);
 void effects_output_data_ready(void);
 int effects_show_external_ui(int effect_id);
 void effects_idle_external_uis(void);

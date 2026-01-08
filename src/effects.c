@@ -611,6 +611,11 @@ typedef struct HMI_ADDRESSING_T {
 } hmi_addressing_t;
 #endif
 
+typedef struct SYNC_SCHEDULED_PARAM_T {
+    port_t *port;
+    float value;
+} sync_scheduled_param_t;
+
 typedef struct POSTPONED_PARAMETER_EVENT_T {
     int effect_id;
     const char* symbol;
@@ -725,6 +730,7 @@ typedef struct RAW_MIDI_PORT_ITEM {
 typedef struct CACHED_EFFECT_FLUSH_T {
     effect_t *effect;
     port_t **ports;
+    int num_ports;
 } cached_effect_flush_t;
 
 
@@ -860,6 +866,11 @@ static pthread_mutex_t g_midi_learning_mutex;
 /* MIDI control and program monitoring */
 static bool g_monitored_midi_controls[16];
 static bool g_monitored_midi_programs[16];
+
+/* Postponed port updates */
+static sync_scheduled_param_t g_sync_scheduled_params[MAX_SYNC_SCHEDULED_PARAMS];
+static pthread_mutex_t g_sync_scheduled_params_mutex;
+static unsigned int g_sync_scheduled_param_count;
 
 #ifdef HAVE_HYLIA
 static hylia_t* g_hylia_instance;
@@ -4498,6 +4509,7 @@ int effects_init(void* client)
     pthread_mutex_init(&g_raw_midi_port_mutex, &mutex_atts);
     pthread_mutex_init(&g_audio_monitor_mutex, &mutex_atts);
     pthread_mutex_init(&g_midi_learning_mutex, &mutex_atts);
+    pthread_mutex_init(&g_sync_scheduled_params_mutex, &mutex_atts);
 #ifdef MOD_HMI_CONTROL_ENABLED
     pthread_mutex_init(&g_hmi_mutex, &mutex_atts);
 #endif
@@ -5084,6 +5096,7 @@ int effects_finish(int close_client)
     pthread_mutex_destroy(&g_raw_midi_port_mutex);
     pthread_mutex_destroy(&g_audio_monitor_mutex);
     pthread_mutex_destroy(&g_midi_learning_mutex);
+    pthread_mutex_destroy(&g_sync_scheduled_params_mutex);
 #ifdef MOD_HMI_CONTROL_ENABLED
     pthread_mutex_destroy(&g_hmi_mutex);
 #endif
@@ -6561,11 +6574,19 @@ int effects_remove(int effect_id)
 
         start = 0;
         end = MAX_PLUGIN_INSTANCES;
+
+        // clear all sync scheduled params if removing all plugins
+        pthread_mutex_lock(&g_sync_scheduled_params_mutex);
+        g_sync_scheduled_param_count = 0;
+        pthread_mutex_unlock(&g_sync_scheduled_params_mutex);
     }
     else
     {
         start = effect_id;
         end = start + 1;
+
+        // trigger sync scheduled params now for no dangling pointers
+        effect_sync_scheduled_params(false);
     }
 
     // stop plugins processing
@@ -7000,17 +7021,36 @@ int effects_set_parameter_multi(const char *control_symbol, float value, int num
     }
 
     // the critical loop, must be as fast and small as possible
-    port_t *port;
-    for (int i = 0; i < num_ports; i++)
+    bool scheduled = true;
+    pthread_mutex_lock(&g_sync_scheduled_params_mutex);
+    if (g_sync_scheduled_param_count + num_ports <= MAX_SYNC_SCHEDULED_PARAMS)
     {
-        port = ports[i];
-        port->prev_value = *port->buffer = value;
+        int p = g_sync_scheduled_param_count;
+        for (int i = 0; i < num_ports; i++, p++)
+        {
+            g_sync_scheduled_params[p].port = ports[i];
+            g_sync_scheduled_params[p].value = value;
+        }
+        g_sync_scheduled_param_count = p;
     }
+    else
+    {
+        scheduled = false;
+    }
+    pthread_mutex_unlock(&g_sync_scheduled_params_mutex);
 
+    if (! scheduled)
+    {
+        // no space to schedule events, trigger param changes now
+        for (int i = 0; i < num_ports; i++)
+        {
+            port_t *port = ports[i];
+            port->prev_value = *port->buffer = value;
 #ifdef WITH_EXTERNAL_UI_SUPPORT
-    for (int i = 0; i < num_ports; i++)
-        ports[i]->hints |= HINT_SHOULD_UPDATE;
+            port->hints |= HINT_SHOULD_UPDATE;
 #endif
+        }
+    }
 
     free(ports);
 
@@ -7080,6 +7120,7 @@ int effects_flush_parameters_multi(int reset, int param_count, const flushed_par
     if (num_effects == 1)
         return effects_flush_parameters(*effects, reset, param_count, params);
 
+    cached_effect_flush_t *cached_effect;
     effect_t *effect;
     port_t *port;
 
@@ -7096,54 +7137,70 @@ int effects_flush_parameters_multi(int reset, int param_count, const flushed_par
         {
             effect = &(g_effects[effect_id]);
 
-            cached_effect_flush_t *cached_effect = &cached_effects[num_cached_effects++];
+            cached_effect = &cached_effects[num_cached_effects++];
             cached_effect->effect = effect;
             cached_effect->ports = malloc(sizeof(port_t*) * param_count);
+            cached_effect->num_ports = 0;
 
             for (int j = 0; j < param_count; j++)
-                cached_effect->ports[j] = FindEffectInputPortBySymbol(effect, params[j].symbol);
-        }
-    }
-
-    for (int i = 0; i < num_cached_effects; i++)
-    {
-        effect = cached_effects[i].effect;
-        if (effect->reset_index >= 0 && reset != 0)
-        {
-            port = effect->ports[effect->reset_index];
-            port->prev_value = *(port->buffer) = reset;
+            {
+                if ((cached_effect->ports[cached_effect->num_ports] = FindEffectInputPortBySymbol(effect, params[j].symbol)))
+                    ++cached_effect->num_ports;
+            }
         }
     }
 
     // the critical loop, must be as fast and small as possible
-    for (int j = 0; j < param_count; j++)
+    bool scheduled = true;
+    const int resetb = reset != 0 ? 1 : 0;
+    pthread_mutex_lock(&g_sync_scheduled_params_mutex);
+    if (g_sync_scheduled_param_count + (param_count + resetb) * num_cached_effects <= MAX_SYNC_SCHEDULED_PARAMS)
     {
+        int p = g_sync_scheduled_param_count;
         for (int i = 0; i < num_cached_effects; i++)
         {
-            if ((port = cached_effects[i].ports[j]))
+            cached_effect = &cached_effects[i];
+            effect = cached_effect->effect;
+            for (int j = 0; j < cached_effect->num_ports; j++, p++)
+            {
+                g_sync_scheduled_params[p].port = cached_effect->ports[j];
+                g_sync_scheduled_params[p].value = params[j].value;
+            }
+            if (effect->reset_index >= 0 && reset != 0)
+            {
+                g_sync_scheduled_params[p].port = effect->ports[effect->reset_index];
+                g_sync_scheduled_params[p].value = reset;
+                ++p;
+            }
+        }
+        g_sync_scheduled_param_count = p;
+    }
+    else
+    {
+        scheduled = false;
+    }
+    pthread_mutex_unlock(&g_sync_scheduled_params_mutex);
+
+    if (! scheduled)
+    {
+        // no space to schedule events, trigger param changes now
+        for (int i = 0; i < num_cached_effects; i++)
+        {
+            cached_effect = &cached_effects[i];
+            effect = cached_effect->effect;
+            for (int j = 0; j < cached_effect->num_ports; j++)
+            {
+                port = cached_effect->ports[j];
                 port->prev_value = *(port->buffer) = params[j].value;
-        }
-    }
-
 #ifdef WITH_EXTERNAL_UI_SUPPORT
-    for (int i = 0; i < num_cached_effects; i++)
-    {
-        for (int j = 0; j < param_count; j++)
-        {
-            if ((port = cached_effects[i].ports[j]))
                 port->hints |= HINT_SHOULD_UPDATE;
-        }
-    }
 #endif
-
-    // reset a 2nd time in case plugin was processing while we changed parameters
-    for (int i = 0; i < num_cached_effects; i++)
-    {
-        effect = cached_effects[i].effect;
-        if (effect->reset_index >= 0 && reset != 0)
-        {
-            port = effect->ports[effect->reset_index];
-            port->prev_value = *(port->buffer) = reset;
+            }
+            if (effect->reset_index >= 0 && reset != 0)
+            {
+                port = effect->ports[effect->reset_index];
+                port->prev_value = *(port->buffer) = reset;
+            }
         }
     }
 
@@ -9452,6 +9509,33 @@ int effects_transport_sync_mode(const char* mode)
 
     g_transport_sync_mode = TRANSPORT_SYNC_NONE;
     return SUCCESS;
+}
+
+void effect_sync_scheduled_params(int realtime)
+{
+    port_t *port;
+
+    if (realtime != 0)
+    {
+        if (pthread_mutex_trylock(&g_sync_scheduled_params_mutex) != 0)
+            return;
+    }
+    else
+    {
+        pthread_mutex_lock(&g_sync_scheduled_params_mutex);
+    }
+
+    for (unsigned int i = 0; i < g_sync_scheduled_param_count; i++)
+    {
+        port = g_sync_scheduled_params[i].port;
+        port->prev_value = *port->buffer = g_sync_scheduled_params[i].value;
+#ifdef WITH_EXTERNAL_UI_SUPPORT
+        port->hints |= HINT_SHOULD_UPDATE;
+#endif
+    }
+
+    g_sync_scheduled_param_count = 0;
+    pthread_mutex_unlock(&g_sync_scheduled_params_mutex);
 }
 
 void effects_output_data_ready(void)
