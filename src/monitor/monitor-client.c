@@ -35,6 +35,10 @@
 #include "../utils.h"
 #include "../dsp/compressor_core.h"
 
+#ifndef STANDALONE_MONITOR_CLIENT
+#include "../effects.h"
+#endif
+
 /*
 ************************************************************************************************************************
 *           LOCAL DEFINES
@@ -282,6 +286,10 @@ static float ProcessMonitorLoopStereo(monitor_client_t *const mon, jack_nframes_
 static int ProcessMonitor(jack_nframes_t nframes, void *arg)
 {
     monitor_client_t *const mon = arg;
+
+   #ifndef STANDALONE_MONITOR_CLIENT
+    effect_sync_scheduled_params(true);
+   #endif
 
     if (mon->muted)
     {
