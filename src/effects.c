@@ -2237,6 +2237,14 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
             /* Run the plugin with zero buffer to avoid 'pause behavior' in delay plugins */
             lilv_instance_run(effect->lilv_instance, nframes);
 
+            for (i = 0; i < effect->output_audio_ports_count; i++)
+            {
+                float *buffer_out = (float*)jack_port_get_buffer(effect->output_audio_ports[i]->jack_port, nframes);
+                for (jack_nframes_t frame = 0; frame < nframes; ++frame)
+                {
+                    buffer_out[frame] += ((float*)effect->output_audio_ports[i]->buffer)[frame];
+                }
+            } 
             /* no need to silence plugin audio or cv, they are unused during bypass */
         }
         /* Plugins without audio inputs */
