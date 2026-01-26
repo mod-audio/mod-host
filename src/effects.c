@@ -1914,12 +1914,8 @@ static void* HMIClientThread(void* arg)
 
 static void PreRunPlugin(effect_t *effect)
 {
-    if ((effect->hints & HINT_IS_LIVE) == 0 &&
-        (!g_processing_enabled || (
-         (effect->hints & HINT_STATE_UNSAFE) && pthread_mutex_lock(&effect->state_restore_mutex) != 0)))
-    {
-        return;
-    }
+    if (effect->hints & HINT_STATE_UNSAFE)
+        pthread_mutex_lock(&effect->state_restore_mutex);
 
     /* common variables */
     port_t *port;
