@@ -55,8 +55,12 @@ typedef unsigned int uint;
 #include <dlfcn.h>
 #endif
 
-#if defined(_DARKGLASS_DEVICE_PABLITO) || defined(_MOD_DEVICE_DUO) || defined(_MOD_DEVICE_DUOX) || defined(_MOD_DEVICE_DWARF)
+#if defined(_DARKGLASS_DEVICE_PABLITO)
 #include <sys/resource.h>
+#elif defined(_MOD_DEVICE_DUO) || defined(_MOD_DEVICE_DUOX) || defined(_MOD_DEVICE_DWARF)
+#include <sys/resource.h>
+#include <syscall.h>
+#include <unistd.h>
 #endif
 
 /* Jack */
@@ -1813,8 +1817,12 @@ static void RunPostPonedEvents(int ignored_effect_id)
 
 static void* PostPonedEventsThread(void* arg)
 {
-#if defined(_DARKGLASS_DEVICE_PABLITO) || defined(_MOD_DEVICE_DUO) || defined(_MOD_DEVICE_DUOX) || defined(_MOD_DEVICE_DWARF)
+#if defined(_DARKGLASS_DEVICE_PABLITO)
     setpriority(PRIO_PROCESS, gettid(), -18);
+#elif defined(_MOD_DEVICE_DUO) || defined(_MOD_DEVICE_DUOX) || defined(_MOD_DEVICE_DWARF)
+    const pid_t tid = syscall(SYS_gettid);
+    if (tid > 0)
+        setpriority(PRIO_PROCESS, tid, -18);
 #endif
 
     while (g_postevents_running == 1)
