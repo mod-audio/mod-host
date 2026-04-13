@@ -1153,10 +1153,7 @@ static int BufferSize(jack_nframes_t nframes, void* data)
             effect->options_interface->set(effect->lilv_instance->lv2_handle, options);
 
             if (effect->activated)
-            {
                 lilv_instance_activate(effect->lilv_instance);
-                PreRunPlugin(effect);
-            }
         }
     }
 #ifdef HAVE_HYLIA
@@ -6031,7 +6028,6 @@ int effects_add(const char *uri, int instance, int activate)
     if (activate)
     {
         lilv_instance_activate(lilv_instance);
-        PreRunPlugin(effect);
 
         /* Try activate the Jack client */
         if (jack_activate(jack_client) != 0)
@@ -6736,7 +6732,6 @@ int effects_activate(int effect_id, int value)
         {
             effect->activated = true;
             lilv_instance_activate(effect->lilv_instance);
-            PreRunPlugin(effect);
 
             if (jack_activate(effect->jack_client) != 0)
             {
@@ -6768,7 +6763,9 @@ static void* effects_activate_thread(void* arg)
 {
     effect_t *effect = arg;
 
-    PreRunPlugin(effect);
+    effect->activated = true;
+
+    lilv_instance_activate(effect->lilv_instance);
 
     if (jack_activate(effect->jack_client) != 0)
         fprintf(stderr, "can't activate jack_client\n");
@@ -6778,10 +6775,14 @@ static void* effects_activate_thread(void* arg)
 
 static void* effects_deactivate_thread(void* arg)
 {
-    jack_client_t *jack_client = arg;
+    effect_t *effect = arg;
 
-    if (jack_deactivate(jack_client) != 0)
+    if (jack_deactivate(effect->jack_client) != 0)
         fprintf(stderr, "can't deactivate jack_client\n");
+
+    lilv_instance_deactivate(effect->lilv_instance);
+
+    effect->activated = false;
 
     return NULL;
 }
@@ -6803,7 +6804,7 @@ int effects_activate_multi(int value, int num_effects, int *effects)
     effect_t *effect;
 
     // create threads to activate all clients
-    // reduces time spent waiting for jack operations to complete, triggering in parallel
+    // reduces time spent waiting for plugin and jack operations to complete, triggering in parallel
     for (int i = 0, effect_id; i < num_effects; ++i)
     {
         effect_id = effects[i];
@@ -6816,18 +6817,10 @@ int effects_activate_multi(int value, int num_effects, int *effects)
         {
             if (! effect->activated)
             {
-                effect->activated = true;
-                lilv_instance_activate(effect->lilv_instance);
-
                 if (zix_thread_create(&threads[num_threads], sizeof(void*), effects_activate_thread, effect) == 0)
-                {
                     ++num_threads;
-                }
                 else
-                {
-                    PreRunPlugin(effect);
-                    jack_activate(effect->jack_client);
-                }
+                    effects_activate_thread(effect);
             }
         }
         else
@@ -6837,7 +6830,7 @@ int effects_activate_multi(int value, int num_effects, int *effects)
                 if (zix_thread_create(&threads[num_threads], sizeof(void*), effects_deactivate_thread, effect->jack_client) == 0)
                     ++num_threads;
                 else
-                    jack_deactivate(effect->jack_client);
+                    effects_deactivate_thread(effect);
             }
         }
     }
@@ -6847,22 +6840,6 @@ int effects_activate_multi(int value, int num_effects, int *effects)
         zix_thread_join(threads[i], NULL);
 
     free(threads);
-
-    // if deactivating, do the last lv2 deactivate step now
-    if (! value)
-    {
-        for (int i = 0, effect_id; i < num_effects; ++i)
-        {
-            effect_id = effects[i];
-            effect = &g_effects[effect_id];
-
-            if (! effect->activated || effect->jack_client == NULL)
-                continue;
-
-            effect->activated = false;
-            lilv_instance_deactivate(effect->lilv_instance);
-        }
-    }
 
     return SUCCESS;
 }
