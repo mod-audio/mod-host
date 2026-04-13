@@ -98,7 +98,7 @@ zix_thread_create(ZixThread* thread,
     if (stack_size != 0)
         pthread_attr_setstacksize(&attr, stack_size);
 
-#ifdef _DARKGLASS_DEVICE_PABLITO
+#ifdef _MOD_DEVICE_RK358x
     cpu_set_t cpuset;
     CPU_ZERO(&cpuset);
     for (int i = 0; i < 4; ++i)

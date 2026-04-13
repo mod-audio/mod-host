@@ -40,12 +40,13 @@ static void* worker_func(void* data)
 {
     worker_t* worker = (worker_t*)data;
     void* buf = NULL;
+    uint32_t size;
     while (true) {
         sem_wait(&worker->sem);
         if (worker->exit) break;
 
         while (jack_ringbuffer_read_space(worker->requests) != 0) {
-            uint32_t size = 0;
+            size = 0;
             jack_ringbuffer_peek(worker->requests, (char*)&size, sizeof(size));
 
             if (jack_ringbuffer_read_space(worker->requests) < sizeof(size) + size) {
@@ -119,13 +120,13 @@ LV2_Worker_Status worker_schedule(LV2_Worker_Schedule_Handle handle, uint32_t si
 void worker_emit_responses(worker_t *worker)
 {
     if (worker->responses) {
+        uint32_t size;
         while (jack_ringbuffer_read_space(worker->responses) != 0) {
-            uint32_t size = 0;
+            size = 0;
             jack_ringbuffer_peek(worker->responses, (char*)&size, sizeof(size));
 
             if (jack_ringbuffer_read_space(worker->responses) < sizeof(size) + size) {
-                sched_yield();
-                continue;
+                break;
             }
 
             jack_ringbuffer_read_advance(worker->responses, sizeof(size));
