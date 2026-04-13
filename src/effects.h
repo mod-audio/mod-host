@@ -160,6 +160,7 @@ int effects_set_parameter_multi(const char *control_symbol, float value, int num
 int effects_get_parameter(int effect_id, const char *control_symbol, float *value);
 int effects_flush_parameters(int effect_id, int reset, int param_count, const flushed_param_t *params);
 int effects_flush_parameters_multi(int reset, int param_count, const flushed_param_t *params, int num_effects, int *effects);
+int effects_pre_run_multi(int reset, int param_count, const flushed_param_t *params, int num_effects, int *effects);
 int effects_set_property(int effect_id, const char *uri, const char *value);
 int effects_get_property(int effect_id, const char *uri);
 int effects_monitor_parameter(int effect_id, const char *control_symbol, const char *op, float value);

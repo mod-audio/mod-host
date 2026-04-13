@@ -111,6 +111,7 @@
 #define MULTI_BYPASS            "multi_bypass %i %i ..."
 #define MULTI_PARAM_SET         "multi_param_set %s %f %i ..."
 #define MULTI_PARAMS_FLUSH      "multi_params_flush %i %i ... %i ..."
+#define MULTI_PRE_RUN           "multi_pre_run %i %i ... %i ..."
 #define HELP                    "help"
 #define QUIT                    "quit"
 

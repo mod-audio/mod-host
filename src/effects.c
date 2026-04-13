@@ -7118,6 +7118,12 @@ int effects_flush_parameters_multi(int reset, int param_count, const flushed_par
         {
             effect = &(g_effects[effect_id]);
 
+            if (! effect->activated)
+            {
+                fprintf(stderr, "multi-param-flush attempted on non-activated plugin #%d\n", effect->instance);
+                continue;
+            }
+
             cached_effect = &cached_effects[num_cached_effects++];
             cached_effect->effect = effect;
             cached_effect->ports = malloc(sizeof(port_t*) * param_count);
@@ -7189,6 +7195,52 @@ int effects_flush_parameters_multi(int reset, int param_count, const flushed_par
         free(cached_effects[i].ports);
 
     free(cached_effects);
+
+    return SUCCESS;
+}
+
+int effects_pre_run_multi(int reset, int param_count, const flushed_param_t *params, int num_effects, int *effects)
+{
+    if (num_effects <= 0)
+        return ERR_INVALID_OPERATION;
+
+    effect_t *effect;
+    port_t *port;
+
+    for (int i = 0, effect_id; i < num_effects; i++)
+    {
+        effect_id = effects[i];
+        if (InstanceExist(effect_id))
+        {
+            effect = &(g_effects[effect_id]);
+
+            if (effect->activated)
+            {
+                fprintf(stderr, "pre-run attempted on activated plugin #%d\n", effect->instance);
+                continue;
+            }
+
+            for (int j = 0; j < param_count; j++)
+            {
+                port = FindEffectInputPortBySymbol(effect, params[j].symbol);
+
+                if (port)
+                {
+                    port->prev_value = *(port->buffer) = params[j].value;
+#ifdef WITH_EXTERNAL_UI_SUPPORT
+                    port->hints |= HINT_SHOULD_UPDATE;
+#endif
+                }
+                if (effect->reset_index >= 0 && reset != 0)
+                {
+                    port = effect->ports[effect->reset_index];
+                    port->prev_value = *(port->buffer) = reset;
+                }
+            }
+
+            PreRunPlugin(effect);
+        }
+    }
 
     return SUCCESS;
 }

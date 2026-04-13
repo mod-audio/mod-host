@@ -341,7 +341,14 @@ The commands supported by mod-host are:
     multi_params_flush <reset_value> <instance_count> <instance_number...> <param_count> <params...>
         * flush several param values at once and trigger reset if available (multiple instance variant)
         * reset value must be according to reset property spec
+        * all instances must be in activated state
         e.g.: multi_params_flush 1 2 0 1 2 "gain" 0.0 "distortion" 0.5
+
+    multi_pre_run <reset_value> <instance_count> <instance_number...> <param_count> <params...>
+        * pre-run and flush several param values at once and trigger reset if available (multiple instance variant)
+        * reset value must be according to reset property spec
+        * all instances must be in deactivated state
+        e.g.: multi_pre_run 1 2 0 1 2 "gain" 0.0 "distortion" 0.5
 
     help
         * show a help message
