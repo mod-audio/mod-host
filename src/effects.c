@@ -6668,10 +6668,10 @@ int effects_remove_multi(int num_effects, int *effects)
 
         if (effect->activated)
         {
-            if (zix_thread_create(&threads[num_threads], sizeof(void*), effects_deactivate_thread, effect->jack_client) == 0)
+            if (zix_thread_create(&threads[num_threads], sizeof(void*), effects_deactivate_thread, effect) == 0)
                 ++num_threads;
             else
-                jack_deactivate(effect->jack_client);
+                effects_deactivate_thread(effect);
         }
     }
 
@@ -6827,7 +6827,7 @@ int effects_activate_multi(int value, int num_effects, int *effects)
         {
             if (effect->activated)
             {
-                if (zix_thread_create(&threads[num_threads], sizeof(void*), effects_deactivate_thread, effect->jack_client) == 0)
+                if (zix_thread_create(&threads[num_threads], sizeof(void*), effects_deactivate_thread, effect) == 0)
                     ++num_threads;
                 else
                     effects_deactivate_thread(effect);
