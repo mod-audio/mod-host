@@ -7199,10 +7199,51 @@ int effects_flush_parameters_multi(int reset, int param_count, const flushed_par
     return SUCCESS;
 }
 
+int effects_pre_run(int effect_id, int reset, int param_count, const flushed_param_t *params)
+{
+    if (!InstanceExist(effect_id))
+        return ERR_INSTANCE_NON_EXISTS;
+
+    effect_t *effect = &(g_effects[effect_id]);
+
+    if (effect->activated)
+    {
+        fprintf(stderr, "pre-run attempted on activated plugin #%d\n", effect_id);
+        return ERR_INVALID_OPERATION;
+    }
+
+    port_t *port;
+
+    for (int i = 0; i < param_count; i++)
+    {
+        port = FindEffectInputPortBySymbol(effect, params[i].symbol);
+        if (port)
+        {
+            port->prev_value = *(port->buffer) = params[i].value;
+#ifdef WITH_EXTERNAL_UI_SUPPORT
+            port->hints |= HINT_SHOULD_UPDATE;
+#endif
+        }
+    }
+
+    if (effect->reset_index >= 0 && reset != 0)
+    {
+        port = effect->ports[effect->reset_index];
+        port->prev_value = *(port->buffer) = reset;
+    }
+
+    PreRunPlugin(effect);
+
+    return SUCCESS;
+}
+
 int effects_pre_run_multi(int reset, int param_count, const flushed_param_t *params, int num_effects, int *effects)
 {
     if (num_effects <= 0)
         return ERR_INVALID_OPERATION;
+
+    if (num_effects == 1)
+        return effects_pre_run(*effects, reset, param_count, params);
 
     effect_t *effect;
     port_t *port;
@@ -7216,7 +7257,7 @@ int effects_pre_run_multi(int reset, int param_count, const flushed_param_t *par
 
             if (effect->activated)
             {
-                fprintf(stderr, "pre-run attempted on activated plugin #%d\n", effect->instance);
+                fprintf(stderr, "multi-pre-run attempted on activated plugin #%d\n", effect->instance);
                 continue;
             }
 

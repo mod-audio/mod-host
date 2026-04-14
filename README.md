@@ -186,6 +186,12 @@ The commands supported by mod-host are:
         * reset value must be according to reset property spec
         e.g.: params_flush 0 1 2 "gain" 0.0 "distortion" 0.5
 
+    pre_run <instance_number> <reset_value> <param_count> <params...>
+        * pre-run and flush several param values at once and trigger reset if available
+        * reset value must be according to reset property spec
+        * instance must be in deactivated state
+        e.g.: pre_run 0 1 2 "gain" 0.0 "distortion" 0.5
+
     patch_set <instance_number> <property_uri> <value>
         * set the value of a control port
         e.g.: patch_set 0 "gain" 2.5
@@ -345,7 +351,7 @@ The commands supported by mod-host are:
         e.g.: multi_params_flush 1 2 0 1 2 "gain" 0.0 "distortion" 0.5
 
     multi_pre_run <reset_value> <instance_count> <instance_number...> <param_count> <params...>
-        * pre-run and flush several param values at once and trigger reset if available (for multiple instance)
+        * pre-run and flush several param values at once and trigger reset if available (multiple instance variant)
         * reset value must be according to reset property spec
         * all instances must be in deactivated state
         e.g.: multi_pre_run 1 2 0 1 2 "gain" 0.0 "distortion" 0.5
