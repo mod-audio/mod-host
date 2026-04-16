@@ -803,9 +803,9 @@ static volatile double g_transport_bpm;
 static volatile bool g_transport_reset;
 static volatile enum TransportSyncMode g_transport_sync_mode;
 static bool g_aggregated_midi_enabled;
-static bool g_processing_enabled;
 static bool g_verbose_debug;
 static bool g_cpu_load_enabled;
+static volatile bool g_processing_enabled;
 static volatile bool g_cpu_load_trigger;
 
 // Wall clock time since program startup
@@ -7206,7 +7206,7 @@ int effects_pre_run(int effect_id, int reset, int param_count, const flushed_par
 
     effect_t *effect = &(g_effects[effect_id]);
 
-    if (effect->activated)
+    if (effect->activated && ((effect->hints & HINT_IS_LIVE) == 0 || g_processing_enabled))
     {
         fprintf(stderr, "pre-run attempted on activated plugin #%d\n", effect_id);
         return ERR_INVALID_OPERATION;
@@ -7255,7 +7255,7 @@ int effects_pre_run_multi(int reset, int param_count, const flushed_param_t *par
         {
             effect = &(g_effects[effect_id]);
 
-            if (effect->activated)
+            if (effect->activated && ((effect->hints & HINT_IS_LIVE) == 0 || g_processing_enabled))
             {
                 fprintf(stderr, "multi-pre-run attempted on activated plugin #%d\n", effect->instance);
                 continue;
@@ -9349,7 +9349,15 @@ int effects_processing_enable(int enable)
     // regular on/off
     case 0:
     case 1:
-        g_processing_enabled = enable != 0;
+        if (g_processing_enabled && enable == 0)
+        {
+            g_processing_enabled = false;
+            monitor_client_wait_proc();
+        }
+        else
+        {
+            g_processing_enabled = enable != 0;
+        }
         break;
 
     // turn on while reporting feedback data ready
@@ -9365,6 +9373,7 @@ int effects_processing_enable(int enable)
         {
             monitor_client_wait_volume();
             g_processing_enabled = false;
+            monitor_client_wait_proc();
         }
         break;
 
