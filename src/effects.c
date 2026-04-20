@@ -7206,7 +7206,7 @@ int effects_pre_run(int effect_id, int reset, int param_count, const flushed_par
 
     effect_t *effect = &(g_effects[effect_id]);
 
-    if (effect->activated && ((effect->hints & HINT_IS_LIVE) == 0 || g_processing_enabled))
+    if (effect->activated && ((effect->hints & HINT_IS_LIVE) != 0 || g_processing_enabled))
     {
         fprintf(stderr, "pre-run attempted on activated plugin #%d\n", effect_id);
         return ERR_INVALID_OPERATION;
@@ -7255,7 +7255,7 @@ int effects_pre_run_multi(int reset, int param_count, const flushed_param_t *par
         {
             effect = &(g_effects[effect_id]);
 
-            if (effect->activated && ((effect->hints & HINT_IS_LIVE) == 0 || g_processing_enabled))
+            if (effect->activated && ((effect->hints & HINT_IS_LIVE) != 0 || g_processing_enabled))
             {
                 fprintf(stderr, "multi-pre-run attempted on activated plugin #%d\n", effect->instance);
                 continue;
