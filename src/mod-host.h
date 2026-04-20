@@ -69,6 +69,7 @@
 #define EFFECT_PARAM_GET        "param_get %i %s"
 #define EFFECT_PARAM_MON        "param_monitor %i %s %s %f"
 #define EFFECT_PARAMS_FLUSH     "params_flush %i %i %i ..."
+#define EFFECT_PRE_RUN          "pre_run %i %i %i ..."
 #define EFFECT_PATCH_GET        "patch_get %i %s"
 #define EFFECT_PATCH_SET        "patch_set %i %s %s"
 #define EFFECT_LICENSEE         "licensee %i"
@@ -111,6 +112,8 @@
 #define MULTI_BYPASS            "multi_bypass %i %i ..."
 #define MULTI_PARAM_SET         "multi_param_set %s %f %i ..."
 #define MULTI_PARAMS_FLUSH      "multi_params_flush %i %i ... %i ..."
+#define MULTI_PRE_RUN           "multi_pre_run %i %i ... %i ..."
+#define WAIT_AUDIO_CYCLE        "wait_audio_cycle"
 #define HELP                    "help"
 #define QUIT                    "quit"
 

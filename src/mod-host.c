@@ -74,6 +74,7 @@
 #include "protocol.h"
 #include "completer.h"
 #include "monitor.h"
+#include "monitor/monitor-client.h"
 #include "zix/thread.h"
 #include "info.h"
 
@@ -307,6 +308,39 @@ static void effects_flush_params_cb(proto_t *proto)
     }
 
     resp = effects_flush_parameters(atoi(proto->list[1]), atoi(proto->list[2]), param_count, params);
+    protocol_response_int(resp, proto);
+
+    free(params);
+}
+
+static void effects_pre_run_cb(proto_t *proto)
+{
+    int resp;
+    int param_count = atoi(proto->list[3]);
+    flushed_param_t *params;
+
+    if (param_count != 0)
+    {
+        params = malloc(sizeof(flushed_param_t) * param_count);
+
+        if (params == NULL)
+        {
+            protocol_response_int(ERR_MEMORY_ALLOCATION, proto);
+            return;
+        }
+
+        for (int i = 0; i < param_count; i++)
+        {
+            params[i].symbol = proto->list[4 + i * 2];
+            params[i].value = atof(proto->list[5 + i * 2]);
+        }
+    }
+    else
+    {
+        params = NULL;
+    }
+
+    resp = effects_pre_run(atoi(proto->list[1]), atoi(proto->list[2]), param_count, params);
     protocol_response_int(resp, proto);
 
     free(params);
@@ -924,6 +958,66 @@ static void multi_params_flush(proto_t *proto)
     free(params);
 }
 
+static void multi_pre_run(proto_t *proto)
+{
+    int instance_count = atoi(proto->list[2]);
+    if (instance_count == 0)
+    {
+        protocol_response_int(ERR_ASSIGNMENT_INVALID_OP, proto);
+        return;
+    }
+
+    int *instances = malloc(sizeof(int) * instance_count);
+
+    if (instances != NULL)
+    {
+        for (int i = 0; i < instance_count; i++)
+            instances[i] = atoi(proto->list[3 + i]);
+    }
+    else
+    {
+        protocol_response_int(ERR_MEMORY_ALLOCATION, proto);
+        return;
+    }
+
+    int param_count = atoi(proto->list[3 + instance_count]);
+    flushed_param_t *params;
+
+    if (param_count != 0)
+    {
+        params = malloc(sizeof(flushed_param_t) * param_count);
+
+        if (params == NULL)
+        {
+            free(instances);
+            protocol_response_int(ERR_MEMORY_ALLOCATION, proto);
+            return;
+        }
+
+        for (int i = 0; i < param_count; i++)
+        {
+            params[i].symbol = proto->list[4 + instance_count + i * 2];
+            params[i].value = atof(proto->list[5 + instance_count + i * 2]);
+        }
+    }
+    else
+    {
+        params = NULL;
+    }
+
+    int resp = effects_pre_run_multi(atoi(proto->list[1]), param_count, params, instance_count, instances);
+    protocol_response_int(resp, proto);
+
+    free(instances);
+    free(params);
+}
+
+static void wait_audio_cycle(proto_t *proto)
+{
+    int resp = monitor_client_wait_proc() ? 0 : ERR_INVALID_OPERATION;
+    protocol_response_int(resp, proto);
+}
+
 static void help_cb(proto_t *proto)
 {
     proto->response = 0;
@@ -1053,6 +1147,7 @@ static int mod_host_init(jack_client_t* client, int socket_port, int feedback_po
     protocol_add_command(EFFECT_PARAM_GET, effects_get_param_cb);
     protocol_add_command(EFFECT_PARAM_MON, effects_monitor_param_cb);
     protocol_add_command(EFFECT_PARAMS_FLUSH, effects_flush_params_cb);
+    protocol_add_command(EFFECT_PRE_RUN, effects_pre_run_cb);
     protocol_add_command(EFFECT_PATCH_GET, effects_get_property_cb);
     protocol_add_command(EFFECT_PATCH_SET, effects_set_property_cb);
     protocol_add_command(EFFECT_LICENSEE, effects_licensee_cb);
@@ -1097,6 +1192,8 @@ static int mod_host_init(jack_client_t* client, int socket_port, int feedback_po
     protocol_add_command(MULTI_BYPASS, multi_bypass);
     protocol_add_command(MULTI_PARAM_SET, multi_param_set);
     protocol_add_command(MULTI_PARAMS_FLUSH, multi_params_flush);
+    protocol_add_command(MULTI_PRE_RUN, multi_pre_run);
+    protocol_add_command(WAIT_AUDIO_CYCLE, wait_audio_cycle);
 
     /* skip help and quit for internal client */
     if (client == NULL)

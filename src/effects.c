@@ -803,9 +803,9 @@ static volatile double g_transport_bpm;
 static volatile bool g_transport_reset;
 static volatile enum TransportSyncMode g_transport_sync_mode;
 static bool g_aggregated_midi_enabled;
-static bool g_processing_enabled;
 static bool g_verbose_debug;
 static bool g_cpu_load_enabled;
+static volatile bool g_processing_enabled;
 static volatile bool g_cpu_load_trigger;
 
 // Wall clock time since program startup
@@ -926,6 +926,7 @@ static void* PostPonedEventsThread(void* arg);
 #ifdef MOD_HMI_CONTROL_ENABLED
 static void* HMIClientThread(void* arg);
 #endif
+static void PreRunPlugin(effect_t *effect);
 static int ProcessPlugin(jack_nframes_t nframes, void *arg);
 static bool SetPortValue(port_t *port, float value, int effect_id, bool is_bypass, bool from_ui);
 static float UpdateValueFromMidi(midi_cc_t* mcc, uint16_t mvalue, bool highres);
@@ -1915,6 +1916,122 @@ static void* HMIClientThread(void* arg)
     return NULL;
 }
 #endif
+
+static void PreRunPlugin(effect_t *effect)
+{
+    if (effect->hints & HINT_STATE_UNSAFE)
+        pthread_mutex_lock(&effect->state_restore_mutex);
+
+    /* common variables */
+    port_t *port;
+    unsigned int i;
+    float value;
+    bool needs_post = false;
+
+    if (effect->hints & HINT_TRANSPORT)
+    {
+        effect->transport_rolling = g_jack_rolling;
+        // effect->transport_frame = pos.frame;
+        effect->transport_bpb = g_transport_bpb;
+        effect->transport_bpm = g_transport_bpm;
+    }
+    if (effect->bpb_index >= 0)
+    {
+        *(effect->ports[effect->bpb_index]->buffer) = g_transport_bpb;
+    }
+    if (effect->bpm_index >= 0)
+    {
+        *(effect->ports[effect->bpm_index]->buffer) = g_transport_bpm;
+    }
+    if (effect->speed_index >= 0)
+    {
+        *(effect->ports[effect->speed_index]->buffer) = g_jack_rolling ? 1.0f : 0.0f;
+    }
+
+    /* Prepare midi/event ports */
+    for (i = 0; i < effect->input_event_ports_count; i++)
+    {
+        port = effect->input_event_ports[i];
+        lv2_evbuf_reset(port->evbuf, true);
+    }
+
+    for (i = 0; i < effect->output_event_ports_count; i++)
+        lv2_evbuf_reset(effect->output_event_ports[i]->evbuf, false);
+
+    /* Bypass */
+    if (effect->bypass > 0.5f && effect->enabled_index < 0)
+    {
+        lilv_instance_run(effect->lilv_instance, 0);
+    }
+    /* Effect process */
+    else
+    {
+        /* Run the effect */
+        lilv_instance_run(effect->lilv_instance, 0);
+
+        /* Notify the plugin the run() cycle is finished */
+        if (effect->worker.iface)
+        {
+            /* Process any replies from the worker. */
+            worker_emit_responses(&effect->worker);
+            if (effect->worker.iface->end_run)
+            {
+                effect->worker.iface->end_run(effect->lilv_instance->lv2_handle);
+            }
+        }
+    }
+
+    if (effect->hints & HINT_TRIGGERS)
+    {
+        for (i = 0; i < effect->input_control_ports_count; i++)
+        {
+            port = effect->input_control_ports[i];
+
+            if ((port->hints & HINT_TRIGGER) && floats_differ_enough(port->prev_value, port->def_value))
+                port->prev_value = *(port->buffer) = port->def_value;
+        }
+    }
+
+    if (effect->hints & HINT_OUTPUT_MONITORS)
+    {
+        for (i = 0; i < effect->output_control_ports_count; i++)
+        {
+            port = effect->output_control_ports[i];
+
+            if ((port->hints & HINT_MONITORED) == 0)
+                continue;
+
+            value = *(port->buffer);
+
+            if (! floats_differ_enough(port->prev_value, value))
+                continue;
+
+            postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
+
+            if (posteventptr == NULL)
+                continue;
+
+            port->prev_value = value;
+
+            posteventptr->event.type = POSTPONED_OUTPUT_MONITOR;
+            posteventptr->event.parameter.effect_id = effect->instance;
+            posteventptr->event.parameter.symbol    = port->symbol;
+            posteventptr->event.parameter.value     = value;
+
+            pthread_mutex_lock(&g_rtsafe_mutex);
+            list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
+            pthread_mutex_unlock(&g_rtsafe_mutex);
+
+            needs_post = true;
+        }
+    }
+
+    if (effect->hints & HINT_STATE_UNSAFE)
+        pthread_mutex_unlock(&effect->state_restore_mutex);
+
+    if (needs_post)
+        sem_post(&g_postevents_semaphore);
+}
 
 static int ProcessPlugin(jack_nframes_t nframes, void *arg)
 {
@@ -5143,7 +5260,7 @@ int effects_add(const char *uri, int instance, int activate)
     if (lilv_plugin_has_extension_data(effect->lilv_plugin, g_lilv_nodes.worker_interface))
     {
         const LV2_Worker_Interface *worker_interface =
-            (const LV2_Worker_Interface*) lilv_instance_get_extension_data(effect->lilv_instance,
+            (const LV2_Worker_Interface*) lilv_instance_get_extension_data(lilv_instance,
                                                                            LV2_WORKER__interface);
 
         worker_init(&effect->worker, lilv_instance, worker_interface, worker_buf_size);
@@ -5152,21 +5269,21 @@ int effects_add(const char *uri, int instance, int activate)
     if (lilv_plugin_has_extension_data(effect->lilv_plugin, g_lilv_nodes.options_interface))
     {
         effect->options_interface =
-            (const LV2_Options_Interface*) lilv_instance_get_extension_data(effect->lilv_instance,
+            (const LV2_Options_Interface*) lilv_instance_get_extension_data(lilv_instance,
                                                                             LV2_OPTIONS__interface);
     }
 
     if (lilv_plugin_has_extension_data(effect->lilv_plugin, g_lilv_nodes.license_interface))
     {
         effect->license_iface =
-            (const MOD_License_Interface*) lilv_instance_get_extension_data(effect->lilv_instance,
+            (const MOD_License_Interface*) lilv_instance_get_extension_data(lilv_instance,
                                                                             MOD_LICENSE__interface);
     }
 
     if (lilv_plugin_has_extension_data(effect->lilv_plugin, g_lilv_nodes.state_interface))
     {
         effect->state_iface =
-            (const LV2_State_Interface*) lilv_instance_get_extension_data(effect->lilv_instance,
+            (const LV2_State_Interface*) lilv_instance_get_extension_data(lilv_instance,
                                                                           LV2_STATE__interface);
         effect->hints |= HINT_HAS_STATE;
 
@@ -5181,7 +5298,7 @@ int effects_add(const char *uri, int instance, int activate)
             LilvState *state = lilv_state_new_from_world(g_lv2_data, &g_urid_map, plugin_uri);
 
             if (state != NULL) {
-                lilv_state_restore(state, effect->lilv_instance, NULL, NULL,
+                lilv_state_restore(state, lilv_instance, NULL, NULL,
                                    LV2_STATE_IS_POD|LV2_STATE_IS_PORTABLE, effect->features);
                 lilv_state_free(state);
             }
@@ -5192,7 +5309,7 @@ int effects_add(const char *uri, int instance, int activate)
     if (lilv_plugin_has_extension_data(effect->lilv_plugin, g_lilv_nodes.hmi_interface))
     {
         effect->hmi_notif =
-            (const LV2_HMI_PluginNotification*) lilv_instance_get_extension_data(effect->lilv_instance,
+            (const LV2_HMI_PluginNotification*) lilv_instance_get_extension_data(lilv_instance,
                                                                                  LV2_HMI__PluginNotification);
     }
 #endif
@@ -6551,10 +6668,10 @@ int effects_remove_multi(int num_effects, int *effects)
 
         if (effect->activated)
         {
-            if (zix_thread_create(&threads[num_threads], sizeof(void*), effects_deactivate_thread, effect->jack_client) == 0)
+            if (zix_thread_create(&threads[num_threads], sizeof(void*), effects_deactivate_thread, effect) == 0)
                 ++num_threads;
             else
-                jack_deactivate(effect->jack_client);
+                effects_deactivate_thread(effect);
         }
     }
 
@@ -6644,9 +6761,13 @@ int effects_activate(int effect_id, int value)
 
 static void* effects_activate_thread(void* arg)
 {
-    jack_client_t *jack_client = arg;
+    effect_t *effect = arg;
 
-    if (jack_activate(jack_client) != 0)
+    effect->activated = true;
+
+    lilv_instance_activate(effect->lilv_instance);
+
+    if (jack_activate(effect->jack_client) != 0)
         fprintf(stderr, "can't activate jack_client\n");
 
     return NULL;
@@ -6654,10 +6775,14 @@ static void* effects_activate_thread(void* arg)
 
 static void* effects_deactivate_thread(void* arg)
 {
-    jack_client_t *jack_client = arg;
+    effect_t *effect = arg;
 
-    if (jack_deactivate(jack_client) != 0)
+    if (jack_deactivate(effect->jack_client) != 0)
         fprintf(stderr, "can't deactivate jack_client\n");
+
+    lilv_instance_deactivate(effect->lilv_instance);
+
+    effect->activated = false;
 
     return NULL;
 }
@@ -6679,7 +6804,7 @@ int effects_activate_multi(int value, int num_effects, int *effects)
     effect_t *effect;
 
     // create threads to activate all clients
-    // reduces time spent waiting for jack operations to complete, triggering in parallel
+    // reduces time spent waiting for plugin and jack operations to complete, triggering in parallel
     for (int i = 0, effect_id; i < num_effects; ++i)
     {
         effect_id = effects[i];
@@ -6692,23 +6817,20 @@ int effects_activate_multi(int value, int num_effects, int *effects)
         {
             if (! effect->activated)
             {
-                effect->activated = true;
-                lilv_instance_activate(effect->lilv_instance);
-
-                if (zix_thread_create(&threads[num_threads], sizeof(void*), effects_activate_thread, effect->jack_client) == 0)
+                if (zix_thread_create(&threads[num_threads], sizeof(void*), effects_activate_thread, effect) == 0)
                     ++num_threads;
                 else
-                    jack_activate(effect->jack_client);
+                    effects_activate_thread(effect);
             }
         }
         else
         {
             if (effect->activated)
             {
-                if (zix_thread_create(&threads[num_threads], sizeof(void*), effects_deactivate_thread, effect->jack_client) == 0)
+                if (zix_thread_create(&threads[num_threads], sizeof(void*), effects_deactivate_thread, effect) == 0)
                     ++num_threads;
                 else
-                    jack_deactivate(effect->jack_client);
+                    effects_deactivate_thread(effect);
             }
         }
     }
@@ -6718,22 +6840,6 @@ int effects_activate_multi(int value, int num_effects, int *effects)
         zix_thread_join(threads[i], NULL);
 
     free(threads);
-
-    // if deactivating, do the last lv2 deactivate step now
-    if (! value)
-    {
-        for (int i = 0, effect_id; i < num_effects; ++i)
-        {
-            effect_id = effects[i];
-            effect = &g_effects[effect_id];
-
-            if (! effect->activated || effect->jack_client == NULL)
-                continue;
-
-            effect->activated = false;
-            lilv_instance_deactivate(effect->lilv_instance);
-        }
-    }
 
     return SUCCESS;
 }
@@ -7012,6 +7118,12 @@ int effects_flush_parameters_multi(int reset, int param_count, const flushed_par
         {
             effect = &(g_effects[effect_id]);
 
+            if (! effect->activated)
+            {
+                fprintf(stderr, "multi-param-flush attempted on non-activated plugin #%d\n", effect->instance);
+                continue;
+            }
+
             cached_effect = &cached_effects[num_cached_effects++];
             cached_effect->effect = effect;
             cached_effect->ports = malloc(sizeof(port_t*) * param_count);
@@ -7083,6 +7195,93 @@ int effects_flush_parameters_multi(int reset, int param_count, const flushed_par
         free(cached_effects[i].ports);
 
     free(cached_effects);
+
+    return SUCCESS;
+}
+
+int effects_pre_run(int effect_id, int reset, int param_count, const flushed_param_t *params)
+{
+    if (!InstanceExist(effect_id))
+        return ERR_INSTANCE_NON_EXISTS;
+
+    effect_t *effect = &(g_effects[effect_id]);
+
+    if (effect->activated && ((effect->hints & HINT_IS_LIVE) != 0 || g_processing_enabled))
+    {
+        fprintf(stderr, "pre-run attempted on activated plugin #%d\n", effect_id);
+        return ERR_INVALID_OPERATION;
+    }
+
+    port_t *port;
+
+    for (int i = 0; i < param_count; i++)
+    {
+        port = FindEffectInputPortBySymbol(effect, params[i].symbol);
+        if (port)
+        {
+            port->prev_value = *(port->buffer) = params[i].value;
+#ifdef WITH_EXTERNAL_UI_SUPPORT
+            port->hints |= HINT_SHOULD_UPDATE;
+#endif
+        }
+    }
+
+    if (effect->reset_index >= 0 && reset != 0)
+    {
+        port = effect->ports[effect->reset_index];
+        port->prev_value = *(port->buffer) = reset;
+    }
+
+    PreRunPlugin(effect);
+
+    return SUCCESS;
+}
+
+int effects_pre_run_multi(int reset, int param_count, const flushed_param_t *params, int num_effects, int *effects)
+{
+    if (num_effects <= 0)
+        return ERR_INVALID_OPERATION;
+
+    if (num_effects == 1)
+        return effects_pre_run(*effects, reset, param_count, params);
+
+    effect_t *effect;
+    port_t *port;
+
+    for (int i = 0, effect_id; i < num_effects; i++)
+    {
+        effect_id = effects[i];
+        if (InstanceExist(effect_id))
+        {
+            effect = &(g_effects[effect_id]);
+
+            if (effect->activated && ((effect->hints & HINT_IS_LIVE) != 0 || g_processing_enabled))
+            {
+                fprintf(stderr, "multi-pre-run attempted on activated plugin #%d\n", effect->instance);
+                continue;
+            }
+
+            for (int j = 0; j < param_count; j++)
+            {
+                port = FindEffectInputPortBySymbol(effect, params[j].symbol);
+
+                if (port)
+                {
+                    port->prev_value = *(port->buffer) = params[j].value;
+#ifdef WITH_EXTERNAL_UI_SUPPORT
+                    port->hints |= HINT_SHOULD_UPDATE;
+#endif
+                }
+                if (effect->reset_index >= 0 && reset != 0)
+                {
+                    port = effect->ports[effect->reset_index];
+                    port->prev_value = *(port->buffer) = reset;
+                }
+            }
+
+            PreRunPlugin(effect);
+        }
+    }
 
     return SUCCESS;
 }
@@ -9150,7 +9349,15 @@ int effects_processing_enable(int enable)
     // regular on/off
     case 0:
     case 1:
-        g_processing_enabled = enable != 0;
+        if (g_processing_enabled && enable == 0)
+        {
+            g_processing_enabled = false;
+            monitor_client_wait_proc();
+        }
+        else
+        {
+            g_processing_enabled = enable != 0;
+        }
         break;
 
     // turn on while reporting feedback data ready
@@ -9166,6 +9373,7 @@ int effects_processing_enable(int enable)
         {
             monitor_client_wait_volume();
             g_processing_enabled = false;
+            monitor_client_wait_proc();
         }
         break;
 
