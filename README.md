@@ -189,7 +189,7 @@ The commands supported by mod-host are:
     pre_run <instance_number> <reset_value> <param_count> <params...>
         * pre-run and flush several param values at once and trigger reset if available
         * reset value must be according to reset property spec
-        * instance must be in deactivated state
+        * instance must be in deactivated state or global processing disabled (and plugin does not have isLive flag)
         e.g.: pre_run 0 1 2 "gain" 0.0 "distortion" 0.5
 
     patch_set <instance_number> <property_uri> <value>
@@ -353,7 +353,7 @@ The commands supported by mod-host are:
     multi_pre_run <reset_value> <instance_count> <instance_number...> <param_count> <params...>
         * pre-run and flush several param values at once and trigger reset if available (multiple instance variant)
         * reset value must be according to reset property spec
-        * all instances must be in deactivated state
+        * all instances must be in deactivated state or global processing disabled (and plugins do not have isLive flag)
         e.g.: multi_pre_run 1 2 0 1 2 "gain" 0.0 "distortion" 0.5
 
     wait_audio_cycle
