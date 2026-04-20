@@ -74,6 +74,7 @@
 #include "protocol.h"
 #include "completer.h"
 #include "monitor.h"
+#include "monitor/monitor-client.h"
 #include "zix/thread.h"
 #include "info.h"
 
@@ -1011,6 +1012,12 @@ static void multi_pre_run(proto_t *proto)
     free(params);
 }
 
+static void wait_audio_cycle(proto_t *proto)
+{
+    int resp = monitor_client_wait_proc() ? 0 : ERR_INVALID_OPERATION;
+    protocol_response_int(resp, proto);
+}
+
 static void help_cb(proto_t *proto)
 {
     proto->response = 0;
@@ -1186,6 +1193,7 @@ static int mod_host_init(jack_client_t* client, int socket_port, int feedback_po
     protocol_add_command(MULTI_PARAM_SET, multi_param_set);
     protocol_add_command(MULTI_PARAMS_FLUSH, multi_params_flush);
     protocol_add_command(MULTI_PRE_RUN, multi_pre_run);
+    protocol_add_command(WAIT_AUDIO_CYCLE, wait_audio_cycle);
 
     /* skip help and quit for internal client */
     if (client == NULL)

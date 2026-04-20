@@ -356,6 +356,9 @@ The commands supported by mod-host are:
         * all instances must be in deactivated state
         e.g.: multi_pre_run 1 2 0 1 2 "gain" 0.0 "distortion" 0.5
 
+    wait_audio_cycle
+        * wait for at least 1 audio cycle to pass
+
     help
         * show a help message
 

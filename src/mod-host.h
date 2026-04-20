@@ -113,6 +113,7 @@
 #define MULTI_PARAM_SET         "multi_param_set %s %f %i ..."
 #define MULTI_PARAMS_FLUSH      "multi_params_flush %i %i ... %i ..."
 #define MULTI_PRE_RUN           "multi_pre_run %i %i ... %i ..."
+#define WAIT_AUDIO_CYCLE        "wait_audio_cycle"
 #define HELP                    "help"
 #define QUIT                    "quit"
 
