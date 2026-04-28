@@ -235,6 +235,10 @@ The commands supported by mod-host are:
         * monitor audio levels for a specific jack port (on the feedback port)
         e.g.: monitor_audio_levels "system:capture_1" 1
 
+    monitor_cpu_load <enable> <instance_count> <instance_number...>
+        * monitor cpu load for specific instances
+        e.g.: monitor_cpu_load 1 2 0 1
+
     monitor_midi_control <midi_channel> <enable>
         * listen to MIDI control change messages (on the feedback port)
         e.g.: monitor_midi_control 7 1
