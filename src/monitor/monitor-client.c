@@ -298,6 +298,12 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
         for (uint32_t i=0; i < mon->numports; ++i)
             memset(jack_port_get_buffer(mon->out_ports[i], nframes), 0, sizeof(float)*nframes);
 
+        if (atomic_exchange(&mon->wait_proc, false))
+            sem_post(&mon->wait_proc_sem);
+
+        if (atomic_exchange(&mon->wait_volume, false))
+            sem_post(&mon->wait_volume_sem);
+
         return 0;
     }
 
@@ -362,6 +368,7 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
     }
   #endif
 
+    // we use `floats_differ_enough` here as a safe `!=` float value comparison
     mon->apply_volume = floats_differ_enough(smooth_volume, 1.0f);
     mon->smooth_volume = smooth_volume;
     mon->muted = smooth_volume <= db2lin(MOD_MONITOR_VOLUME_MUTE) ||
@@ -370,6 +377,8 @@ static int ProcessMonitor(jack_nframes_t nframes, void *arg)
     if (atomic_exchange(&mon->wait_proc, false))
         sem_post(&mon->wait_proc_sem);
 
+    // now we manually specify a very low value instead of using `floats_differ_enough`
+    // due to smooth filtering the final value is never reached
     if (atomic_load(&mon->wait_volume) && fabsf(volume - smooth_volume) < 0.000001f)
     {
         atomic_store(&mon->wait_volume, false);
@@ -714,6 +723,8 @@ bool monitor_client_setup_volume(float volume)
     mon->volume = final_volume;
     mon->step_volume = step_volume;
     mon->apply_volume = apply_volume;
+
+    atomic_thread_fence(memory_order_seq_cst);
 
     if (unmute)
         mon->muted = false;
