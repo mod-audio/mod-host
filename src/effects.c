@@ -6023,10 +6023,10 @@ int effects_add(const char *uri, int instance, int activate)
     jack_set_buffer_size_callback(jack_client, BufferSize, effect);
     jack_set_freewheel_callback(jack_client, FreeWheelMode, effect);
 
+    lilv_instance_activate(lilv_instance);
+
     if (activate)
     {
-        lilv_instance_activate(lilv_instance);
-
         /* Try activate the Jack client */
         if (jack_activate(jack_client) != 0)
         {
