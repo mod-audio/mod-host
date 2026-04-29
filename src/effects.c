@@ -1147,13 +1147,11 @@ static int BufferSize(jack_nframes_t nframes, void* data)
             options[4].type = 0;
             options[4].value = NULL;
 
-            if (effect->activated)
-                lilv_instance_deactivate(effect->lilv_instance);
+            lilv_instance_deactivate(effect->lilv_instance);
 
             effect->options_interface->set(effect->lilv_instance->lv2_handle, options);
 
-            if (effect->activated)
-                lilv_instance_activate(effect->lilv_instance);
+            lilv_instance_activate(effect->lilv_instance);
         }
     }
 #ifdef HAVE_HYLIA
@@ -6472,9 +6470,7 @@ static void effects_remove_inner_loop(int effect_id)
 
     if (effect->lilv_instance)
     {
-        if (effect->activated)
-            lilv_instance_deactivate(effect->lilv_instance);
-
+        lilv_instance_deactivate(effect->lilv_instance);
         lilv_instance_free(effect->lilv_instance);
     }
 
@@ -6731,7 +6727,6 @@ int effects_activate(int effect_id, int value)
         if (! effect->activated)
         {
             effect->activated = true;
-            lilv_instance_activate(effect->lilv_instance);
 
             if (jack_activate(effect->jack_client) != 0)
             {
@@ -6751,8 +6746,6 @@ int effects_activate(int effect_id, int value)
                 fprintf(stderr, "can't deactivate jack_client\n");
                 return ERR_JACK_CLIENT_DEACTIVATION;
             }
-
-            lilv_instance_deactivate(effect->lilv_instance);
         }
     }
 
@@ -6764,8 +6757,6 @@ static void* effects_activate_thread(void* arg)
     effect_t *effect = arg;
 
     effect->activated = true;
-
-    lilv_instance_activate(effect->lilv_instance);
 
     if (jack_activate(effect->jack_client) != 0)
         fprintf(stderr, "can't activate jack_client\n");
@@ -6779,8 +6770,6 @@ static void* effects_deactivate_thread(void* arg)
 
     if (jack_deactivate(effect->jack_client) != 0)
         fprintf(stderr, "can't deactivate jack_client\n");
-
-    lilv_instance_deactivate(effect->lilv_instance);
 
     effect->activated = false;
 
