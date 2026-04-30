@@ -459,7 +459,8 @@ typedef struct EFFECT_T {
     jack_ringbuffer_t *events_out_buffer;
     char *events_in_buffer_helper;
 
-    bool activated;
+    bool jack_activated;
+    bool lv2_activated;
 
     // previous transport state
     bool transport_rolling;
@@ -1147,11 +1148,13 @@ static int BufferSize(jack_nframes_t nframes, void* data)
             options[4].type = 0;
             options[4].value = NULL;
 
-            lilv_instance_deactivate(effect->lilv_instance);
+            if (effect->lv2_activated)
+                lilv_instance_deactivate(effect->lilv_instance);
 
             effect->options_interface->set(effect->lilv_instance->lv2_handle, options);
 
-            lilv_instance_activate(effect->lilv_instance);
+            if (effect->lv2_activated)
+                lilv_instance_activate(effect->lilv_instance);
         }
     }
 #ifdef HAVE_HYLIA
@@ -5162,7 +5165,8 @@ int effects_add(const char *uri, int instance, int activate)
     /* Init the struct */
     mod_memset(effect, 0, sizeof(effect_t));
     effect->instance = instance;
-    effect->activated = activate;
+    effect->jack_activated = activate;
+    effect->lv2_activated = true;
 
     /* Init the pointers */
     plugin_uri = NULL;
@@ -6470,7 +6474,9 @@ static void effects_remove_inner_loop(int effect_id)
 
     if (effect->lilv_instance)
     {
-        lilv_instance_deactivate(effect->lilv_instance);
+        if (effect->lv2_activated)
+            lilv_instance_deactivate(effect->lilv_instance);
+
         lilv_instance_free(effect->lilv_instance);
     }
 
@@ -6662,7 +6668,7 @@ int effects_remove_multi(int num_effects, int *effects)
         if (effect->jack_client == NULL)
             continue;
 
-        if (effect->activated)
+        if (effect->jack_activated)
         {
             if (zix_thread_create(&threads[num_threads], sizeof(void*), effects_deactivate_thread, effect) == 0)
                 ++num_threads;
@@ -6724,9 +6730,15 @@ int effects_activate(int effect_id, int value)
 
     if (value)
     {
-        if (! effect->activated)
+        if (! effect->lv2_activated)
         {
-            effect->activated = true;
+            effect->lv2_activated = true;
+            lilv_instance_activate(effect->lilv_instance);
+        }
+
+        if (! effect->jack_activated)
+        {
+            effect->jack_activated = true;
 
             if (jack_activate(effect->jack_client) != 0)
             {
@@ -6737,15 +6749,22 @@ int effects_activate(int effect_id, int value)
     }
     else
     {
-        if (effect->activated)
+        if (effect->jack_activated)
         {
-            effect->activated = false;
+            effect->jack_activated = false;
 
             if (jack_deactivate(effect->jack_client) != 0)
             {
                 fprintf(stderr, "can't deactivate jack_client\n");
                 return ERR_JACK_CLIENT_DEACTIVATION;
             }
+        }
+
+        // TODO only deactivate LV2 following some plugin hint
+        if (effect->lv2_activated)
+        {
+            effect->lv2_activated = false;
+            lilv_instance_deactivate(effect->lilv_instance);
         }
     }
 
@@ -6756,7 +6775,13 @@ static void* effects_activate_thread(void* arg)
 {
     effect_t *effect = arg;
 
-    effect->activated = true;
+    if (! effect->lv2_activated)
+    {
+        effect->lv2_activated = true;
+        lilv_instance_activate(effect->lilv_instance);
+    }
+
+    effect->jack_activated = true;
 
     if (jack_activate(effect->jack_client) != 0)
         fprintf(stderr, "can't activate jack_client\n");
@@ -6771,7 +6796,14 @@ static void* effects_deactivate_thread(void* arg)
     if (jack_deactivate(effect->jack_client) != 0)
         fprintf(stderr, "can't deactivate jack_client\n");
 
-    effect->activated = false;
+    // TODO only deactivate LV2 following some plugin hint
+    if (effect->lv2_activated)
+    {
+        effect->lv2_activated = false;
+        lilv_instance_deactivate(effect->lilv_instance);
+    }
+
+    effect->jack_activated = false;
 
     return NULL;
 }
@@ -6804,7 +6836,7 @@ int effects_activate_multi(int value, int num_effects, int *effects)
 
         if (value)
         {
-            if (! effect->activated)
+            if (! effect->jack_activated)
             {
                 if (zix_thread_create(&threads[num_threads], sizeof(void*), effects_activate_thread, effect) == 0)
                     ++num_threads;
@@ -6814,7 +6846,7 @@ int effects_activate_multi(int value, int num_effects, int *effects)
         }
         else
         {
-            if (effect->activated)
+            if (effect->jack_activated)
             {
                 if (zix_thread_create(&threads[num_threads], sizeof(void*), effects_deactivate_thread, effect) == 0)
                     ++num_threads;
@@ -7107,7 +7139,7 @@ int effects_flush_parameters_multi(int reset, int param_count, const flushed_par
         {
             effect = &(g_effects[effect_id]);
 
-            if (! effect->activated)
+            if (! effect->lv2_activated)
             {
                 fprintf(stderr, "multi-param-flush attempted on non-activated plugin #%d\n", effect->instance);
                 continue;
@@ -7195,9 +7227,14 @@ int effects_pre_run(int effect_id, int reset, int param_count, const flushed_par
 
     effect_t *effect = &(g_effects[effect_id]);
 
-    if (effect->activated && ((effect->hints & HINT_IS_LIVE) != 0 || g_processing_enabled))
+    if (effect->jack_activated && ((effect->hints & HINT_IS_LIVE) != 0 || g_processing_enabled))
     {
-        fprintf(stderr, "pre-run attempted on activated plugin #%d\n", effect_id);
+        fprintf(stderr, "pre-run attempted on jack-activated instance #%d\n", effect_id);
+        return ERR_INVALID_OPERATION;
+    }
+    if (! effect->lv2_activated)
+    {
+        fprintf(stderr, "pre-run attempted on non lv2-activated instance #%d\n", effect_id);
         return ERR_INVALID_OPERATION;
     }
 
@@ -7244,9 +7281,14 @@ int effects_pre_run_multi(int reset, int param_count, const flushed_param_t *par
         {
             effect = &(g_effects[effect_id]);
 
-            if (effect->activated && ((effect->hints & HINT_IS_LIVE) != 0 || g_processing_enabled))
+            if (effect->jack_activated && ((effect->hints & HINT_IS_LIVE) != 0 || g_processing_enabled))
             {
-                fprintf(stderr, "multi-pre-run attempted on activated plugin #%d\n", effect->instance);
+                fprintf(stderr, "multi-pre-run attempted on jack-activated instance #%d\n", effect->instance);
+                continue;
+            }
+            if (! effect->lv2_activated)
+            {
+                fprintf(stderr, "multi-pre-run attempted on non lv2-activated instance #%d\n", effect->instance);
                 continue;
             }
 
