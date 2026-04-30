@@ -431,6 +431,34 @@ static void monitor_audio_levels_cb(proto_t *proto)
     protocol_response_int(resp, proto);
 }
 
+static void monitor_cpu_load_cb(proto_t *proto)
+{
+    int instance_count = atoi(proto->list[2]);
+    if (instance_count == 0)
+    {
+        protocol_response_int(ERR_ASSIGNMENT_INVALID_OP, proto);
+        return;
+    }
+
+    int *instances = malloc(sizeof(int) * instance_count);
+    if (instances != NULL)
+    {
+        for (int i = 0; i < instance_count; i++)
+            instances[i] = atoi(proto->list[3 + i]);
+    }
+    else
+    {
+        free(instances);
+        protocol_response_int(ERR_MEMORY_ALLOCATION, proto);
+        return;
+    }
+
+    int resp = effects_monitor_cpu_load(atoi(proto->list[1]), instance_count, instances);
+    protocol_response_int(resp, proto);
+
+    free(instances);
+}
+
 static void monitor_midi_control_cb(proto_t *proto)
 {
     int resp;
@@ -1157,6 +1185,7 @@ static int mod_host_init(jack_client_t* client, int socket_port, int feedback_po
     protocol_add_command(MONITOR_OUTPUT, monitor_output_cb);
     protocol_add_command(MONITOR_OUTPUT_OFF, monitor_output_off_cb);
     protocol_add_command(MONITOR_AUDIO_LEVELS, monitor_audio_levels_cb);
+    protocol_add_command(MONITOR_CPU_LOAD, monitor_cpu_load_cb);
     protocol_add_command(MONITOR_MIDI_CONTROL, monitor_midi_control_cb);
     protocol_add_command(MONITOR_MIDI_PROGRAM, monitor_midi_program_cb);
     protocol_add_command(MIDI_LEARN, midi_learn_cb);

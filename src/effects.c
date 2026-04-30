@@ -301,6 +301,7 @@ enum PostPonedEventType {
     POSTPONED_PARAM_SET,
     POSTPONED_PARAM_STATE,
     POSTPONED_AUDIO_MONITOR,
+    POSTPONED_CPU_MONITOR,
     POSTPONED_OUTPUT_MONITOR,
     POSTPONED_MIDI_CONTROL_CHANGE,
     POSTPONED_MIDI_PROGRAM_CHANGE,
@@ -462,6 +463,10 @@ typedef struct EFFECT_T {
 
     bool jack_activated;
     bool lv2_activated;
+
+    bool monitor_cpu;
+    bool monitor_cpu_reset;
+    float cpu_load;
 
     // previous transport state
     bool transport_rolling;
@@ -640,6 +645,11 @@ typedef struct POSTPONED_AUDIO_MONITOR_EVENT_T {
     float value;
 } postponed_audio_monitor_event_t;
 
+typedef struct POSTPONED_CPU_MONITOR_EVENT_T {
+    int effect_id;
+    float cpu_load;
+} postponed_cpu_monitor_event_t;
+
 typedef struct POSTPONED_MIDI_CONTROL_CHANGE_EVENT_T {
     int8_t channel;
     int8_t control;
@@ -690,6 +700,7 @@ typedef struct POSTPONED_EVENT_T {
         postponed_parameter_event_t parameter;
         postponed_parameter_state_t state;
         postponed_audio_monitor_event_t audio_monitor;
+        postponed_cpu_monitor_event_t cpu_monitor;
         postponed_midi_control_change_event_t control_change;
         postponed_midi_program_change_event_t program_change;
         postponed_midi_map_event_t midi_map;
@@ -786,7 +797,7 @@ static jack_client_t *g_jack_global_client;
 static jack_nframes_t g_sample_rate, g_max_allowed_midi_delta;
 static float g_sample_rate_f;
 static const char **g_capture_ports, **g_playback_ports;
-static int32_t g_midi_buffer_size, g_block_length;
+static int32_t g_midi_buffer_size, g_block_length, g_block_time_us;
 static int32_t g_thread_policy, g_thread_priority;
 #ifdef MOD_IO_PROCESSING_ENABLED
 static jack_port_t *g_audio_in1_port;
@@ -1100,6 +1111,7 @@ static void AllocatePortBuffers(effect_t* effect, int in_size, int out_size)
 static int BufferSize(jack_nframes_t nframes, void* data)
 {
     g_block_length = nframes;
+    g_block_time_us = nframes * 1e6 / g_sample_rate;
     g_midi_buffer_size = jack_port_type_get_buffer_size(g_jack_global_client, JACK_DEFAULT_MIDI_TYPE);
 
     if (data)
@@ -1350,10 +1362,11 @@ static void RunPostPonedEvents(int ignored_effect_id)
     // cached data, to make sure we only handle similar events once
     bool got_midi_program = false;
     bool got_transport = false;
-    postponed_cached_effect_events cached_audio_monitor, cached_process_out_buf;
+    postponed_cached_effect_events cached_audio_monitor, cached_cpu_monitor, cached_process_out_buf;
     postponed_cached_symbol_events cached_param_set, cached_param_state, cached_output_mon;
 
     cached_audio_monitor.last_effect_id = -1;
+    cached_cpu_monitor.last_effect_id = -1;
     cached_process_out_buf.last_effect_id = -1;
     cached_param_set.last_effect_id = -1;
     cached_param_set.last_symbol[0] = '\0';
@@ -1365,6 +1378,7 @@ static void RunPostPonedEvents(int ignored_effect_id)
     cached_output_mon.last_symbol[0] = '\0';
     cached_output_mon.last_symbol[MAX_CHAR_BUF_SIZE] = '\0';
     INIT_LIST_HEAD(&cached_audio_monitor.effects.siblings);
+    INIT_LIST_HEAD(&cached_cpu_monitor.effects.siblings);
     INIT_LIST_HEAD(&cached_process_out_buf.effects.siblings);
     INIT_LIST_HEAD(&cached_param_set.symbols.siblings);
     INIT_LIST_HEAD(&cached_param_state.symbols.siblings);
@@ -1449,6 +1463,18 @@ static void RunPostPonedEvents(int ignored_effect_id)
 
             // save for fast checkup next time
             cached_audio_monitor.last_effect_id = eventptr->event.audio_monitor.index;
+            break;
+
+        case POSTPONED_CPU_MONITOR:
+            if (ShouldIgnorePostPonedEffectEvent(eventptr->event.audio_monitor.index, &cached_audio_monitor))
+                continue;
+
+            snprintf(buf, FEEDBACK_BUF_SIZE, "cpu_monitor %i %f", eventptr->event.cpu_monitor.effect_id,
+                                                                  eventptr->event.cpu_monitor.cpu_load);
+            socket_send_feedback_debug(buf);
+
+            // save for fast checkup next time
+            cached_cpu_monitor.last_effect_id = eventptr->event.cpu_monitor.effect_id;
             break;
 
         case POSTPONED_OUTPUT_MONITOR:
@@ -1743,6 +1769,11 @@ static void RunPostPonedEvents(int ignored_effect_id)
     postponed_cached_symbol_list_data *psymbol;
 
     list_for_each_safe(it, it2, &cached_audio_monitor.effects.siblings)
+    {
+        peffect = list_entry(it, postponed_cached_effect_list_data, siblings);
+        free(peffect);
+    }
+    list_for_each_safe(it, it2, &cached_cpu_monitor.effects.siblings)
     {
         peffect = list_entry(it, postponed_cached_effect_list_data, siblings);
         free(peffect);
@@ -2069,10 +2100,15 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
     }
 
     /* common variables */
+    const bool monitor_cpu = effect->monitor_cpu;
     bool needs_post = false;
     const float *buffer_in;
     float *buffer_out;
     float value;
+    uint64_t time_start;
+
+    if (monitor_cpu)
+        time_start = time_ns_get();
 
     /* transport */
     uint8_t stack_buf[MAX_CHAR_BUF_SIZE+1];
@@ -2613,6 +2649,37 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
 
     if (effect->hints & HINT_STATE_UNSAFE)
         pthread_mutex_unlock(&effect->state_restore_mutex);
+
+    if (monitor_cpu)
+    {
+        if (effect->monitor_cpu_reset)
+        {
+            effect->cpu_load = 0.f;
+            effect->monitor_cpu_reset = false;
+        }
+
+        float cpu_load = ((int32_t)(time_ns_get() - time_start) / g_block_time_us) * 0.001f;
+
+        if (cpu_load > effect->cpu_load)
+        {
+            effect->cpu_load = cpu_load;
+
+            postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
+
+            if (posteventptr != NULL)
+            {
+                posteventptr->event.type = POSTPONED_CPU_MONITOR;
+                posteventptr->event.cpu_monitor.effect_id = effect->instance;
+                posteventptr->event.cpu_monitor.cpu_load  = cpu_load;
+
+                pthread_mutex_lock(&g_rtsafe_mutex);
+                list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
+                pthread_mutex_unlock(&g_rtsafe_mutex);
+
+                needs_post = true;
+            }
+        }
+    }
 
     if (needs_post)
         sem_post(&g_postevents_semaphore);
@@ -4456,6 +4523,8 @@ int effects_init(void* client)
         return ERR_JACK_CLIENT_CREATION;
     }
 
+    time_ns_init();
+
     /* Register jack ports */
     g_midi_in_port = jack_port_register(g_jack_global_client, "midi_in", JACK_DEFAULT_MIDI_TYPE, JackPortIsInput, 0);
 
@@ -4527,6 +4596,7 @@ int effects_init(void* client)
     /* Get buffers size */
     g_block_length = jack_get_buffer_size(g_jack_global_client);
     g_sample_rate = jack_get_sample_rate(g_jack_global_client);
+    g_block_time_us = g_block_length * 1e6 / g_sample_rate;
     g_sample_rate_f = g_sample_rate;
     g_midi_buffer_size = jack_port_type_get_buffer_size(g_jack_global_client, JACK_DEFAULT_MIDI_TYPE);
     g_max_allowed_midi_delta = (jack_nframes_t)(g_sample_rate * 0.2); // max 200ms of allowed delta
@@ -9508,6 +9578,30 @@ int effects_monitor_audio_levels(const char *source_port_name, int enable)
     return SUCCESS;
 }
 
+int effects_monitor_cpu_load(int enable, int num_effects, int *effects)
+{
+    if (num_effects <= 0)
+        return ERR_INVALID_OPERATION;
+
+    effect_t *effect;
+
+    for (int i = 0, effect_id; i < num_effects; i++)
+    {
+        effect_id = effects[i];
+        if (InstanceExist(effect_id))
+        {
+            effect = &g_effects[effect_id];
+
+            if (enable != 0)
+                effect->monitor_cpu_reset = true;
+
+            effect->monitor_cpu = enable != 0;
+        }
+    }
+
+    return SUCCESS;
+}
+
 int effects_monitor_midi_control(int channel, int enable)
 {
     if (channel < 0 || channel > 15)
@@ -9672,6 +9766,20 @@ void effects_output_data_ready(void)
 
     if (! g_postevents_ready)
     {
+        // recalculate max cpu usage again
+        for (int i = 0; i < MAX_PLUGIN_INSTANCES; ++i)
+        {
+            effect_t *effect = &g_effects[i];
+
+            if (effect->lilv_instance == NULL)
+                continue;
+            if (effect->lilv_plugin == NULL)
+                continue;
+
+            if (effect->monitor_cpu)
+                effect->monitor_cpu_reset = true;
+        }
+
         g_postevents_ready = true;
         sem_post(&g_postevents_semaphore);
     }
