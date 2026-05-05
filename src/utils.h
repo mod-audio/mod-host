@@ -130,6 +130,10 @@ float clampf(float value, float min, float max)
     return value < min ? min : (value > max ? max : value);
 }
 
+// get time in nanoseconds
+void time_ns_init();
+uint64_t time_ns_get();
+
 
 /*
 ************************************************************************************************************************

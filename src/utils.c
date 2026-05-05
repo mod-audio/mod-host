@@ -25,6 +25,7 @@
 #include "utils.h"
 #include <math.h>
 #include <string.h>
+#include <time.h>
 
 
 /*
@@ -243,4 +244,33 @@ char *str_duplicate(const char *str)
     char *copy = MALLOC(strlen(str) + 1);
     strcpy(copy, str);
     return copy;
+}
+
+
+#if defined(__ARM_ARCH_8A) && !defined(_MOD_DEVICE_DUOX)
+static uint64_t _cntfrq_ratio = 0;
+#endif
+
+void time_ns_init()
+{
+#if defined(__ARM_ARCH_8A) && !defined(_MOD_DEVICE_DUOX)
+    uint64_t r;
+    asm volatile("mrs %0, CNTFRQ_EL0" : "=r"(r));
+    // 1e6 for MHz clock speed, then converted to nano-seconds ratio
+    _cntfrq_ratio = 1000 / (r / 1e6);
+#endif
+}
+
+
+uint64_t time_ns_get()
+{
+#if defined(__ARM_ARCH_8A) && !defined(_MOD_DEVICE_DUOX)
+    uint64_t r;
+    asm volatile("mrs %0, CNTVCT_EL0" : "=r"(r));
+    return r * _cntfrq_ratio;
+#else
+    struct timespec time;
+    clock_gettime(CLOCK_MONOTONIC_RAW, &time);
+    return (uint64_t) time.tv_sec * 1e9 + (uint64_t) time.tv_nsec;
+#endif
 }
