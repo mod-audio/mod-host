@@ -120,6 +120,10 @@ typedef unsigned int uint;
 
 #include "mod-host.h"
 
+#ifdef __linux__
+#include "memfd-dlopen.h"
+#endif
+
 #ifndef HAVE_NEW_LILV
 #define lilv_free(x) free(x)
 #warning Your current lilv version does not support loading or unloading bundles
