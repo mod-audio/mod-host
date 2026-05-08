@@ -1466,7 +1466,9 @@ static void RunPostPonedEvents(int ignored_effect_id)
             break;
 
         case POSTPONED_CPU_MONITOR:
-            if (ShouldIgnorePostPonedEffectEvent(eventptr->event.audio_monitor.index, &cached_audio_monitor))
+            if (eventptr->event.cpu_monitor.effect_id == ignored_effect_id)
+                continue;
+            if (ShouldIgnorePostPonedEffectEvent(eventptr->event.cpu_monitor.effect_id, &cached_cpu_monitor))
                 continue;
 
             snprintf(buf, FEEDBACK_BUF_SIZE, "cpu_monitor %i %f", eventptr->event.cpu_monitor.effect_id,
