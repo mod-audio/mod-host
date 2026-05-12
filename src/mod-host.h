@@ -79,6 +79,7 @@
 #define MONITOR_OUTPUT          "monitor_output %i %s"
 #define MONITOR_OUTPUT_OFF      "monitor_output_off %i %s"
 #define MONITOR_AUDIO_LEVELS    "monitor_audio_levels %i %s"
+#define MONITOR_CPU_LOAD        "monitor_cpu_load %i %i ..."
 #define MONITOR_MIDI_CONTROL    "monitor_midi_control %i %i"
 #define MONITOR_MIDI_PROGRAM    "monitor_midi_program %i %i"
 #define MIDI_LEARN              "midi_learn %i %s %f %f"
