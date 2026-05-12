@@ -32,10 +32,9 @@
 ************************************************************************************************************************
 */
 
-#include "uridmap.h"
 #include "symap.h"
 
-#include <lilv/lilv.h>
+#include <stdbool.h>
 
 
 /*
@@ -50,6 +49,13 @@
 *           DATA TYPES
 ************************************************************************************************************************
 */
+
+typedef struct LilvInstanceImpl LilvInstance;
+typedef struct LilvNodeImpl LilvNode;
+typedef struct LilvPluginImpl LilvPlugin;
+typedef struct LilvWorldImpl LilvWorld;
+typedef uint32_t LV2_URID;
+typedef void LilvScalePoints;
 
 enum PortFlow {
     FLOW_UNKNOWN,
@@ -73,9 +79,6 @@ enum PortHints {
     HINT_TRIGGER        = 1 << 3,
     HINT_LOGARITHMIC    = 1 << 4,
     HINT_MONITORED      = 1 << 5, // outputs only
-    HINT_SHOULD_UPDATE  = 1 << 6, // inputs only, for external UIs | FIXME remove this
-    HINT_STATE_INACTIVE = 1 << 7,
-    HINT_STATE_BLOCKED  = 1 << 8,
     // cv
     HINT_CV_MOD         = 1 << 0, // uses mod cvport
     HINT_CV_RANGES      = 1 << 1, // port info includes ranges
@@ -203,13 +206,18 @@ typedef struct LV2_PORT_T {
     enum PortType type;
     enum PortFlow flow;
     enum PortHints hints;
+    uint32_t index;
     const char *symbol;
     float min_value;
     float max_value;
     float def_value;
-    LilvScalePoints* scale_points;
+    LilvScalePoints *scale_points;
 } lv2_port_t;
 
+typedef struct LV2_PLUGIN_T {
+    LilvInstance *lilv_instance;
+    const LilvPlugin *lilv_plugin;
+} lv2_plugin_t;
 
 
 /*
@@ -245,9 +253,9 @@ void lilv_cleanup();
 void lilv_add_bundle(const char *path);
 void lilv_remove_bundle(const char *path, const char *resource);
 
-const LilvPlugin* lilv_get_plugin(const char *uri);
+lv2_plugin_t lilv_get_plugin(const char *uri);
 
-uint32_t lilv_get_port_index(const LilvPlugin *plugin, const char *symbol);
+uint32_t lilv_get_port_index(const lv2_plugin_t *plugin, const char *symbol);
 
 
 /*

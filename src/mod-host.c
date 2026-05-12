@@ -70,7 +70,7 @@
 
 #include "mod-host.h"
 #include "effects.h"
-#include "lilv.h"
+#include "lv2.h"
 #include "socket.h"
 #include "protocol.h"
 #include "completer.h"

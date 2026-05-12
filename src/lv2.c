@@ -22,7 +22,8 @@
  ************************************************************************************************************************
  */
 
-#include "lilv.h"
+#include "lv2.h"
+#include "uridmap.h"
 
 #include <limits.h>
 #include <stdlib.h>
@@ -44,6 +45,8 @@
 #include "lv2/kxstudio-properties.h"
 #include "lv2/lv2-hmi.h"
 #include "lv2/mod-license.h"
+
+#include <lilv/lilv.h>
 
 
 /*
@@ -429,24 +432,26 @@ void lilv_remove_bundle(const char *path, const char *resource)
 #endif
 }
 
-const LilvPlugin* lilv_get_plugin(const char *uri)
+lv2_plugin_t lilv_get_plugin(const char *uri)
 {
+    lv2_plugin_t plugin = { 0 };
+
     LilvNode *uri_node = lilv_new_uri(g_lv2_data, uri);
 
-    const LilvPlugin *plugin = lilv_plugins_get_by_uri(g_plugins, uri_node);
+    plugin.lilv_plugin = lilv_plugins_get_by_uri(g_plugins, uri_node);
 
     lilv_node_free(uri_node);
 
     return plugin;
 }
 
-uint32_t lilv_get_port_index(const LilvPlugin *plugin, const char *symbol)
+uint32_t lilv_get_port_index(const lv2_plugin_t *plugin, const char *symbol)
 {
     LilvNode *symbol_node = lilv_new_string(g_lv2_data, symbol);
 
-    const LilvPort *port = lilv_plugin_get_port_by_symbol(plugin, symbol_node);
+    const LilvPort *port = lilv_plugin_get_port_by_symbol(plugin->lilv_plugin, symbol_node);
 
     lilv_node_free(symbol_node);
 
-    return lilv_port_get_index(plugin, port);
+    return lilv_port_get_index(plugin->lilv_plugin, port);
 }
