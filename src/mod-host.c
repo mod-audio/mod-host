@@ -70,6 +70,7 @@
 
 #include "mod-host.h"
 #include "effects.h"
+#include "lilv.h"
 #include "socket.h"
 #include "protocol.h"
 #include "completer.h"
@@ -653,13 +654,13 @@ static void save_cb(proto_t *proto)
 
 static void bundle_add(proto_t *proto)
 {
-    effects_bundle_add(proto->list[1]);
+    lilv_add_bundle(proto->list[1]);
     protocol_response("resp 0", proto);
 }
 
 static void bundle_remove(proto_t *proto)
 {
-    effects_bundle_remove(proto->list[1], proto->list[2]);
+    lilv_remove_bundle(proto->list[1], proto->list[2]);
     protocol_response("resp 0", proto);
 }
 

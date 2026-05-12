@@ -24,6 +24,10 @@
 
 #include "lilv.h"
 
+#include <limits.h>
+#include <stdlib.h>
+#include <string.h>
+
 #include <lv2/atom/atom.h>
 #include <lv2/buf-size/buf-size.h>
 #include <lv2/log/log.h>
@@ -48,6 +52,22 @@
  ************************************************************************************************************************
  */
 
+#ifndef LV2_BUF_SIZE__nominalBlockLength
+#define LV2_BUF_SIZE__nominalBlockLength LV2_BUF_SIZE_PREFIX "nominalBlockLength"
+#endif
+
+#ifndef LV2_CORE__enabled
+#define LV2_CORE__enabled LV2_CORE_PREFIX "enabled"
+#endif
+
+#ifndef LV2_STATE__threadSafeRestore
+#define LV2_STATE__threadSafeRestore LV2_STATE_PREFIX "threadSafeRestore"
+#endif
+
+#ifndef LILV_URI_CV_PORT
+#define LILV_URI_CV_PORT "http://lv2plug.in/ns/lv2core#CVPort"
+#endif
+
 #define LILV_NS_MOD "http://moddevices.com/ns/mod#"
 
 
@@ -56,6 +76,8 @@
  *           LOCAL CONSTANTS
  ************************************************************************************************************************
  */
+
+#define OS_SEP '/'
 
 
 /*
@@ -78,6 +100,8 @@
  ************************************************************************************************************************
  */
 
+static const LilvPlugins *g_plugins;
+
 
 /*
  * ***********************************************************************************************************************
@@ -99,6 +123,29 @@
  ************************************************************************************************************************
  */
 
+#ifdef _WIN32
+// missing on Windows
+static char* _realpath(const char *name, char *resolved)
+{
+    if (name == NULL)
+        return NULL;
+
+    if (_access(name, 4) != 0)
+        return NULL;
+
+    char *retname = NULL;
+
+    if ((retname = resolved) == NULL)
+        retname = malloc(PATH_MAX + 2);
+
+    if (retname == NULL)
+        return NULL;
+
+    return _fullpath(retname, name, PATH_MAX);
+}
+#define realpath _realpath
+#endif
+
 
 /*
  * ***********************************************************************************************************************
@@ -111,7 +158,6 @@ LilvWorld *g_lv2_data = NULL;
 Symap* g_symap = NULL;
 urids_t g_urids = { 0 };
 
-const LilvPlugins *g_plugins = NULL;
 char *g_lv2_scratch_dir = NULL;
 
 void lilv_init()
@@ -122,6 +168,7 @@ void lilv_init()
     lilv_world_set_option(g_lv2_data, LILV_OPTION_OBJECT_INDEX, NULL);
 #endif
     lilv_world_load_all(g_lv2_data);
+
     g_plugins = lilv_world_get_all_plugins(g_lv2_data);
 
     /* Lilv Nodes initialization */
@@ -185,6 +232,7 @@ void lilv_init()
 
     /* URI and URID Feature initialization */
     urid_sem_init();
+
     g_symap = symap_new();
 
     g_urids.atom_Double          = urid_to_id(g_symap, LV2_ATOM__Double);
@@ -238,7 +286,10 @@ void lilv_init()
 
 void lilv_cleanup()
 {
+    g_plugins = NULL;
+
     symap_free(g_symap);
+    g_symap = NULL;
 
     lilv_node_free(g_lilv_nodes.atom_port);
     lilv_node_free(g_lilv_nodes.audio);
@@ -286,5 +337,116 @@ void lilv_cleanup()
     lilv_node_free(g_lilv_nodes.toggled);
     lilv_node_free(g_lilv_nodes.trigger);
     lilv_node_free(g_lilv_nodes.worker_interface);
+
     lilv_world_free(g_lv2_data);
+    g_lv2_data = NULL;
+}
+
+void lilv_add_bundle(const char *path)
+{
+#ifdef HAVE_NEW_LILV
+    // lilv wants the last character as the separator
+    char tmppath[PATH_MAX+2];
+    char* bundlepath = realpath(path, tmppath);
+
+    if (bundlepath == NULL)
+        return;
+
+    {
+        const size_t size = strlen(bundlepath);
+        if (size <= 1)
+            return;
+
+        if (bundlepath[size] != OS_SEP)
+        {
+            bundlepath[size  ] = OS_SEP;
+            bundlepath[size+1] = '\0';
+        }
+    }
+
+    // convert bundle string into a lilv node
+    LilvNode* bundlenode = lilv_new_file_uri(g_lv2_data, NULL, bundlepath);
+
+    // load the bundle
+    lilv_world_load_bundle(g_lv2_data, bundlenode);
+
+    // free bundlenode, no longer needed
+    lilv_node_free(bundlenode);
+
+    // refresh plugins
+    g_plugins = lilv_world_get_all_plugins(g_lv2_data);
+#else
+    UNUSED_PARAM(path);
+#endif
+}
+
+void lilv_remove_bundle(const char *path, const char *resource)
+{
+#ifdef HAVE_NEW_LILV
+    // lilv wants the last character as the separator
+    char tmppath[PATH_MAX+2];
+    char* bundlepath = realpath(path, tmppath);
+
+    if (bundlepath == NULL)
+        return;
+
+    {
+        const size_t size = strlen(bundlepath);
+        if (size <= 1)
+            return;
+
+        if (bundlepath[size] != OS_SEP)
+        {
+            bundlepath[size  ] = OS_SEP;
+            bundlepath[size+1] = '\0';
+        }
+    }
+
+    // unload resource if requested
+    if (resource != NULL && resource[0] != '\0')
+    {
+        LilvNode *resourcenode = lilv_new_uri(g_lv2_data, resource);
+        if (resourcenode)
+        {
+            lilv_world_unload_resource(g_lv2_data, resourcenode);
+            lilv_node_free(resourcenode);
+        }
+    }
+
+    // convert bundle string into a lilv node
+    LilvNode* bundlenode = lilv_new_file_uri(g_lv2_data, NULL, bundlepath);
+
+    // unload the bundle
+    lilv_world_unload_bundle(g_lv2_data, bundlenode);
+
+    // free bundlenode, no longer needed
+    lilv_node_free(bundlenode);
+
+    // refresh plugins
+    g_plugins = lilv_world_get_all_plugins(g_lv2_data);
+#else
+    UNUSED_PARAM(path);
+#endif
+}
+
+const LilvPlugin* lilv_get_plugin(const char *uri)
+{
+    LilvNode *uri_node = lilv_new_uri(g_lv2_data, uri);
+
+    const LilvPlugin *plugin = lilv_plugins_get_by_uri(g_plugins, uri_node);
+
+    lilv_node_free(uri_node);
+
+    return plugin;
+}
+
+uint32_t lilv_get_port_index(const LilvPlugin *plugin, const char *symbol)
+{
+    LilvNode *symbol_node = lilv_new_string(g_lv2_data, symbol);
+
+    const LilvPort *port = lilv_plugin_get_port_by_symbol(plugin, symbol_node);
+
+    lilv_node_free(symbol_node);
+
+    return lilv_port_get_index(plugin, port);
 }

@@ -85,7 +85,6 @@ typedef unsigned int uint;
 #include <lv2/worker/worker.h>
 #include "lv2/control-input-port-change-request.h"
 #include "lv2/control-port-state-update.h"
-#include "lv2/lv2-hmi.h"
 #include "lv2/mod-license.h"
 
 // do not enable external-ui support in embed targets
@@ -109,27 +108,9 @@ typedef unsigned int uint;
 #include <hylia.h>
 #endif
 
-#include "mod-host.h"
-
 #ifndef HAVE_NEW_LILV
 #define lilv_free(x) free(x)
 #warning Your current lilv version does not support loading or unloading bundles
-#endif
-
-#ifndef LV2_BUF_SIZE__nominalBlockLength
-#define LV2_BUF_SIZE__nominalBlockLength LV2_BUF_SIZE_PREFIX "nominalBlockLength"
-#endif
-
-#ifndef LV2_CORE__enabled
-#define LV2_CORE__enabled LV2_CORE_PREFIX "enabled"
-#endif
-
-#ifndef LV2_STATE__threadSafeRestore
-#define LV2_STATE__threadSafeRestore LV2_STATE_PREFIX "threadSafeRestore"
-#endif
-
-#ifndef LILV_URI_CV_PORT
-#define LILV_URI_CV_PORT "http://lv2plug.in/ns/lv2core#CVPort"
 #endif
 
 #ifndef HAVE_LV2_STATE_FREE_PATH
@@ -171,6 +152,7 @@ typedef struct {
 #include "mod-memset.h"
 
 #ifdef MOD_HMI_CONTROL_ENABLED
+#include "lv2/lv2-hmi.h"
 #include "sys_host.h"
 #endif
 
@@ -208,51 +190,6 @@ typedef struct {
 *           LOCAL CONSTANTS
 ************************************************************************************************************************
 */
-
-enum PortFlow {
-    FLOW_UNKNOWN,
-    FLOW_INPUT,
-    FLOW_OUTPUT
-};
-
-enum PortType {
-    TYPE_UNKNOWN,
-    TYPE_CONTROL,
-    TYPE_AUDIO,
-    TYPE_CV,
-    TYPE_EVENT
-};
-
-enum PortHints {
-    // controls
-    HINT_ENUMERATION    = 1 << 0,
-    HINT_INTEGER        = 1 << 1,
-    HINT_TOGGLE         = 1 << 2,
-    HINT_TRIGGER        = 1 << 3,
-    HINT_LOGARITHMIC    = 1 << 4,
-    HINT_MONITORED      = 1 << 5, // outputs only
-    HINT_SHOULD_UPDATE  = 1 << 6, // inputs only, for external UIs
-    HINT_STATE_INACTIVE = 1 << 7,
-    HINT_STATE_BLOCKED  = 1 << 8,
-    // cv
-    HINT_CV_MOD         = 1 << 0, // uses mod cvport
-    HINT_CV_RANGES      = 1 << 1, // port info includes ranges
-    // events
-    HINT_TRANSPORT      = 1 << 0,
-    HINT_MIDI_EVENT     = 1 << 1,
-    HINT_OLD_EVENT_API  = 1 << 2,
-};
-
-enum PluginHints {
-    //HINT_TRANSPORT     = 1 << 0, // must match HINT_TRANSPORT set above
-    HINT_TRIGGERS        = 1 << 1,
-    HINT_OUTPUT_MONITORS = 1 << 2,
-    HINT_HAS_MIDI_INPUT  = 1 << 3,
-    HINT_HAS_STATE       = 1 << 4,
-    HINT_STATE_UNSAFE    = 1 << 5, // state restore needs mutex protection
-    HINT_IS_LIVE         = 1 << 6, // needs to be always running, cannot have processing disabled
-    HINT_NO_PRE_RUN      = 1 << 7, // do not keep plugin active for pre-run
-};
 
 enum TransportSyncMode {
     TRANSPORT_SYNC_NONE,
@@ -338,24 +275,17 @@ typedef struct CV_SOURCE_T {
 
 typedef struct PORT_T {
     uint32_t index;
-    enum PortType type;
-    enum PortFlow flow;
-    enum PortHints hints;
-    const char* symbol;
     jack_port_t *jack_port;
     float *buffer;
     uint32_t buffer_count;
     LV2_Evbuf *evbuf;
-    float min_value;
-    float max_value;
-    float def_value;
     float prev_value;
-    LilvScalePoints* scale_points;
     cv_source_t* cv_source;
     pthread_mutex_t cv_source_mutex;
 #ifdef MOD_HMI_CONTROL_ENABLED
     hmi_addressing_t* hmi_addressing;
 #endif
+    lv2_port_t meta;
 } port_t;
 
 typedef struct PROPERTY_T {
@@ -923,29 +853,6 @@ static char* _strchrnul(const char *s, int c)
 #define strchrnul _strchrnul
 #endif
 
-#ifdef _WIN32
-// missing on Windows
-static char* _realpath(const char *name, char *resolved)
-{
-    if (name == NULL)
-        return NULL;
-
-    if (_access(name, 4) != 0)
-        return NULL;
-
-    char *retname = NULL;
-
-    if ((retname = resolved) == NULL)
-        retname = malloc(PATH_MAX + 2);
-
-    if (retname == NULL)
-        return NULL;
-
-    return _fullpath(retname, name, PATH_MAX);
-}
-#define realpath _realpath
-#endif
-
 static void InstanceDelete(int effect_id)
 {
     if (INSTANCE_IS_VALID(effect_id))
@@ -970,7 +877,7 @@ static void AllocatePortBuffers(effect_t* effect, int in_size, int out_size)
     for (i = 0; i < effect->event_ports_count; i++)
     {
         port = effect->event_ports[i];
-        const int size = port->flow == FLOW_INPUT ? in_size : out_size;
+        const int size = port->meta.flow == FLOW_INPUT ? in_size : out_size;
         if (size == 0)
             continue;
         if (port->evbuf && lv2_evbuf_get_capacity(port->evbuf) == (uint32_t)size)
@@ -978,7 +885,7 @@ static void AllocatePortBuffers(effect_t* effect, int in_size, int out_size)
         lv2_evbuf_free(port->evbuf);
         port->evbuf = lv2_evbuf_new(
             size,
-            (port->hints & HINT_OLD_EVENT_API) ? LV2_EVBUF_EVENT : LV2_EVBUF_ATOM,
+            (port->meta.hints & HINT_OLD_EVENT_API) ? LV2_EVBUF_EVENT : LV2_EVBUF_ATOM,
             g_urid_map.map(g_urid_map.handle, LV2_ATOM__Chunk),
             g_urid_map.map(g_urid_map.handle, LV2_ATOM__Sequence));
 
@@ -1881,8 +1788,8 @@ static void PreRunPlugin(effect_t *effect)
         {
             port = effect->input_control_ports[i];
 
-            if ((port->hints & HINT_TRIGGER) && floats_differ_enough(port->prev_value, port->def_value))
-                port->prev_value = *(port->buffer) = port->def_value;
+            if ((port->meta.hints & HINT_TRIGGER) && floats_differ_enough(port->prev_value, port->meta.def_value))
+                port->prev_value = *(port->buffer) = port->meta.def_value;
         }
     }
 
@@ -1892,7 +1799,7 @@ static void PreRunPlugin(effect_t *effect)
         {
             port = effect->output_control_ports[i];
 
-            if ((port->hints & HINT_MONITORED) == 0)
+            if ((port->meta.hints & HINT_MONITORED) == 0)
                 continue;
 
             value = *(port->buffer);
@@ -1909,7 +1816,7 @@ static void PreRunPlugin(effect_t *effect)
 
             posteventptr->event.type = POSTPONED_OUTPUT_MONITOR;
             posteventptr->event.parameter.effect_id = effect->instance;
-            posteventptr->event.parameter.symbol    = port->symbol;
+            posteventptr->event.parameter.symbol    = port->meta.symbol;
             posteventptr->event.parameter.value     = value;
 
             pthread_mutex_lock(&g_rtsafe_mutex);
@@ -1953,7 +1860,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
         for (i = 0; i < effect->output_event_ports_count; i++)
         {
             port = effect->output_event_ports[i];
-            if (port->jack_port && port->flow == FLOW_OUTPUT && port->type == TYPE_EVENT)
+            if (port->jack_port && port->meta.flow == FLOW_OUTPUT && port->meta.type == TYPE_EVENT)
                 jack_midi_clear_buffer(jack_port_get_buffer(port->jack_port, nframes));
         }
         return 0;
@@ -2057,7 +1964,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
         if (effect->bypass > 0.5f && effect->enabled_index < 0)
         {
             // effect is now bypassed, but wasn't before
-            if (!effect->was_bypassed && (port->hints & HINT_MIDI_EVENT) != 0)
+            if (!effect->was_bypassed && (port->meta.hints & HINT_MIDI_EVENT) != 0)
             {
                 LV2_Evbuf_Iterator iter = lv2_evbuf_begin(port->evbuf);
 
@@ -2090,7 +1997,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
             LV2_Evbuf_Iterator iter = lv2_evbuf_begin(port->evbuf);
 
             /* Write time position */
-            if (lv2_pos->size > 0 && (port->hints & HINT_TRANSPORT) != 0)
+            if (lv2_pos->size > 0 && (port->meta.hints & HINT_TRANSPORT) != 0)
             {
                 lv2_evbuf_write(&iter, 0, 0, lv2_pos->type, lv2_pos->size, LV2_ATOM_BODY_CONST(lv2_pos));
             }
@@ -2158,7 +2065,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
                 // normalize value to 0-1
                 value = (value - cv_source->source_min_value) / cv_source->source_diff_value;
 
-                if (port->hints & HINT_TOGGLE) {
+                if (port->meta.hints & HINT_TOGGLE) {
                     // use min|max values if toggle
                     value = value > 0.5f ? cv_source->max_value : cv_source->min_value;
 
@@ -2167,7 +2074,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
                     value = cv_source->min_value + (value * cv_source->diff_value);
 
                     // and round to integer if needed
-                    if (port->hints & HINT_INTEGER) {
+                    if (port->meta.hints & HINT_INTEGER) {
                         value = roundf(value);
                     }
                 }
@@ -2334,7 +2241,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
             value = *(effect->ports[port_id]->buffer);
             if (monitor_check_condition(effect->monitors[i]->op, effect->monitors[i]->value, value) &&
                 floats_differ_enough(value, effect->monitors[i]->last_notified_value)) {
-                if (monitor_send(effect->instance, effect->ports[port_id]->symbol, value) >= 0)
+                if (monitor_send(effect->instance, effect->ports[port_id]->meta.symbol, value) >= 0)
                     effect->monitors[i]->last_notified_value = value;
             }
         }
@@ -2345,7 +2252,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
     {
         port = effect->output_event_ports[i];
 
-        if (port->flow == FLOW_OUTPUT && port->type == TYPE_EVENT)
+        if (port->meta.flow == FLOW_OUTPUT && port->meta.type == TYPE_EVENT)
         {
             void *buf = port->jack_port ? jack_port_get_buffer(port->jack_port, nframes) : NULL;
 
@@ -2461,8 +2368,8 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
         {
             port = effect->input_control_ports[i];
 
-            if ((port->hints & HINT_TRIGGER) && floats_differ_enough(port->prev_value, port->def_value))
-                port->prev_value = *(port->buffer) = port->def_value;
+            if ((port->meta.hints & HINT_TRIGGER) && floats_differ_enough(port->prev_value, port->meta.def_value))
+                port->prev_value = *(port->buffer) = port->meta.def_value;
         }
     }
 
@@ -2472,7 +2379,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
         {
             port = effect->output_control_ports[i];
 
-            if ((port->hints & HINT_MONITORED) == 0)
+            if ((port->meta.hints & HINT_MONITORED) == 0)
                 continue;
 
             value = *(port->buffer);
@@ -2489,7 +2396,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
 
             posteventptr->event.type = POSTPONED_OUTPUT_MONITOR;
             posteventptr->event.parameter.effect_id = effect->instance;
-            posteventptr->event.parameter.symbol    = port->symbol;
+            posteventptr->event.parameter.symbol    = port->meta.symbol;
             posteventptr->event.parameter.value     = value;
 
             pthread_mutex_lock(&g_rtsafe_mutex);
@@ -2523,17 +2430,17 @@ static bool SetPortValue(port_t *port, float value, int effect_id, bool is_bypas
     }
     else if (effect_id == GLOBAL_EFFECT_ID)
     {
-        if (!strcmp(port->symbol, g_bpb_port_symbol))
+        if (!strcmp(port->meta.symbol, g_bpb_port_symbol))
         {
             g_transport_bpb = value;
             update_transport = true;
         }
-        else if (!strcmp(port->symbol, g_bpm_port_symbol))
+        else if (!strcmp(port->meta.symbol, g_bpm_port_symbol))
         {
             g_transport_bpm = value;
             update_transport = true;
         }
-        else if (!strcmp(port->symbol, g_rolling_port_symbol))
+        else if (!strcmp(port->meta.symbol, g_rolling_port_symbol))
         {
             if (value > 0.5f)
             {
@@ -2551,7 +2458,7 @@ static bool SetPortValue(port_t *port, float value, int effect_id, bool is_bypas
     else if (!from_ui)
     {
 #ifdef WITH_EXTERNAL_UI_SUPPORT
-        port->hints |= HINT_SHOULD_UPDATE;
+        port->meta.hints |= HINT_SHOULD_UPDATE;
 #endif
     }
 
@@ -2565,7 +2472,7 @@ static bool SetPortValue(port_t *port, float value, int effect_id, bool is_bypas
 
     posteventptr->event.type = POSTPONED_PARAM_SET;
     posteventptr->event.parameter.effect_id = effect_id;
-    posteventptr->event.parameter.symbol    = port->symbol;
+    posteventptr->event.parameter.symbol    = port->meta.symbol;
     posteventptr->event.parameter.value     = value;
 
     pthread_mutex_lock(&g_rtsafe_mutex);
@@ -2599,15 +2506,15 @@ static float UpdateValueFromMidi(midi_cc_t* mcc, uint16_t mvalue, bool highres)
     port_t* port = mcc->port;
     float value;
 
-    if (port->hints & HINT_TRIGGER)
+    if (port->meta.hints & HINT_TRIGGER)
     {
         // now triggered, always maximum
-        value = port->max_value;
+        value = port->meta.max_value;
     }
-    else if (port->hints & HINT_TOGGLE)
+    else if (port->meta.hints & HINT_TOGGLE)
     {
         // toggle, always min or max
-        value = mvalue >= mvaluediv ? port->max_value : port->min_value;
+        value = mvalue >= mvaluediv ? port->meta.max_value : port->meta.min_value;
 
         if (mcc->effect_id == GLOBAL_EFFECT_ID && !strcmp(mcc->symbol, g_rolling_port_symbol))
         {
@@ -2644,7 +2551,7 @@ static float UpdateValueFromMidi(midi_cc_t* mcc, uint16_t mvalue, bool highres)
         }
         else
         {
-            if (port->hints & HINT_LOGARITHMIC)
+            if (port->meta.hints & HINT_LOGARITHMIC)
             {
                 // FIXME: calculate value properly (don't do log on custom scale, use port min/max then adjust)
                 value = mcc->minimum * powf(mcc->maximum/mcc->minimum, value);
@@ -2654,7 +2561,7 @@ static float UpdateValueFromMidi(midi_cc_t* mcc, uint16_t mvalue, bool highres)
                 value = mcc->minimum + (mcc->maximum - mcc->minimum) * value;
             }
 
-            if (port->hints & HINT_INTEGER)
+            if (port->meta.hints & HINT_INTEGER)
                 value = rintf(value);
         }
 
@@ -3437,7 +3344,7 @@ static port_t *FindEffectInputPortBySymbol(effect_t *effect, const char *control
 
     for (uint32_t i = 0; i < effect->input_control_ports_count; i++)
     {
-        if (strcmp(effect->input_control_ports[i]->symbol, control_symbol) == 0)
+        if (strcmp(effect->input_control_ports[i]->meta.symbol, control_symbol) == 0)
             return effect->input_control_ports[i];
     }
     return NULL;
@@ -3447,7 +3354,7 @@ static port_t *FindEffectOutputPortBySymbol(effect_t *effect, const char *contro
 {
     for (uint32_t i = 0; i < effect->output_control_ports_count; i++)
     {
-        if (strcmp(effect->output_control_ports[i]->symbol, control_symbol) == 0)
+        if (strcmp(effect->output_control_ports[i]->meta.symbol, control_symbol) == 0)
             return effect->output_control_ports[i];
     }
     return NULL;
@@ -4072,7 +3979,7 @@ static LV2_ControlInputPort_Change_Status RequestControlPortChange(LV2_ControlIn
 
     port_t *port = effect->ports[index];
 
-    if (port->type != TYPE_CONTROL || port->flow != FLOW_INPUT)
+    if (port->meta.type != TYPE_CONTROL || port->meta.flow != FLOW_INPUT)
         return LV2_CONTROL_INPUT_PORT_CHANGE_ERR_INVALID_INDEX;
 
     // ignore requests for same value
@@ -4096,13 +4003,13 @@ static LV2_Control_Port_State_Update_Status UpdateControlPortState(LV2_Control_P
 
     port_t *port = effect->ports[index];
 
-    if (port->type != TYPE_CONTROL)
+    if (port->meta.type != TYPE_CONTROL)
         return LV2_CONTROL_PORT_STATE_UPDATE_ERR_INVALID_INDEX;
 
     LV2_Control_Port_State curstate;
-    if (port->hints & HINT_STATE_BLOCKED)
+    if (port->meta.hints & HINT_STATE_BLOCKED)
         curstate = LV2_CONTROL_PORT_STATE_BLOCKED;
-    else if (port->hints & HINT_STATE_INACTIVE)
+    else if (port->meta.hints & HINT_STATE_INACTIVE)
         curstate = LV2_CONTROL_PORT_STATE_INACTIVE;
     else
         curstate = LV2_CONTROL_PORT_STATE_NONE;
@@ -4119,20 +4026,20 @@ static LV2_Control_Port_State_Update_Status UpdateControlPortState(LV2_Control_P
     switch (state)
     {
     case LV2_CONTROL_PORT_STATE_NONE:
-        port->hints &= ~(HINT_STATE_INACTIVE|HINT_STATE_BLOCKED);
+        port->meta.hints &= ~(HINT_STATE_INACTIVE|HINT_STATE_BLOCKED);
         break;
     case LV2_CONTROL_PORT_STATE_INACTIVE:
-        port->hints |= HINT_STATE_INACTIVE;
-        port->hints &= ~HINT_STATE_BLOCKED;
+        port->meta.hints |= HINT_STATE_INACTIVE;
+        port->meta.hints &= ~HINT_STATE_BLOCKED;
         break;
     case LV2_CONTROL_PORT_STATE_BLOCKED:
-        port->hints |= HINT_STATE_INACTIVE|HINT_STATE_BLOCKED;
+        port->meta.hints |= HINT_STATE_INACTIVE|HINT_STATE_BLOCKED;
         break;
     }
 
     posteventptr->event.type = POSTPONED_PARAM_STATE;
     posteventptr->event.state.effect_id = effect->instance;
-    posteventptr->event.state.symbol    = port->symbol;
+    posteventptr->event.state.symbol    = port->meta.symbol;
     posteventptr->event.state.state     = state;
 
     pthread_mutex_lock(&g_rtsafe_mutex);
@@ -4312,7 +4219,7 @@ static void ExternalControllerWriteFunction(LV2UI_Controller controller,
     port_t *port = effect->ports[port_index];
     const float value = *((const float*)buffer);
 
-    if (port->type != TYPE_CONTROL || port->flow != FLOW_INPUT)
+    if (port->meta.type != TYPE_CONTROL || port->meta.flow != FLOW_INPUT)
         return;
 
     // ignore requests for same value
@@ -4467,37 +4374,37 @@ int effects_init(void* client)
         port_t *port_bpb = ports[0] = calloc(1, sizeof(port_t));
         port_bpb->buffer = &port_bpb->prev_value;
         port_bpb->buffer_count = 1;
-        port_bpb->min_value = 0.0f;
-        port_bpb->max_value = 1.0f;
-        port_bpb->def_value = 0.0f;
-        port_bpb->type = TYPE_CONTROL;
-        port_bpb->flow = FLOW_INPUT;
-        port_bpb->hints = 0x0;
-        port_bpb->symbol = g_bpb_port_symbol;
+        port_bpb->meta.min_value = 0.0f;
+        port_bpb->meta.max_value = 1.0f;
+        port_bpb->meta.def_value = 0.0f;
+        port_bpb->meta.type = TYPE_CONTROL;
+        port_bpb->meta.flow = FLOW_INPUT;
+        port_bpb->meta.hints = 0x0;
+        port_bpb->meta.symbol = g_bpb_port_symbol;
         pthread_mutex_init(&port_bpb->cv_source_mutex, &mutex_atts);
 
         port_t *port_bpm = ports[1] = calloc(1, sizeof(port_t));
         port_bpm->buffer = &port_bpm->prev_value;
         port_bpm->buffer_count = 1;
-        port_bpm->min_value = 0.0f;
-        port_bpm->max_value = 1.0f;
-        port_bpm->def_value = 0.0f;
-        port_bpm->type = TYPE_CONTROL;
-        port_bpm->flow = FLOW_INPUT;
-        port_bpm->hints = 0x0;
-        port_bpm->symbol = g_bpm_port_symbol;
+        port_bpm->meta.min_value = 0.0f;
+        port_bpm->meta.max_value = 1.0f;
+        port_bpm->meta.def_value = 0.0f;
+        port_bpm->meta.type = TYPE_CONTROL;
+        port_bpm->meta.flow = FLOW_INPUT;
+        port_bpm->meta.hints = 0x0;
+        port_bpm->meta.symbol = g_bpm_port_symbol;
         pthread_mutex_init(&port_bpm->cv_source_mutex, &mutex_atts);
 
         port_t *port_rolling = ports[2] = calloc(1, sizeof(port_t));
         port_rolling->buffer = &port_rolling->prev_value;
         port_rolling->buffer_count = 1;
-        port_rolling->min_value = 0.0f;
-        port_rolling->max_value = 1.0f;
-        port_rolling->def_value = 0.0f;
-        port_rolling->type = TYPE_CONTROL;
-        port_rolling->flow = FLOW_INPUT;
-        port_rolling->hints = HINT_TOGGLE;
-        port_rolling->symbol = g_rolling_port_symbol;
+        port_rolling->meta.min_value = 0.0f;
+        port_rolling->meta.max_value = 1.0f;
+        port_rolling->meta.def_value = 0.0f;
+        port_rolling->meta.type = TYPE_CONTROL;
+        port_rolling->meta.flow = FLOW_INPUT;
+        port_rolling->meta.hints = HINT_TOGGLE;
+        port_rolling->meta.symbol = g_rolling_port_symbol;
         pthread_mutex_init(&port_rolling->cv_source_mutex, &mutex_atts);
 
         effect_t *effect = &g_effects[GLOBAL_EFFECT_ID];
@@ -4522,28 +4429,28 @@ int effects_init(void* client)
 
         effect->bypass_port.buffer_count = 1;
         effect->bypass_port.buffer = &effect->bypass;
-        effect->bypass_port.min_value = 0.0f;
-        effect->bypass_port.max_value = 1.0f;
-        effect->bypass_port.def_value = 0.0f;
+        effect->bypass_port.meta.min_value = 0.0f;
+        effect->bypass_port.meta.max_value = 1.0f;
+        effect->bypass_port.meta.def_value = 0.0f;
         effect->bypass_port.prev_value = 0.0f;
-        effect->bypass_port.type = TYPE_CONTROL;
-        effect->bypass_port.flow = FLOW_INPUT;
-        effect->bypass_port.hints = HINT_TOGGLE;
-        effect->bypass_port.symbol = g_bypass_port_symbol;
+        effect->bypass_port.meta.type = TYPE_CONTROL;
+        effect->bypass_port.meta.flow = FLOW_INPUT;
+        effect->bypass_port.meta.hints = HINT_TOGGLE;
+        effect->bypass_port.meta.symbol = g_bypass_port_symbol;
         pthread_mutex_init(&effect->bypass_port.cv_source_mutex, &mutex_atts);
 
         /* virtual presets port */
         effect->preset_value = 0.0f;
         effect->presets_port.buffer_count = 1;
         effect->presets_port.buffer = &effect->preset_value;
-        effect->presets_port.min_value = 0.0f;
-        effect->presets_port.max_value = 1.0f;
-        effect->presets_port.def_value = 0.0f;
+        effect->presets_port.meta.min_value = 0.0f;
+        effect->presets_port.meta.max_value = 1.0f;
+        effect->presets_port.meta.def_value = 0.0f;
         effect->presets_port.prev_value = 0.0f;
-        effect->presets_port.type = TYPE_CONTROL;
-        effect->presets_port.flow = FLOW_INPUT;
-        effect->presets_port.hints = HINT_ENUMERATION|HINT_INTEGER;
-        effect->presets_port.symbol = g_presets_port_symbol;
+        effect->presets_port.meta.type = TYPE_CONTROL;
+        effect->presets_port.meta.flow = FLOW_INPUT;
+        effect->presets_port.meta.hints = HINT_ENUMERATION|HINT_INTEGER;
+        effect->presets_port.meta.symbol = g_presets_port_symbol;
         pthread_mutex_init(&effect->presets_port.cv_source_mutex, &mutex_atts);
     }
 
@@ -4917,27 +4824,13 @@ int effects_add(const char *uri, int instance, int activate)
 
     /* Get the plugin */
     plugin_uri = lilv_new_uri(g_lv2_data, uri);
-    plugin = lilv_plugins_get_by_uri(g_plugins, plugin_uri);
+    plugin = lilv_get_plugin(uri);
 
     if (!plugin)
     {
-        // NOTE: Reloading the entire world is nasty!
-        //       It may result in crashes, and we now have a way to add/remove bundles as needed anyway.
-#if 0
-        /* If the plugin are not found reload all plugins */
-        lilv_world_load_all(g_lv2_data);
-        g_plugins = lilv_world_get_all_plugins(g_lv2_data);
-
-        /* Try get the plugin again */
-        plugin = lilv_plugins_get_by_uri(g_plugins, plugin_uri);
-
-        if (!plugin)
-#endif
-        {
-            fprintf(stderr, "can't get plugin\n");
-            error = ERR_LV2_INVALID_URI;
-            goto error;
-        }
+        fprintf(stderr, "can't get plugin\n");
+        error = ERR_LV2_INVALID_URI;
+        goto error;
     }
 
     effect->lilv_plugin = plugin;
@@ -5084,29 +4977,29 @@ int effects_add(const char *uri, int instance, int activate)
         lilv_port = lilv_plugin_get_port_by_index(plugin, i);
         symbol_node = lilv_port_get_symbol(plugin, lilv_port);
         port->index = i;
-        port->symbol = lilv_node_as_string(symbol_node);
+        port->meta.symbol = lilv_node_as_string(symbol_node);
 
         snprintf(port_name, MAX_CHAR_BUF_SIZE, "%s", lilv_node_as_string(symbol_node));
 
         /* Port flow */
-        port->flow = FLOW_UNKNOWN;
+        port->meta.flow = FLOW_UNKNOWN;
         if (lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.input))
         {
             jack_flags = JackPortIsInput;
-            port->flow = FLOW_INPUT;
+            port->meta.flow = FLOW_INPUT;
         }
         else if (lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.output))
         {
             jack_flags = JackPortIsOutput;
-            port->flow = FLOW_OUTPUT;
+            port->meta.flow = FLOW_OUTPUT;
         }
 
-        port->type = TYPE_UNKNOWN;
-        port->hints = 0x0;
+        port->meta.type = TYPE_UNKNOWN;
+        port->meta.hints = 0x0;
 
         if (lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.audio))
         {
-            port->type = TYPE_AUDIO;
+            port->meta.type = TYPE_AUDIO;
 
             /* Allocate memory to audio buffer */
             audio_buffer = (float *) mod_calloc(g_sample_rate, sizeof(float));
@@ -5137,7 +5030,7 @@ int effects_add(const char *uri, int instance, int activate)
         }
         else if (lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.control))
         {
-            port->type = TYPE_CONTROL;
+            port->meta.type = TYPE_CONTROL;
 
             /* Allocate memory to control port */
             control_buffer = (float *) malloc(sizeof(float));
@@ -5151,7 +5044,7 @@ int effects_add(const char *uri, int instance, int activate)
             port->buffer_count = 1;
             lilv_instance_connect_port(lilv_instance, i, control_buffer);
 
-            port->scale_points = lilv_port_get_scale_points(plugin, lilv_port);
+            port->meta.scale_points = lilv_port_get_scale_points(plugin, lilv_port);
 
             /* Set the minimum value of control */
             float min_value;
@@ -5219,34 +5112,34 @@ int effects_add(const char *uri, int instance, int activate)
 
             if (lilv_port_has_property(plugin, lilv_port, g_lilv_nodes.enumeration))
             {
-                port->hints |= HINT_ENUMERATION;
+                port->meta.hints |= HINT_ENUMERATION;
 
                 // make 2 scalepoint enumeration work as toggle
-                if (lilv_scale_points_size(port->scale_points) == 2)
-                    port->hints |= HINT_TOGGLE;
+                if (lilv_scale_points_size(port->meta.scale_points) == 2)
+                    port->meta.hints |= HINT_TOGGLE;
             }
             if (lilv_port_has_property(plugin, lilv_port, g_lilv_nodes.integer))
             {
-                port->hints |= HINT_INTEGER;
+                port->meta.hints |= HINT_INTEGER;
             }
             if (lilv_port_has_property(plugin, lilv_port, g_lilv_nodes.toggled))
             {
-                port->hints |= HINT_TOGGLE;
+                port->meta.hints |= HINT_TOGGLE;
             }
             if (lilv_port_has_property(plugin, lilv_port, g_lilv_nodes.trigger))
             {
-                port->hints |= HINT_TRIGGER;
+                port->meta.hints |= HINT_TRIGGER;
                 effect->hints |= HINT_TRIGGERS;
             }
             if (lilv_port_has_property(plugin, lilv_port, g_lilv_nodes.logarithmic))
             {
-                port->hints |= HINT_LOGARITHMIC;
+                port->meta.hints |= HINT_LOGARITHMIC;
             }
 
             port->jack_port = NULL;
-            port->def_value = def_value;
-            port->min_value = min_value;
-            port->max_value = max_value;
+            port->meta.def_value = def_value;
+            port->meta.min_value = min_value;
+            port->meta.max_value = max_value;
             port->prev_value = def_value;
 
             control_ports_count++;
@@ -5258,7 +5151,7 @@ int effects_add(const char *uri, int instance, int activate)
         }
         else if (lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.cv) || lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.mod_cvport))
         {
-            port->type = TYPE_CV;
+            port->meta.type = TYPE_CV;
 
             /* Allocate memory to cv buffer */
             cv_buffer = (float *) mod_calloc(g_sample_rate, sizeof(float));
@@ -5284,7 +5177,7 @@ int effects_add(const char *uri, int instance, int activate)
             }
 
             if (lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.mod_cvport))
-                port->hints |= HINT_CV_MOD;
+                port->meta.hints |= HINT_CV_MOD;
 
             /* Set the minimum value of control */
             float min_value;
@@ -5316,7 +5209,7 @@ int effects_add(const char *uri, int instance, int activate)
             else if (lilvvalue_minimum != NULL && lilvvalue_maximum != NULL)
             {
                 // if range is valid, set metadata
-                port->hints |= HINT_CV_RANGES;
+                port->meta.hints |= HINT_CV_RANGES;
 
                 jack_uuid_t uuid = jack_port_uuid(jack_port);
                 if (!jack_uuid_empty(uuid)) {
@@ -5331,8 +5224,8 @@ int effects_add(const char *uri, int instance, int activate)
                 }
             }
 
-            port->min_value = min_value;
-            port->max_value = max_value;
+            port->meta.min_value = min_value;
+            port->meta.max_value = max_value;
 
             port->jack_port = jack_port;
 
@@ -5346,31 +5239,31 @@ int effects_add(const char *uri, int instance, int activate)
         else if (lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.event) ||
                     lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.atom_port))
         {
-            port->type = TYPE_EVENT;
+            port->meta.type = TYPE_EVENT;
             if (lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.event))
             {
-                port->hints |= HINT_OLD_EVENT_API;
-                port->hints |= HINT_MIDI_EVENT;
+                port->meta.hints |= HINT_OLD_EVENT_API;
+                port->meta.hints |= HINT_MIDI_EVENT;
                 effect->hints |= HINT_HAS_MIDI_INPUT;
             }
             else
             {
                 if (lilv_port_supports_event(plugin, lilv_port, g_lilv_nodes.midiEvent))
                 {
-                    port->hints |= HINT_MIDI_EVENT;
+                    port->meta.hints |= HINT_MIDI_EVENT;
                     effect->hints |= HINT_HAS_MIDI_INPUT;
                 }
                 if (lilv_port_supports_event(plugin, lilv_port, g_lilv_nodes.timePosition))
                 {
-                    port->hints |= HINT_TRANSPORT;
+                    port->meta.hints |= HINT_TRANSPORT;
                     effect->hints |= HINT_TRANSPORT;
                 }
             }
 
-            if (port->flow == FLOW_INPUT && control_in_size == 0)
+            if (port->meta.flow == FLOW_INPUT && control_in_size == 0)
                 control_in_size = g_midi_buffer_size * 16; // 16 taken from jalv source code
 
-            if (port->flow == FLOW_OUTPUT && control_out_size == 0)
+            if (port->meta.flow == FLOW_OUTPUT && control_out_size == 0)
                 control_out_size = g_midi_buffer_size * 16; // 16 taken from jalv source code
 
             LilvNodes *lilvminsize = lilv_port_get_value(plugin, lilv_port, g_lilv_nodes.minimumSize);
@@ -5380,12 +5273,12 @@ int effects_add(const char *uri, int instance, int activate)
                 if (iminsize > 0)
                 {
                     const uint minsize = (uint)iminsize;
-                    if (port->flow == FLOW_INPUT)
+                    if (port->meta.flow == FLOW_INPUT)
                     {
                         if (minsize > control_in_size)
                             control_in_size = minsize;
                     }
-                    else if (port->flow == FLOW_OUTPUT)
+                    else if (port->meta.flow == FLOW_OUTPUT)
                     {
                         if (minsize > control_out_size)
                             control_out_size = minsize;
@@ -5732,28 +5625,28 @@ int effects_add(const char *uri, int instance, int activate)
 
     effect->bypass_port.buffer_count = 1;
     effect->bypass_port.buffer = &effect->bypass;
-    effect->bypass_port.min_value = 0.0f;
-    effect->bypass_port.max_value = 1.0f;
-    effect->bypass_port.def_value = 0.0f;
+    effect->bypass_port.meta.min_value = 0.0f;
+    effect->bypass_port.meta.max_value = 1.0f;
+    effect->bypass_port.meta.def_value = 0.0f;
     effect->bypass_port.prev_value = 0.0f;
-    effect->bypass_port.type = TYPE_CONTROL;
-    effect->bypass_port.flow = FLOW_INPUT;
-    effect->bypass_port.hints = HINT_TOGGLE;
-    effect->bypass_port.symbol = g_bypass_port_symbol;
+    effect->bypass_port.meta.type = TYPE_CONTROL;
+    effect->bypass_port.meta.flow = FLOW_INPUT;
+    effect->bypass_port.meta.hints = HINT_TOGGLE;
+    effect->bypass_port.meta.symbol = g_bypass_port_symbol;
     pthread_mutex_init(&effect->bypass_port.cv_source_mutex, &mutex_atts);
 
     // virtual presets port
     effect->preset_value = 0.0f;
     effect->presets_port.buffer_count = 1;
     effect->presets_port.buffer = &effect->preset_value;
-    effect->presets_port.min_value = 0.0f;
-    effect->presets_port.max_value = 1.0f;
-    effect->presets_port.def_value = 0.0f;
+    effect->presets_port.meta.min_value = 0.0f;
+    effect->presets_port.meta.max_value = 1.0f;
+    effect->presets_port.meta.def_value = 0.0f;
     effect->presets_port.prev_value = 0.0f;
-    effect->presets_port.type = TYPE_CONTROL;
-    effect->presets_port.flow = FLOW_INPUT;
-    effect->presets_port.hints = HINT_ENUMERATION|HINT_INTEGER;
-    effect->presets_port.symbol = g_presets_port_symbol;
+    effect->presets_port.meta.type = TYPE_CONTROL;
+    effect->presets_port.meta.flow = FLOW_INPUT;
+    effect->presets_port.meta.hints = HINT_ENUMERATION|HINT_INTEGER;
+    effect->presets_port.meta.symbol = g_presets_port_symbol;
     pthread_mutex_init(&effect->presets_port.cv_source_mutex, &mutex_atts);
 
     pthread_mutexattr_destroy(&mutex_atts);
@@ -6185,7 +6078,7 @@ static void effects_remove_inner_loop(int effect_id)
                 // TODO destroy port mutexes
                 free(effect->ports[i]->buffer);
 
-                lilv_scale_points_free(effect->ports[i]->scale_points);
+                lilv_scale_points_free(effect->ports[i]->meta.scale_points);
 
                 free(effect->ports[i]);
             }
@@ -6705,11 +6598,11 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
         {
             // stores the data of the current control
             last_effect_id = effect_id;
-            last_min = port->min_value;
-            last_max = port->max_value;
+            last_min = port->meta.min_value;
+            last_max = port->meta.max_value;
             last_buffer = port->buffer;
             last_prev   = &port->prev_value;
-            last_symbol = port->symbol;
+            last_symbol = port->meta.symbol;
 
             if (value < last_min)
                 value = last_min;
@@ -6719,8 +6612,8 @@ int effects_set_parameter(int effect_id, const char *control_symbol, float value
             *last_prev = *last_buffer = value;
 
 #ifdef WITH_EXTERNAL_UI_SUPPORT
-            last_hints = &port->hints;
-            port->hints |= HINT_SHOULD_UPDATE;
+            last_hints = &port->meta.hints;
+            port->meta.hints |= HINT_SHOULD_UPDATE;
 #endif
             return SUCCESS;
         }
@@ -6784,7 +6677,7 @@ int effects_set_parameter_multi(const char *control_symbol, float value, int num
             port_t *port = ports[i];
             port->prev_value = *port->buffer = value;
 #ifdef WITH_EXTERNAL_UI_SUPPORT
-            port->hints |= HINT_SHOULD_UPDATE;
+            port->meta.hints |= HINT_SHOULD_UPDATE;
 #endif
         }
     }
@@ -6834,7 +6727,7 @@ int effects_flush_parameters(int effect_id, int reset, int param_count, const fl
         {
             port->prev_value = *(port->buffer) = params[i].value;
 #ifdef WITH_EXTERNAL_UI_SUPPORT
-            port->hints |= HINT_SHOULD_UPDATE;
+            port->meta.hints |= HINT_SHOULD_UPDATE;
 #endif
         }
     }
@@ -6936,7 +6829,7 @@ int effects_flush_parameters_multi(int reset, int param_count, const flushed_par
                 port = cached_effect->ports[j];
                 port->prev_value = *(port->buffer) = params[j].value;
 #ifdef WITH_EXTERNAL_UI_SUPPORT
-                port->hints |= HINT_SHOULD_UPDATE;
+                port->meta.hints |= HINT_SHOULD_UPDATE;
 #endif
             }
             if (effect->reset_index >= 0 && reset != 0)
@@ -6970,7 +6863,7 @@ int effects_pre_run(int effect_id, int reset, int param_count, const flushed_par
         {
             port->prev_value = *(port->buffer) = params[i].value;
 #ifdef WITH_EXTERNAL_UI_SUPPORT
-            port->hints |= HINT_SHOULD_UPDATE;
+            port->meta.hints |= HINT_SHOULD_UPDATE;
 #endif
         }
     }
@@ -7026,7 +6919,7 @@ int effects_pre_run_multi(int reset, int param_count, const flushed_param_t *par
                 {
                     port->prev_value = *(port->buffer) = params[j].value;
 #ifdef WITH_EXTERNAL_UI_SUPPORT
-                    port->hints |= HINT_SHOULD_UPDATE;
+                    port->meta.hints |= HINT_SHOULD_UPDATE;
 #endif
                 }
                 if (effect->reset_index >= 0 && reset != 0)
@@ -7427,12 +7320,9 @@ int effects_monitor_parameter(int effect_id, const char *control_symbol, const c
     else
         return ERR_ASSIGNMENT_INVALID_OP;
 
-
     effect_t *effect = &g_effects[effect_id];
-    const LilvNode *symbol = lilv_new_string(g_lv2_data, control_symbol);
-    const LilvPort *port = lilv_plugin_get_port_by_symbol(effect->lilv_plugin, symbol);
 
-    int port_id = lilv_port_get_index(effect->lilv_plugin, port);
+    int port_id = lilv_get_port_index(effect->lilv_plugin, control_symbol);
 
     effect->monitors_count++;
     effect->monitors =
@@ -7462,11 +7352,11 @@ int effects_monitor_output_parameter(int effect_id, const char *control_symbol_o
         if (enable == 0)
         {
             // check if not monitored
-            if ((port->hints & HINT_MONITORED) == 0)
+            if ((port->meta.hints & HINT_MONITORED) == 0)
                 return SUCCESS;
 
             // remove monitored flag
-            port->hints &= ~HINT_MONITORED;
+            port->meta.hints &= ~HINT_MONITORED;
 
             // stop postpone events thread
             if (g_postevents_running == 1)
@@ -7496,12 +7386,12 @@ int effects_monitor_output_parameter(int effect_id, const char *control_symbol_o
         }
 
         // check if already monitored
-        if (port->hints & HINT_MONITORED)
+        if (port->meta.hints & HINT_MONITORED)
             return SUCCESS;
 
         // set prev_value
         port->prev_value = *(port->buffer);
-        port->hints |= HINT_MONITORED;
+        port->meta.hints |= HINT_MONITORED;
 
         // simulate an output monitor event here, to report current value
         postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
@@ -7510,7 +7400,7 @@ int effects_monitor_output_parameter(int effect_id, const char *control_symbol_o
         {
             posteventptr->event.type = POSTPONED_OUTPUT_MONITOR;
             posteventptr->event.parameter.effect_id = effect->instance;
-            posteventptr->event.parameter.symbol    = port->symbol;
+            posteventptr->event.parameter.symbol    = port->meta.symbol;
             posteventptr->event.parameter.value     = port->prev_value;
 
             pthread_mutex_lock(&g_rtsafe_mutex);
@@ -7599,16 +7489,16 @@ int effects_get_parameter_symbols(int effect_id, int output_ports, const char** 
     {
         if (output_ports)
         {
-            if (effect->control_ports[i]->flow != FLOW_OUTPUT)
+            if (effect->control_ports[i]->meta.flow != FLOW_OUTPUT)
                 continue;
         }
         else
         {
-            if (effect->control_ports[i]->flow != FLOW_INPUT)
+            if (effect->control_ports[i]->meta.flow != FLOW_INPUT)
                 continue;
         }
 
-        symbols[j++] = (const char *) effect->control_ports[i]->symbol;
+        symbols[j++] = (const char *) effect->control_ports[i]->meta.symbol;
     }
 
     symbols[j] = NULL;
@@ -7649,15 +7539,15 @@ int effects_get_parameter_info(int effect_id, const char *control_symbol, float 
 
     for (i = 0; i < effect->control_ports_count; i++)
     {
-        if (strcmp(control_symbol, effect->control_ports[i]->symbol) == 0)
+        if (strcmp(control_symbol, effect->control_ports[i]->meta.symbol) == 0)
         {
-            (*range[0]) = effect->control_ports[i]->def_value;
-            (*range[1]) = effect->control_ports[i]->min_value;
-            (*range[2]) = effect->control_ports[i]->max_value;
+            (*range[0]) = effect->control_ports[i]->meta.def_value;
+            (*range[1]) = effect->control_ports[i]->meta.min_value;
+            (*range[2]) = effect->control_ports[i]->meta.max_value;
             (*range[3]) = *(effect->control_ports[i]->buffer);
 
             /* Get the scale points */
-            LilvScalePoints *points = effect->control_ports[i]->scale_points;
+            LilvScalePoints *points = effect->control_ports[i]->meta.scale_points;
             if (points != NULL)
             {
                 uint32_t j = 0;
@@ -7755,7 +7645,7 @@ int effects_midi_learn(int effect_id, const char *control_symbol, float minimum,
 
             g_midi_cc_list[i].minimum = minimum;
             g_midi_cc_list[i].maximum = maximum;
-            g_midi_cc_list[i].symbol = port->symbol;
+            g_midi_cc_list[i].symbol = port->meta.symbol;
             g_midi_cc_list[i].port = port;
         }
 
@@ -7827,7 +7717,7 @@ int effects_midi_map(int effect_id, const char *control_symbol, int channel, int
 
             g_midi_cc_list[i].minimum = minimum;
             g_midi_cc_list[i].maximum = maximum;
-            g_midi_cc_list[i].symbol = port->symbol;
+            g_midi_cc_list[i].symbol = port->meta.symbol;
             g_midi_cc_list[i].port = port;
         }
 
@@ -8313,7 +8203,7 @@ int effects_cv_map(int effect_id, const char *control_symbol, const char *source
             return ERR_MEMORY_ALLOCATION;
 
         jack_port = jack_port_register(effect->jack_client,
-                                       port->symbol,
+                                       port->meta.symbol,
                                        JACK_DEFAULT_AUDIO_TYPE,
                                        JackPortIsInput|JackPortIsControlVoltage, 0);
 
@@ -8381,16 +8271,16 @@ int effects_cv_map(int effect_id, const char *control_symbol, const char *source
 
                     for (uint32_t i = 0; i < source_effect->output_cv_ports_count; ++i)
                     {
-                        if (!strcmp(source_effect->output_cv_ports[i]->symbol, source_symbol))
+                        if (!strcmp(source_effect->output_cv_ports[i]->meta.symbol, source_symbol))
                         {
                             const port_t *source_port = source_effect->output_cv_ports[i];
 
-                            source_min_value = source_port->min_value;
-                            source_max_value = source_port->max_value;
+                            source_min_value = source_port->meta.min_value;
+                            source_max_value = source_port->meta.max_value;
 
-                            if (source_port->hints & HINT_CV_MOD)
+                            if (source_port->meta.hints & HINT_CV_MOD)
                                 source_is_mod_cv = true;
-                            if (source_port->hints & HINT_CV_RANGES)
+                            if (source_port->meta.hints & HINT_CV_RANGES)
                                 source_has_ranges = true;
 
                             break;
@@ -8680,97 +8570,6 @@ float effects_jack_max_cpu_load(void)
     return jack_cpu_load(g_jack_global_client);
 #endif
 }
-
-#define OS_SEP '/'
-
-void effects_bundle_add(const char* bpath)
-{
-#ifdef HAVE_NEW_LILV
-    // lilv wants the last character as the separator
-    char tmppath[PATH_MAX+2];
-    char* bundlepath = realpath(bpath, tmppath);
-
-    if (bundlepath == NULL)
-        return;
-
-    {
-        const size_t size = strlen(bundlepath);
-        if (size <= 1)
-            return;
-
-        if (bundlepath[size] != OS_SEP)
-        {
-            bundlepath[size  ] = OS_SEP;
-            bundlepath[size+1] = '\0';
-        }
-    }
-
-    // convert bundle string into a lilv node
-    LilvNode* bundlenode = lilv_new_file_uri(g_lv2_data, NULL, bundlepath);
-
-    // load the bundle
-    lilv_world_load_bundle(g_lv2_data, bundlenode);
-
-    // free bundlenode, no longer needed
-    lilv_node_free(bundlenode);
-
-    // refresh plugins
-    g_plugins = lilv_world_get_all_plugins(g_lv2_data);
-#else
-    UNUSED_PARAM(bpath);
-#endif
-}
-
-void effects_bundle_remove(const char *bpath, const char *resource)
-{
-#ifdef HAVE_NEW_LILV
-    // lilv wants the last character as the separator
-    char tmppath[PATH_MAX+2];
-    char* bundlepath = realpath(bpath, tmppath);
-
-    if (bundlepath == NULL)
-        return;
-
-    {
-        const size_t size = strlen(bundlepath);
-        if (size <= 1)
-            return;
-
-        if (bundlepath[size] != OS_SEP)
-        {
-            bundlepath[size  ] = OS_SEP;
-            bundlepath[size+1] = '\0';
-        }
-    }
-
-    // unload resource if requested
-    if (resource != NULL && resource[0] != '\0')
-    {
-        LilvNode *resourcenode = lilv_new_uri(g_lv2_data, resource);
-        if (resourcenode)
-        {
-            lilv_world_unload_resource(g_lv2_data, resourcenode);
-            lilv_node_free(resourcenode);
-        }
-    }
-
-    // convert bundle string into a lilv node
-    LilvNode* bundlenode = lilv_new_file_uri(g_lv2_data, NULL, bundlepath);
-
-    // unload the bundle
-    lilv_world_unload_bundle(g_lv2_data, bundlenode);
-
-    // free bundlenode, no longer needed
-    lilv_node_free(bundlenode);
-
-    // refresh plugins
-    g_plugins = lilv_world_get_all_plugins(g_lv2_data);
-#else
-    UNUSED_PARAM(bpath);
-#endif
-}
-
-#undef OS_SEP
 
 int effects_state_load(const char *dir)
 {
@@ -9384,7 +9183,7 @@ void effect_sync_scheduled_params(int realtime)
         port = g_sync_scheduled_params[i].port;
         port->prev_value = *port->buffer = g_sync_scheduled_params[i].value;
 #ifdef WITH_EXTERNAL_UI_SUPPORT
-        port->hints |= HINT_SHOULD_UPDATE;
+        port->meta.hints |= HINT_SHOULD_UPDATE;
 #endif
     }
 
@@ -9540,9 +9339,9 @@ void effects_idle_external_uis(void)
                 for (uint32_t j = 0; j < effect->input_control_ports_count; j++)
                 {
                     port = effect->input_control_ports[j];
-                    if (port->hints & HINT_SHOULD_UPDATE)
+                    if (port->meta.hints & HINT_SHOULD_UPDATE)
                     {
-                        port->hints &= ~HINT_SHOULD_UPDATE;
+                        port->meta.hints &= ~HINT_SHOULD_UPDATE;
                         effect->ui_desc->port_event(effect->ui_handle,
                                                     port->index,
                                                     sizeof(float), 0,

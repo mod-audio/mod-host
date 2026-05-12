@@ -40,13 +40,6 @@
 
 /*
 ************************************************************************************************************************
-*           DO NOT CHANGE THESE DEFINES
-************************************************************************************************************************
-*/
-
-
-/*
-************************************************************************************************************************
 *           CONFIGURATION DEFINES
 ************************************************************************************************************************
 */
@@ -57,6 +50,51 @@
 *           DATA TYPES
 ************************************************************************************************************************
 */
+
+enum PortFlow {
+    FLOW_UNKNOWN,
+    FLOW_INPUT,
+    FLOW_OUTPUT
+};
+
+enum PortType {
+    TYPE_UNKNOWN,
+    TYPE_CONTROL,
+    TYPE_AUDIO,
+    TYPE_CV,
+    TYPE_EVENT
+};
+
+enum PortHints {
+    // controls
+    HINT_ENUMERATION    = 1 << 0,
+    HINT_INTEGER        = 1 << 1,
+    HINT_TOGGLE         = 1 << 2,
+    HINT_TRIGGER        = 1 << 3,
+    HINT_LOGARITHMIC    = 1 << 4,
+    HINT_MONITORED      = 1 << 5, // outputs only
+    HINT_SHOULD_UPDATE  = 1 << 6, // inputs only, for external UIs | FIXME remove this
+    HINT_STATE_INACTIVE = 1 << 7,
+    HINT_STATE_BLOCKED  = 1 << 8,
+    // cv
+    HINT_CV_MOD         = 1 << 0, // uses mod cvport
+    HINT_CV_RANGES      = 1 << 1, // port info includes ranges
+    // events
+    HINT_TRANSPORT      = 1 << 0,
+    HINT_MIDI_EVENT     = 1 << 1,
+    HINT_OLD_EVENT_API  = 1 << 2,
+};
+
+enum PluginHints {
+    //HINT_TRANSPORT     = 1 << 0, // must match HINT_TRANSPORT set above
+    HINT_TRIGGERS        = 1 << 1,
+    HINT_OUTPUT_MONITORS = 1 << 2,
+    HINT_HAS_MIDI_INPUT  = 1 << 3,
+    HINT_HAS_STATE       = 1 << 4,
+    HINT_STATE_UNSAFE    = 1 << 5, // state restore needs mutex protection
+    HINT_IS_LIVE         = 1 << 6, // needs to be always running, cannot have processing disabled
+    HINT_NO_PRE_RUN      = 1 << 7, // do not keep plugin active for pre-run
+};
 
 typedef struct LILV_NODES_T {
     LilvNode *atom_port;
@@ -151,6 +189,28 @@ typedef struct URIDS_T {
     LV2_URID threads_schedPriority;
 } urids_t;
 
+typedef struct LV2_FEATURES_T {
+    bool hmi;
+    bool license;
+    bool options;
+    bool state;
+    bool stateLoadDefault;
+    bool stateThreadSafeRestore;
+    bool worker;
+} lv2_features_t;
+
+typedef struct LV2_PORT_T {
+    enum PortType type;
+    enum PortFlow flow;
+    enum PortHints hints;
+    const char *symbol;
+    float min_value;
+    float max_value;
+    float def_value;
+    LilvScalePoints* scale_points;
+} lv2_port_t;
+
+
 
 /*
 ************************************************************************************************************************
@@ -163,7 +223,6 @@ extern LilvWorld *g_lv2_data;
 extern Symap* g_symap;
 extern urids_t g_urids;
 
-extern const LilvPlugins *g_plugins;
 extern char *g_lv2_scratch_dir;
 
 
@@ -182,6 +241,13 @@ extern char *g_lv2_scratch_dir;
 
 void lilv_init();
 void lilv_cleanup();
+
+void lilv_add_bundle(const char *path);
+void lilv_remove_bundle(const char *path, const char *resource);
+
+const LilvPlugin* lilv_get_plugin(const char *uri);
+
+uint32_t lilv_get_port_index(const LilvPlugin *plugin, const char *symbol);
 
 
 /*
