@@ -26,6 +26,7 @@
 #define _GNU_SOURCE
 #endif
 
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -471,9 +472,9 @@ typedef struct EFFECT_T {
     bool jack_activated;
     bool lv2_activated;
 
-    bool monitor_cpu;
-    bool monitor_cpu_reset;
-    float cpu_load;
+    atomic_bool monitor_cpu;
+    atomic_bool monitor_cpu_reset;
+    double cpu_load;
 
     // previous transport state
     bool transport_rolling;
@@ -804,7 +805,8 @@ static jack_client_t *g_jack_global_client;
 static jack_nframes_t g_sample_rate, g_max_allowed_midi_delta;
 static float g_sample_rate_f;
 static const char **g_capture_ports, **g_playback_ports;
-static int32_t g_midi_buffer_size, g_block_length, g_block_time_us;
+static int32_t g_midi_buffer_size, g_block_length;
+static double g_block_time_us;
 static int32_t g_thread_policy, g_thread_priority;
 #ifdef MOD_IO_PROCESSING_ENABLED
 static jack_port_t *g_audio_in1_port;
@@ -1138,7 +1140,7 @@ static void AllocatePortBuffers(effect_t* effect, int in_size, int out_size)
 static int BufferSize(jack_nframes_t nframes, void* data)
 {
     g_block_length = nframes;
-    g_block_time_us = nframes * 1e6 / g_sample_rate;
+    g_block_time_us = (double)(nframes * 1e6) / g_sample_rate;
     g_midi_buffer_size = jack_port_type_get_buffer_size(g_jack_global_client, JACK_DEFAULT_MIDI_TYPE);
 
     if (data)
@@ -2129,7 +2131,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
     }
 
     /* common variables */
-    const bool monitor_cpu = effect->monitor_cpu;
+    const bool monitor_cpu = atomic_load(&effect->monitor_cpu);
     bool needs_post = false;
     const float *buffer_in;
     float *buffer_out;
@@ -2681,13 +2683,10 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
 
     if (monitor_cpu)
     {
-        if (effect->monitor_cpu_reset)
-        {
+        if (atomic_exchange(&effect->monitor_cpu_reset, false))
             effect->cpu_load = 0.f;
-            effect->monitor_cpu_reset = false;
-        }
 
-        float cpu_load = ((int32_t)(time_ns_get() - time_start) / g_block_time_us) * 0.001f;
+        const double cpu_load = (double)(time_ns_get() - time_start) / g_block_time_us;
 
         if (cpu_load > effect->cpu_load)
         {
@@ -2699,7 +2698,7 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
             {
                 posteventptr->event.type = POSTPONED_CPU_MONITOR;
                 posteventptr->event.cpu_monitor.effect_id = effect->instance;
-                posteventptr->event.cpu_monitor.cpu_load  = cpu_load;
+                posteventptr->event.cpu_monitor.cpu_load  = cpu_load * 0.001;
 
                 pthread_mutex_lock(&g_rtsafe_mutex);
                 list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
@@ -5006,7 +5005,7 @@ int effects_init(void* client)
     /* Get buffers size */
     g_block_length = jack_get_buffer_size(g_jack_global_client);
     g_sample_rate = jack_get_sample_rate(g_jack_global_client);
-    g_block_time_us = g_block_length * 1e6 / g_sample_rate;
+    g_block_time_us = (double)(g_block_length * 1e6) / g_sample_rate;
     g_sample_rate_f = g_sample_rate;
     g_midi_buffer_size = jack_port_type_get_buffer_size(g_jack_global_client, JACK_DEFAULT_MIDI_TYPE);
     g_max_allowed_midi_delta = (jack_nframes_t)(g_sample_rate * 0.2); // max 200ms of allowed delta
@@ -5651,6 +5650,9 @@ int effects_add(const char *uri, int instance, int activate)
     effect->instance = instance;
     effect->jack_activated = activate;
     effect->lv2_activated = true;
+
+    atomic_init(&effect->monitor_cpu, false);
+    atomic_init(&effect->monitor_cpu_reset, true);
 
     /* Init the pointers */
     plugin_uri = NULL;
@@ -10092,9 +10094,9 @@ int effects_monitor_cpu_load(int enable, int num_effects, int *effects)
                 continue;
 
             if (enable != 0)
-                effect->monitor_cpu_reset = true;
+                atomic_store(&effect->monitor_cpu_reset, true);
 
-            effect->monitor_cpu = enable != 0;
+            atomic_store(&effect->monitor_cpu, enable != 0);
         }
     }
 
@@ -10279,8 +10281,8 @@ void effects_output_data_ready(void)
             if (effect->lilv_plugin == NULL)
                 continue;
 
-            if (effect->monitor_cpu)
-                effect->monitor_cpu_reset = true;
+            if (atomic_load(&effect->monitor_cpu))
+                atomic_store(&effect->monitor_cpu_reset, true);
         }
 
         g_postevents_ready = true;
