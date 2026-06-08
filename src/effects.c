@@ -5948,6 +5948,22 @@ int effects_remove(int effect_id)
         }
     }
 
+    // discard events that arrived between the pre-drain and jack_client_close above
+    {
+        struct list_head stale;
+        INIT_LIST_HEAD(&stale);
+        pthread_mutex_lock(&g_rtsafe_mutex);
+        list_splice_init(&g_rtsafe_list, &stale);
+        pthread_mutex_unlock(&g_rtsafe_mutex);
+        struct list_head *it, *it2;
+        list_for_each_safe(it, it2, &stale)
+        {
+            postponed_event_list_data *const ep =
+                list_entry(it, postponed_event_list_data, siblings);
+            rtsafe_memory_pool_deallocate(g_rtsafe_mem_pool, ep);
+        }
+    }
+
     // clear param_set cache
     effects_set_parameter(-1, NULL, 0.f);
 
