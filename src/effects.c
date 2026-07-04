@@ -35,6 +35,7 @@
 #include <math.h>
 #include <pthread.h>
 #include <sys/stat.h>
+#include <time.h>
 
 #ifdef _WIN32
 #include <direct.h>
@@ -281,6 +282,7 @@ enum PostPonedEventType {
     POSTPONED_MIDI_PROGRAM_CHANGE,
     POSTPONED_MIDI_MAP,
     POSTPONED_TRANSPORT,
+    POSTPONED_BEAT_SYNC,
     POSTPONED_JACK_MIDI_CONNECT,
     POSTPONED_LOG_TRACE, // stack allocated, rt-safe
     POSTPONED_LOG_MESSAGE, // heap allocated
@@ -604,6 +606,13 @@ typedef struct POSTPONED_TRANSPORT_EVENT_T {
     float bpm;
 } postponed_transport_event_t;
 
+typedef struct POSTPONED_BEAT_SYNC_EVENT_T {
+    int32_t bar; // 0-indexed, matches the time:bar convention used elsewhere in this file
+    uint64_t t_us; // CLOCK_MONOTONIC microseconds at which this downbeat occurred
+    float bpm;
+    float bpb;
+} postponed_beat_sync_event_t;
+
 typedef struct POSTPONED_JACK_MIDI_CONNECT_EVENT_T {
     jack_port_id_t port;
 } postponed_jack_midi_connect_event_t;
@@ -628,6 +637,7 @@ typedef struct POSTPONED_EVENT_T {
         postponed_midi_program_change_event_t program_change;
         postponed_midi_map_event_t midi_map;
         postponed_transport_event_t transport;
+        postponed_beat_sync_event_t beat_sync;
         postponed_jack_midi_connect_event_t jack_midi_connect;
         postponed_log_trace_event_t log_trace;
         postponed_log_message_event_t log_message;
@@ -725,6 +735,7 @@ static jack_port_t *g_audio_out2_port;
 static jack_port_t *g_midi_in_port;
 static jack_position_t g_jack_pos;
 static bool g_jack_rolling;
+static int32_t g_last_beat_sync_bar = -1;
 static volatile double g_transport_bpb;
 static volatile double g_transport_bpm;
 static volatile bool g_transport_reset;
@@ -1334,6 +1345,16 @@ static void RunPostPonedEvents(int ignored_effect_id)
 
             // ignore older transport changes
             got_transport = true;
+            break;
+
+        case POSTPONED_BEAT_SYNC:
+            // one event per downbeat crossing, all delivered (not a state to dedup)
+            snprintf(buf, FEEDBACK_BUF_SIZE, "beat_sync %i %llu %f %f",
+                     eventptr->event.beat_sync.bar,
+                     (unsigned long long)eventptr->event.beat_sync.t_us,
+                     eventptr->event.beat_sync.bpm,
+                     eventptr->event.beat_sync.bpb);
+            socket_send_feedback_debug(buf);
             break;
 
         case POSTPONED_JACK_MIDI_CONNECT:
@@ -2472,32 +2493,91 @@ static bool UpdateGlobalJackPosition(enum UpdatePositionFlag flag, bool do_post)
         g_jack_pos.beats_per_minute = g_transport_bpm;
     }
 
+    // Detect downbeat (bar boundary) crossings and post an absolute-timestamped
+    // beat_sync event so external clients (pi-Stomp) can drive a metronome/count-in
+    // LED without running their own JACK client. One event per newly-seen bar;
+    // t_us is back-dated to the actual downbeat frame (not "now"), so consumers can
+    // extrapolate a drift-free grid regardless of feedback/relay latency.
+    bool posted = false;
+
+    if (g_jack_rolling && (g_jack_pos.valid & JackPositionBBT) != 0x0 && g_jack_pos.beats_per_minute > 0.0)
+    {
+        const int32_t bar = (int32_t)g_jack_pos.bar - 1;
+
+        if (bar != g_last_beat_sync_bar)
+        {
+            g_last_beat_sync_bar = bar;
+
+            const double tick = (g_jack_pos.valid & JackTickDouble) ? g_jack_pos.tick_double : g_jack_pos.tick;
+            const double bar_beat = (g_jack_pos.beat - 1) + (tick / g_jack_pos.ticks_per_beat);
+            const double beat_length_frames = 60.0 * g_jack_pos.frame_rate / g_jack_pos.beats_per_minute;
+            const double frames_since_downbeat = bar_beat * beat_length_frames;
+
+            struct timespec now;
+            clock_gettime(CLOCK_MONOTONIC, &now);
+            const uint64_t now_us = (uint64_t)now.tv_sec * 1000000ULL + (uint64_t)now.tv_nsec / 1000ULL;
+            const uint64_t t_us = now_us - (uint64_t)llround(frames_since_downbeat * 1000000.0 / g_jack_pos.frame_rate);
+
+            postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
+
+            if (posteventptr)
+            {
+                posteventptr->event.type = POSTPONED_BEAT_SYNC;
+                posteventptr->event.beat_sync.bar = bar;
+                posteventptr->event.beat_sync.t_us = t_us;
+                posteventptr->event.beat_sync.bpm = g_jack_pos.beats_per_minute;
+                posteventptr->event.beat_sync.bpb = g_jack_pos.beats_per_bar;
+
+                pthread_mutex_lock(&g_rtsafe_mutex);
+                list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
+                pthread_mutex_unlock(&g_rtsafe_mutex);
+
+                posted = true;
+            }
+        }
+    }
+    else
+    {
+        // stopped or no valid BBT: forget the last bar so a fresh roll re-anchors immediately
+        g_last_beat_sync_bar = -1;
+    }
+
     if (flag == UPDATE_POSITION_SKIP)
-        return false;
+    {
+        if (posted && do_post)
+            sem_post(&g_postevents_semaphore);
+        return posted;
+    }
     if (flag == UPDATE_POSITION_IF_CHANGED &&
         old_rolling == g_jack_rolling &&
         !doubles_differ_enough(old_bpb, g_transport_bpb) &&
         !doubles_differ_enough(old_bpm, g_transport_bpm))
-        return false;
+    {
+        if (posted && do_post)
+            sem_post(&g_postevents_semaphore);
+        return posted;
+    }
 
     postponed_event_list_data* const posteventptr = rtsafe_memory_pool_allocate_atomic(g_rtsafe_mem_pool);
 
-    if (!posteventptr)
-        return false;
+    if (posteventptr)
+    {
+        posteventptr->event.type = POSTPONED_TRANSPORT;
+        posteventptr->event.transport.rolling = g_jack_rolling;
+        posteventptr->event.transport.bpb     = g_transport_bpb;
+        posteventptr->event.transport.bpm     = g_transport_bpm;
 
-    posteventptr->event.type = POSTPONED_TRANSPORT;
-    posteventptr->event.transport.rolling = g_jack_rolling;
-    posteventptr->event.transport.bpb     = g_transport_bpb;
-    posteventptr->event.transport.bpm     = g_transport_bpm;
+        pthread_mutex_lock(&g_rtsafe_mutex);
+        list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
+        pthread_mutex_unlock(&g_rtsafe_mutex);
 
-    pthread_mutex_lock(&g_rtsafe_mutex);
-    list_add_tail(&posteventptr->siblings, &g_rtsafe_list);
-    pthread_mutex_unlock(&g_rtsafe_mutex);
+        posted = true;
+    }
 
-    if (do_post)
+    if (posted && do_post)
         sem_post(&g_postevents_semaphore);
 
-    return true;
+    return posted;
 }
 
 static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
