@@ -1380,7 +1380,10 @@ static void RunPostPonedEvents(int ignored_effect_id)
                     jack_ringbuffer_read(effect->events_out_buffer, (char*)&key, sizeof(uint32_t));
                     jack_ringbuffer_read(effect->events_out_buffer, (char*)&atom, sizeof(LV2_Atom));
 
-                    char *body = mod_calloc(1, atom.size);
+                    // +1 so the string/path/uri branches below always find a
+                    // terminator. A plugin may emit a zero-size Path (NAM with
+                    // no model does), leaving nothing for "%s" to stop on.
+                    char *body = mod_calloc(1, atom.size + 1);
                     jack_ringbuffer_read(effect->events_out_buffer, body, atom.size);
 
                     supported = true;
@@ -5829,6 +5832,16 @@ int effects_remove(int effect_id)
             }
 #endif
 
+            // Close the client before freeing anything it touches; until it
+            // returns the process callback can still run the plugin, and the
+            // plugin writes its control ports every cycle.
+            if (effect->jack_client)
+                jack_client_close(effect->jack_client);
+
+            if (effect->lilv_instance)
+                lilv_instance_deactivate(effect->lilv_instance);
+            lilv_instance_free(effect->lilv_instance);
+
             FreeFeatures(effect);
 
             if (effect->event_ports)
@@ -5888,13 +5901,6 @@ int effects_remove(int effect_id)
                 }
                 free(effect->properties);
             }
-
-            if (effect->lilv_instance)
-                lilv_instance_deactivate(effect->lilv_instance);
-            lilv_instance_free(effect->lilv_instance);
-
-            if (effect->jack_client)
-                jack_client_close(effect->jack_client);
 
             free(effect->audio_ports);
             free(effect->input_audio_ports);
