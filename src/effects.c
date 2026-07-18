@@ -5832,6 +5832,16 @@ int effects_remove(int effect_id)
             }
 #endif
 
+            // Close the client before freeing anything it touches; until it
+            // returns the process callback can still run the plugin, and the
+            // plugin writes its control ports every cycle.
+            if (effect->jack_client)
+                jack_client_close(effect->jack_client);
+
+            if (effect->lilv_instance)
+                lilv_instance_deactivate(effect->lilv_instance);
+            lilv_instance_free(effect->lilv_instance);
+
             FreeFeatures(effect);
 
             if (effect->event_ports)
@@ -5891,13 +5901,6 @@ int effects_remove(int effect_id)
                 }
                 free(effect->properties);
             }
-
-            if (effect->lilv_instance)
-                lilv_instance_deactivate(effect->lilv_instance);
-            lilv_instance_free(effect->lilv_instance);
-
-            if (effect->jack_client)
-                jack_client_close(effect->jack_client);
 
             free(effect->audio_ports);
             free(effect->input_audio_ports);
