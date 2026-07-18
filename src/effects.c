@@ -1380,7 +1380,10 @@ static void RunPostPonedEvents(int ignored_effect_id)
                     jack_ringbuffer_read(effect->events_out_buffer, (char*)&key, sizeof(uint32_t));
                     jack_ringbuffer_read(effect->events_out_buffer, (char*)&atom, sizeof(LV2_Atom));
 
-                    char *body = mod_calloc(1, atom.size);
+                    // +1 so the string/path/uri branches below always find a
+                    // terminator. A plugin may emit a zero-size Path (NAM with
+                    // no model does), leaving nothing for "%s" to stop on.
+                    char *body = mod_calloc(1, atom.size + 1);
                     jack_ringbuffer_read(effect->events_out_buffer, body, atom.size);
 
                     supported = true;
