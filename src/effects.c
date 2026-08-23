@@ -2514,9 +2514,13 @@ static bool UpdateGlobalJackPosition(enum UpdatePositionFlag flag, bool do_post)
     {
         const int32_t bar = (int32_t)g_jack_pos.bar - 1;
         const bool new_bar = (bar != g_last_beat_sync_bar);
-        const bool bpm_or_bpb_changed = (flag != UPDATE_POSITION_SKIP) &&
+        // UPDATE_POSITION_FORCED means that a caller has just set bpm or bpb.
+        // Those callers write the global before they call, thus old_bpm and
+        // old_bpb already hold the new value and can not show the change.
+        const bool bpm_or_bpb_changed = (flag == UPDATE_POSITION_FORCED) ||
+                                        ((flag == UPDATE_POSITION_IF_CHANGED) &&
                                          (doubles_differ_enough(old_bpb, g_transport_bpb) ||
-                                          doubles_differ_enough(old_bpm, g_transport_bpm));
+                                          doubles_differ_enough(old_bpm, g_transport_bpm)));
 
         if (new_bar || bpm_or_bpb_changed)
         {
@@ -6979,7 +6983,7 @@ int effects_set_beats_per_minute(double bpm)
     g_transport_bpm = bpm;
     g_transport_reset = true;
     TriggerJackTimebase(false);
-    UpdateGlobalJackPosition(UPDATE_POSITION_FORCED, false);
+    UpdateGlobalJackPosition(UPDATE_POSITION_FORCED, true);
   } else {
     result = ERR_JACK_VALUE_OUT_OF_RANGE;
   }
