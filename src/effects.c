@@ -971,9 +971,19 @@ static void AllocatePortBuffers(effect_t* effect, int in_size, int out_size)
 
     for (i = 0; i < effect->event_ports_count; i++)
     {
-        const int size = effect->event_ports[i]->flow == FLOW_INPUT ? in_size : out_size;
+        int size = effect->event_ports[i]->flow == FLOW_INPUT ? in_size : out_size;
+
+        /* A zero size means "leave this port's buffer as it already is" -- BufferSize() passes it
+           that way for ports whose size is pinned to something other than the default. Skipping
+           is only safe once the port HAS a buffer; a port that never got one needs the same
+           default the output side already has below. */
         if (size == 0)
-            continue;
+        {
+            if (effect->event_ports[i]->evbuf != NULL)
+                continue;
+            size = g_midi_buffer_size * 16; // 16 taken from jalv source code
+        }
+
         lv2_evbuf_free(effect->event_ports[i]->evbuf);
         effect->event_ports[i]->evbuf = lv2_evbuf_new(
             size,
