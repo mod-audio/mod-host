@@ -5108,6 +5108,23 @@ int effects_add(const char *uri, int instance)
         }
     }
 
+    /* lilv can undercount a plugin's ports relative to what its compiled LV2 descriptor actually
+       has (some bundles' Turtle reuses one blank node as the lv2:port of more than one plugin
+       subject). When that happens, some of what jack_activate() below wires up is never
+       lilv_instance_connect_port()-ed, and the real-time thread calls into the plugin with an
+       unconnected port. Refuse rather than activate a plugin lilv could not fully describe. */
+    if (ports_count == 0 ||
+        (audio_ports_count + control_ports_count + cv_ports_count + event_ports_count) != ports_count)
+    {
+        fprintf(stderr, "effects_add: lilv reported %u port(s) for %s but only classified "
+                         "%u (audio) + %u (control) + %u (cv) + %u (event) -- refusing to "
+                         "activate an effect lilv could not fully describe\n",
+                ports_count, uri, audio_ports_count, control_ports_count, cv_ports_count,
+                event_ports_count);
+        error = ERR_LV2_INSTANTIATION;
+        goto error;
+    }
+
     // special ports
     {
         const LilvPort* enabled_port = lilv_plugin_get_port_by_designation(plugin, g_lilv_nodes.input, g_lilv_nodes.enabled);
