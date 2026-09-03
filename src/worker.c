@@ -61,7 +61,13 @@ void worker_init(worker_t *worker, LilvInstance *instance, const LV2_Worker_Inte
     worker->iface = iface;
     worker->instance = instance;
     sem_init(&worker->sem, 0, 0);
-    zix_thread_create(&worker->thread, size + sizeof(void*) * 4, worker_func, worker);
+    const ZixStatus thread_status =
+        zix_thread_create(&worker->thread, size + sizeof(void*) * 4, worker_func, worker);
+    worker->thread_started = (thread_status == ZIX_STATUS_SUCCESS);
+    if (!worker->thread_started) {
+        fprintf(stderr, "worker_init: zix_thread_create() failed (status %d) -- "
+                         "this plugin's LV2 worker extension will not run\n", (int)thread_status);
+    }
     worker->requests  = jack_ringbuffer_create(size);
     worker->responses = jack_ringbuffer_create(size);
     worker->response  = malloc(size);
@@ -72,9 +78,13 @@ void worker_init(worker_t *worker, LilvInstance *instance, const LV2_Worker_Inte
 void worker_finish(worker_t *worker)
 {
     worker->exit = true;
-    if (worker->requests) {
+    /* Only join a thread zix_thread_create() actually reported starting -- `requests` is
+       allocated unconditionally above and is not evidence of that (see worker_init()). */
+    if (worker->thread_started) {
         sem_post(&worker->sem);
         zix_thread_join(worker->thread, NULL);
+    }
+    if (worker->requests) {
         jack_ringbuffer_free(worker->requests);
         jack_ringbuffer_free(worker->responses);
         free(worker->response);

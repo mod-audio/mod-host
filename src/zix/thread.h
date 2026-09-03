@@ -22,6 +22,8 @@
 #else
 #    include <errno.h>
 #    include <pthread.h>
+#    include <stdio.h>
+#    include <string.h>
 #endif
 
 #include "common.h"
@@ -94,9 +96,16 @@ zix_thread_create(ZixThread* thread,
 {
     pthread_attr_t attr;
     pthread_attr_init(&attr);
-    pthread_attr_setstacksize(&attr, stack_size);
+    const int ss_ret = pthread_attr_setstacksize(&attr, stack_size);
+    if (ss_ret) {
+        fprintf(stderr, "zix_thread_create: pthread_attr_setstacksize(%zu) failed: %s\n",
+                stack_size, strerror(ss_ret));
+    }
 
     const int ret = pthread_create(thread, &attr, function, arg);
+    if (ret) {
+        fprintf(stderr, "zix_thread_create: pthread_create() failed: %s\n", strerror(ret));
+    }
     pthread_attr_destroy(&attr);
 
     if (ret == EAGAIN) {

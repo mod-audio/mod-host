@@ -27,6 +27,8 @@ typedef struct WORKER_T {
     void *response;
     sem_t sem;
     ZixThread thread;
+    /* True only once zix_thread_create() reports success for `thread` above. */
+    bool thread_started;
     const LV2_Worker_Interface *iface;
     LilvInstance *instance;
     bool exit;
