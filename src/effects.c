@@ -971,9 +971,19 @@ static void AllocatePortBuffers(effect_t* effect, int in_size, int out_size)
 
     for (i = 0; i < effect->event_ports_count; i++)
     {
-        const int size = effect->event_ports[i]->flow == FLOW_INPUT ? in_size : out_size;
+        int size = effect->event_ports[i]->flow == FLOW_INPUT ? in_size : out_size;
+
+        /* A zero size means "leave this port's buffer as it already is" -- BufferSize() passes it
+           that way for ports whose size is pinned to something other than the default. Skipping
+           is only safe once the port HAS a buffer; a port that never got one needs the same
+           default the output side already has below. */
         if (size == 0)
-            continue;
+        {
+            if (effect->event_ports[i]->evbuf != NULL)
+                continue;
+            size = g_midi_buffer_size * 16; // 16 taken from jalv source code
+        }
+
         lv2_evbuf_free(effect->event_ports[i]->evbuf);
         effect->event_ports[i]->evbuf = lv2_evbuf_new(
             size,
@@ -5096,6 +5106,23 @@ int effects_add(const char *uri, int instance)
                 }
             }
         }
+    }
+
+    /* lilv can undercount a plugin's ports relative to what its compiled LV2 descriptor actually
+       has (some bundles' Turtle reuses one blank node as the lv2:port of more than one plugin
+       subject). When that happens, some of what jack_activate() below wires up is never
+       lilv_instance_connect_port()-ed, and the real-time thread calls into the plugin with an
+       unconnected port. Refuse rather than activate a plugin lilv could not fully describe. */
+    if (ports_count == 0 ||
+        (audio_ports_count + control_ports_count + cv_ports_count + event_ports_count) != ports_count)
+    {
+        fprintf(stderr, "effects_add: lilv reported %u port(s) for %s but only classified "
+                         "%u (audio) + %u (control) + %u (cv) + %u (event) -- refusing to "
+                         "activate an effect lilv could not fully describe\n",
+                ports_count, uri, audio_ports_count, control_ports_count, cv_ports_count,
+                event_ports_count);
+        error = ERR_LV2_INSTANTIATION;
+        goto error;
     }
 
     // special ports
