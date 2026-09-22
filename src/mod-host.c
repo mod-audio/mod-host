@@ -131,7 +131,10 @@ static pthread_t intclient_socket_thread;
 static void effects_add_cb(proto_t *proto)
 {
     int resp;
-    resp = effects_add(proto->list[1], atoi(proto->list[2]));
+    /* proto->list[3] is the optional client-name argument the "..." tail in EFFECT_ADD
+       lets through; a caller that sent only 3 tokens leaves it unset. */
+    const char *client_name = (proto->list_count > 3) ? proto->list[3] : NULL;
+    resp = effects_add(proto->list[1], atoi(proto->list[2]), client_name);
     protocol_response_int(resp, proto);
 }
 

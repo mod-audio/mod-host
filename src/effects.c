@@ -4538,10 +4538,31 @@ int effects_finish(int close_client)
     return SUCCESS;
 }
 
-int effects_add(const char *uri, int instance)
+/* jack_client_name_size() includes the final NUL, and JACK backends vary it (33 on plain
+   JACK1, up to 256 seen on some PipeWire builds) -- 256 is comfortably above every backend
+   observed, and requested_name is truncated to whatever the live backend actually reports. */
+#define REQUESTED_CLIENT_NAME_BUF_SIZE 256
+
+/* Copy `src` into `dst` (size `dst_size`), replacing JACK's port-separator ':' with '_' (a
+   client name carrying one would make every one of its own ports unparseable as
+   "client:port"), and truncating to at most `max_len` characters. Never NUL if `src` sanitises
+   to nothing -- the caller falls back to the default name in that case. */
+static void sanitize_client_name(char *dst, size_t dst_size, const char *src, size_t max_len)
+{
+    if (max_len >= dst_size) max_len = dst_size - 1;
+    size_t di = 0;
+    for (size_t si = 0; src[si] != '\0' && di < max_len; si++)
+    {
+        dst[di++] = (src[si] == ':') ? '_' : src[si];
+    }
+    dst[di] = '\0';
+}
+
+int effects_add(const char *uri, int instance, const char *client_name)
 {
     unsigned int ports_count;
     char effect_name[32], port_name[MAX_CHAR_BUF_SIZE+1];
+    char requested_name[REQUESTED_CLIENT_NAME_BUF_SIZE];
     float *audio_buffer, *cv_buffer, *control_buffer;
     jack_port_t *jack_port;
     uint32_t audio_ports_count, input_audio_ports_count, output_audio_ports_count;
@@ -4586,7 +4607,61 @@ int effects_add(const char *uri, int instance)
 
     /* Create a client to Jack */
     snprintf(effect_name, 31, "effect_%i", instance);
-    jack_client = jack_client_open(effect_name, JackNoStartServer, &jack_status);
+
+    if (client_name && client_name[0] != '\0')
+    {
+        /* jack_client_name_size() needs a live client/server connection on some backends
+           to report the real limit; g_jack_global_client (opened once at startup for
+           metadata/monitoring) is already up by the time any `add` can run. */
+        size_t name_limit = (size_t)jack_client_name_size() - 1;
+        sanitize_client_name(requested_name, sizeof(requested_name), client_name, name_limit);
+
+        if (requested_name[0] == '\0')
+        {
+            /* Sanitised to nothing (e.g. all-colon input) -- fall through to the default. */
+            jack_client = jack_client_open(effect_name, JackNoStartServer, &jack_status);
+        }
+        else
+        {
+            /* JackUseExactName so a name collision is REPORTED (JackNameNotUnique) rather
+               than silently mangled by JACK's own "-01"/"-02" suffixing, which would leave
+               the caller unable to predict the client it just created. */
+            jack_client = jack_client_open(requested_name, JackNoStartServer | JackUseExactName,
+                                            &jack_status);
+
+            if (!jack_client && (jack_status & JackNameNotUnique))
+            {
+                /* Deterministic disambiguation: append this (already-unique) instance
+                   number rather than trusting JACK's own mangling. */
+                char suffixed_name[REQUESTED_CLIENT_NAME_BUF_SIZE];
+                char id_suffix[16];
+                snprintf(id_suffix, sizeof(id_suffix), "_%i", instance);
+                size_t base_len = strlen(requested_name);
+                size_t suffix_len = strlen(id_suffix);
+                size_t keep = (base_len + suffix_len <= name_limit)
+                                  ? base_len
+                                  : (name_limit > suffix_len ? name_limit - suffix_len : 0);
+                memcpy(suffixed_name, requested_name, keep);
+                memcpy(suffixed_name + keep, id_suffix, suffix_len + 1);
+
+                jack_client = jack_client_open(suffixed_name, JackNoStartServer | JackUseExactName,
+                                                &jack_status);
+            }
+
+            if (!jack_client)
+            {
+                /* Still no client (a collision even the id-suffixed name couldn't clear, or
+                   any other reason JackUseExactName might refuse) -- an `add` must never fail
+                   just because the caller's requested name didn't stick, so fall back to the
+                   default, unnamed path exactly as an unpatched host would behave. */
+                jack_client = jack_client_open(effect_name, JackNoStartServer, &jack_status);
+            }
+        }
+    }
+    else
+    {
+        jack_client = jack_client_open(effect_name, JackNoStartServer, &jack_status);
+    }
 
     if (!jack_client)
     {
