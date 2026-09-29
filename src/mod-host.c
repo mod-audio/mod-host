@@ -60,6 +60,7 @@
 
 #include "mod-host.h"
 #include "effects.h"
+#include "host-dispatch.h"
 #include "socket.h"
 #include "protocol.h"
 #include "completer.h"
@@ -107,6 +108,19 @@ static pthread_t intclient_socket_thread;
 ************************************************************************************************************************
 */
 
+static const host_backend_t g_lv2_backend = {
+    effects_add,
+    effects_remove,
+    effects_bypass,
+    effects_set_parameter,
+    effects_get_parameter,
+    effects_preset_load,
+    effects_state_save,
+    effects_state_load,
+    effects_connect,
+    effects_disconnect,
+};
+
 
 /*
 ************************************************************************************************************************
@@ -128,34 +142,10 @@ static pthread_t intclient_socket_thread;
 ************************************************************************************************************************
 */
 
-static void effects_add_cb(proto_t *proto)
-{
-    int resp;
-    /* proto->list[3] is the optional client-name argument the "..." tail in EFFECT_ADD
-       lets through; a caller that sent only 3 tokens leaves it unset. */
-    const char *client_name = (proto->list_count > 3) ? proto->list[3] : NULL;
-    resp = effects_add(proto->list[1], atoi(proto->list[2]), client_name);
-    protocol_response_int(resp, proto);
-}
-
-static void effects_remove_cb(proto_t *proto)
-{
-    int resp;
-    resp = effects_remove(atoi(proto->list[1]));
-    protocol_response_int(resp, proto);
-}
-
 static void effects_preset_save_cb(proto_t *proto)
 {
     int resp;
     resp = effects_preset_save(atoi(proto->list[1]), proto->list[3], proto->list[4], proto->list[2]);
-    protocol_response_int(resp, proto);
-}
-
-static void effects_preset_load_cb(proto_t *proto)
-{
-    int resp;
-    resp = effects_preset_load(atoi(proto->list[1]), proto->list[2]);
     protocol_response_int(resp, proto);
 }
 
@@ -172,49 +162,6 @@ static void effects_preset_show_cb(proto_t *proto)
         }
     }
     protocol_response("", proto);
-}
-
-static void effects_connect_cb(proto_t *proto)
-{
-    int resp;
-    resp = effects_connect(proto->list[1], proto->list[2]);
-    protocol_response_int(resp, proto);
-}
-
-static void effects_disconnect_cb(proto_t *proto)
-{
-    int resp;
-    resp = effects_disconnect(proto->list[1], proto->list[2]);
-    protocol_response_int(resp, proto);
-}
-
-static void effects_bypass_cb(proto_t *proto)
-{
-    int resp;
-    resp = effects_bypass(atoi(proto->list[1]), atoi(proto->list[2]));
-    protocol_response_int(resp, proto);
-}
-
-static void effects_set_param_cb(proto_t *proto)
-{
-    int resp;
-    resp = effects_set_parameter(atoi(proto->list[1]), proto->list[2], atof(proto->list[3]));
-    protocol_response_int(resp, proto);
-}
-
-static void effects_get_param_cb(proto_t *proto)
-{
-    int resp;
-    float value;
-    resp = effects_get_parameter(atoi(proto->list[1]), proto->list[2], &value);
-
-    char buffer[128];
-    if (resp >= 0)
-        sprintf(buffer, "resp %i %.04f", resp, value);
-    else
-        sprintf(buffer, "resp %i", resp);
-
-    protocol_response(buffer, proto);
 }
 
 static void effects_monitor_param_cb(proto_t *proto)
@@ -515,18 +462,6 @@ static void bundle_remove(proto_t *proto)
     protocol_response("resp 0", proto);
 }
 
-static void state_load(proto_t *proto)
-{
-    const int resp = effects_state_load(proto->list[1]);
-    protocol_response_int(resp, proto);
-}
-
-static void state_save(proto_t *proto)
-{
-    const int resp = effects_state_save(proto->list[1]);
-    protocol_response_int(resp, proto);
-}
-
 static void state_tmpdir(proto_t *proto)
 {
     const int resp = effects_state_set_tmpdir(proto->list[1]);
@@ -675,16 +610,9 @@ static int mod_host_init(jack_client_t* client, int socket_port, int feedback_po
 #endif
 
     /* Setup the protocol */
-    protocol_add_command(EFFECT_ADD, effects_add_cb);
-    protocol_add_command(EFFECT_REMOVE, effects_remove_cb);
-    protocol_add_command(EFFECT_PRESET_LOAD, effects_preset_load_cb);
+    host_dispatch_register(&g_lv2_backend);
     protocol_add_command(EFFECT_PRESET_SAVE, effects_preset_save_cb);
     protocol_add_command(EFFECT_PRESET_SHOW, effects_preset_show_cb);
-    protocol_add_command(EFFECT_CONNECT, effects_connect_cb);
-    protocol_add_command(EFFECT_DISCONNECT, effects_disconnect_cb);
-    protocol_add_command(EFFECT_BYPASS, effects_bypass_cb);
-    protocol_add_command(EFFECT_PARAM_SET, effects_set_param_cb);
-    protocol_add_command(EFFECT_PARAM_GET, effects_get_param_cb);
     protocol_add_command(EFFECT_PARAM_MON, effects_monitor_param_cb);
     protocol_add_command(EFFECT_PATCH_GET, effects_get_property_cb);
     protocol_add_command(EFFECT_PATCH_SET, effects_set_property_cb);
@@ -712,8 +640,6 @@ static int mod_host_init(jack_client_t* client, int socket_port, int feedback_po
     protocol_add_command(BUNDLE_ADD, bundle_add);
     protocol_add_command(BUNDLE_REMOVE, bundle_remove);
     protocol_add_command(FEATURE_ENABLE, feature_enable);
-    protocol_add_command(STATE_LOAD, state_load);
-    protocol_add_command(STATE_SAVE, state_save);
     protocol_add_command(STATE_TMPDIR, state_tmpdir);
     protocol_add_command(TRANSPORT, transport);
     protocol_add_command(TRANSPORT_SYNC, transport_sync);
