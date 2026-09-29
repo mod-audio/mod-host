@@ -291,6 +291,7 @@ void protocol_remove_commands(void)
         FREE(g_commands[i].command);
         FREE(g_commands[i].list);
     }
+    g_command_count = 0;
 }
 
 
