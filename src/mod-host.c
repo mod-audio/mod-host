@@ -733,6 +733,7 @@ static int mod_host_init(jack_client_t* client, int socket_port, int feedback_po
         return -1;
 
     socket_set_receive_cb(protocol_parse);
+    socket_set_idle_cb(effects_idle_external_uis);
 
     return 0;
 }
