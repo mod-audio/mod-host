@@ -137,6 +137,17 @@ static int fake_disconnect(const char *port_a, const char *port_b)
     return ERR_JACK_PORT_DISCONNECTION;
 }
 
+static int fake_monitor_output(int instance, const char *symbol)
+{
+    char buf[128];
+    snprintf(buf, sizeof(buf), "monitor_output(%i,%s) ", instance, symbol);
+    record(buf);
+    if (instance != 3)
+        return ERR_INSTANCE_NON_EXISTS;
+    host_dispatch_output_set(instance, symbol, 0.25f);
+    return SUCCESS;
+}
+
 static const host_backend_t g_fake_backend = {
     fake_add,
     fake_remove,
@@ -161,6 +172,8 @@ static const exchange_t g_fake_exchanges[] = {
     { "disconnect a:out b:in",      "resp -206" },
     { "state_save /tmp/s",          "resp 0" },
     { "state_load /tmp/s",          "resp -105" },
+    { "monitor_output 3 level",     "resp 1" },
+    { "monitor_output 9 level",     "resp 0" },
     { "remove 3",                   "resp 0" },
     { "licensee 3",                 "resp -902" },
     { "cpu_load",                   "not found" },
@@ -171,7 +184,7 @@ static const exchange_t g_fake_exchanges[] = {
 static const char g_fake_calls[] =
     "add(http://x/y,3,chan1) add(http://x/y,4,-) bypass(3,1) param_set(3,gain,0.500000) "
     "param_get(3,gain) preset_load(3,urn:p) connect(a:out,b:in) disconnect(a:out,b:in) "
-    "state_save(/tmp/s) state_load(/tmp/s) remove(3) ";
+    "state_save(/tmp/s) state_load(/tmp/s) monitor_output(3,level) monitor_output(9,level) remove(3) ";
 
 /* a backend with nothing behind it answers every verb with ERR_INVALID_OPERATION */
 static const host_backend_t g_empty_backend = {
@@ -182,6 +195,7 @@ static const exchange_t g_empty_exchanges[] = {
     { "add http://x/y 3",           "resp -902" },
     { "param_get 3 gain",           "resp -902" },
     { "state_save /tmp/s",          "resp -902" },
+    { "monitor_output 3 level",     "resp -902" },
     { NULL, NULL }
 };
 
@@ -470,7 +484,112 @@ static int run_idle_session(int port)
     return 0;
 }
 
-static int run_session(int port, const host_backend_t *backend, const exchange_t *exchanges, const char *expected_calls)
+static int connect_port(int port)
+{
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    struct sockaddr_in addr;
+
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+
+    if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0)
+    {
+        perror("connect");
+        close(fd);
+        return -1;
+    }
+    return fd;
+}
+
+/* the line mod-host's effects.c sends for an output port, terminator included */
+static const char g_output_set_line[] = "output_set 3 level 0.250000";
+
+static void *feedback_client_thread(void *arg)
+{
+    const session_t *session = arg;
+    int fd = connect_port(session->port);
+    int fbfd = connect_port(session->port + 1);
+    char reply[TEST_BUFFER_SIZE];
+    char line[TEST_BUFFER_SIZE];
+    size_t got = 0;
+
+    if (fd < 0 || fbfd < 0)
+    {
+        g_failures++;
+        goto out;
+    }
+
+    if (send(fd, "monitor_output 3 level", 22, 0) < 0 || read_reply(fd, reply, sizeof(reply)) != 0
+        || strcmp(reply, "resp 1") != 0)
+    {
+        printf("FAIL 'monitor_output 3 level' with a feedback client\n");
+        g_failures++;
+        goto out;
+    }
+
+    while (got < sizeof(line))
+    {
+        ssize_t n = recv(fbfd, line + got, 1, 0);
+        if (n <= 0)
+            break;
+        if (line[got++] == '\0')
+            break;
+    }
+
+    if (got == sizeof(g_output_set_line) && memcmp(line, g_output_set_line, got) == 0)
+    {
+        printf("ok   feedback '%s'\n", line);
+    }
+    else
+    {
+        printf("FAIL feedback: got %zu bytes '%.*s', want '%s'\n", got, (int)got, line, g_output_set_line);
+        g_failures++;
+    }
+
+out:
+    if (fbfd >= 0)
+        close(fbfd);
+    if (fd >= 0)
+        close(fd);
+    return NULL;
+}
+
+/* monitor_output reaches the backend, which reports the port's value with host_dispatch_output_set() */
+static int run_feedback_session(int port)
+{
+    session_t session = { port, NULL };
+    pthread_t thread;
+
+    if (host_dispatch_output_set(3, "level", 0.25f) != -1)
+    {
+        printf("FAIL output_set without a feedback client\n");
+        g_failures++;
+    }
+
+    if (socket_start(port, port + 1, TEST_BUFFER_SIZE) < 0)
+    {
+        printf("FAIL socket_start on ports %i and %i\n", port, port + 1);
+        return 1;
+    }
+
+    socket_set_receive_cb(protocol_parse);
+    host_dispatch_register(&g_empty_backend);
+    host_dispatch_register_monitor_output(fake_monitor_output);
+
+    pthread_create(&thread, NULL, feedback_client_thread, &session);
+    socket_run(0);
+    pthread_join(thread, NULL);
+
+    socket_finish();
+    protocol_remove_commands();
+
+    return 0;
+}
+
+static int run_session(int port, const host_backend_t *backend, int (*monitor_output)(int, const char *),
+                       const exchange_t *exchanges, const char *expected_calls)
 {
     session_t session = { port, exchanges };
     pthread_t thread;
@@ -485,6 +604,7 @@ static int run_session(int port, const host_backend_t *backend, const exchange_t
 
     socket_set_receive_cb(protocol_parse);
     host_dispatch_register(backend);
+    host_dispatch_register_monitor_output(monitor_output);
     protocol_add_command("licensee %i", host_dispatch_unsupported_cb);
 
     pthread_create(&thread, NULL, client_thread, &session);
@@ -508,9 +628,11 @@ int main(void)
     const char *env = getenv("PROTOCOL_TEST_PORT");
     int port = env ? atoi(env) : TEST_PORT_DEFAULT;
 
-    if (run_session(port, &g_fake_backend, g_fake_exchanges, g_fake_calls) != 0)
+    if (run_session(port, &g_fake_backend, fake_monitor_output, g_fake_exchanges, g_fake_calls) != 0)
         return 1;
-    if (run_session(port, &g_empty_backend, g_empty_exchanges, "") != 0)
+    if (run_session(port, &g_empty_backend, NULL, g_empty_exchanges, "") != 0)
+        return 1;
+    if (run_feedback_session(port) != 0)
         return 1;
     if (run_idle_session(port) != 0)
         return 1;

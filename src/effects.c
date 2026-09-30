@@ -1281,9 +1281,9 @@ static void RunPostPonedEvents(int ignored_effect_id)
             if (ShouldIgnorePostPonedSymbolEvent(&eventptr->event.parameter, &cached_output_mon))
                 continue;
 
-            snprintf(buf, FEEDBACK_BUF_SIZE, "output_set %i %s %f", eventptr->event.parameter.effect_id,
-                                                                    eventptr->event.parameter.symbol,
-                                                                    eventptr->event.parameter.value);
+            snprintf(buf, FEEDBACK_BUF_SIZE, OUTPUT_SET, eventptr->event.parameter.effect_id,
+                                                        eventptr->event.parameter.symbol,
+                                                        eventptr->event.parameter.value);
             socket_send_feedback_debug(buf);
 
             // save for fast checkup next time
