@@ -35,6 +35,7 @@
 #include "host-dispatch.h"
 #include "host-errors.h"
 #include "mod-host.h"
+#include "socket.h"
 
 
 /*
@@ -44,6 +45,7 @@
 */
 
 static const host_backend_t *g_backend;
+static int (*g_monitor_output)(int instance, const char *symbol);
 
 
 /*
@@ -163,6 +165,17 @@ static void state_save_cb(proto_t *proto)
     protocol_response_int(resp, proto);
 }
 
+/* mod-host answers 1 once the output is monitored and 0 when it cannot be */
+static void monitor_output_cb(proto_t *proto)
+{
+    int resp;
+    if (g_monitor_output)
+        resp = !g_monitor_output(atoi(proto->list[1]), proto->list[2]);
+    else
+        resp = ERR_INVALID_OPERATION;
+    protocol_response_int(resp, proto);
+}
+
 
 /*
 ************************************************************************************************************************
@@ -186,6 +199,13 @@ void host_dispatch_register(const host_backend_t *backend)
     protocol_add_command(STATE_SAVE, state_save_cb);
 }
 
+void host_dispatch_register_monitor_output(int (*monitor_output)(int instance, const char *symbol))
+{
+    g_monitor_output = monitor_output;
+
+    protocol_add_command(MONITOR_OUTPUT, monitor_output_cb);
+}
+
 /* Every other command of mod-host.h answers ERR_INVALID_OPERATION, so a client that speaks the
    whole protocol to a host with only the backend table behind it never reads a grammar error. */
 void host_dispatch_register_unsupported(void)
@@ -207,4 +227,15 @@ void host_dispatch_register_unsupported(void)
 void host_dispatch_unsupported_cb(proto_t *proto)
 {
     protocol_response_int(ERR_INVALID_OPERATION, proto);
+}
+
+int host_dispatch_output_set(int instance, const char *symbol, float value)
+{
+    char buffer[SOCKET_MSG_BUFFER_SIZE];
+    int len = snprintf(buffer, sizeof(buffer), OUTPUT_SET, instance, symbol, value);
+
+    if (len < 0 || len >= (int)sizeof(buffer))
+        return -1;
+
+    return socket_send_feedback(buffer);
 }

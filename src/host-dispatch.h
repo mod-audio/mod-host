@@ -43,8 +43,13 @@
 */
 
 void host_dispatch_register(const host_backend_t *backend);
+/* Registers monitor_output, answered as mod-host does; NULL answers ERR_INVALID_OPERATION.
+   Call it before host_dispatch_register_unsupported(). */
+void host_dispatch_register_monitor_output(int (*monitor_output)(int instance, const char *symbol));
 void host_dispatch_register_unsupported(void);
 void host_dispatch_unsupported_cb(proto_t *proto);
+/* Sends OUTPUT_SET on the feedback socket; -1 without a feedback client or for a symbol too long. */
+int host_dispatch_output_set(int instance, const char *symbol, float value);
 
 
 /*

@@ -101,6 +101,9 @@
 #define HELP                 "help"
 #define QUIT                 "quit"
 
+/* Feedback messages definition */
+#define OUTPUT_SET           "output_set %i %s %f"
+
 
 /*
 ************************************************************************************************************************
