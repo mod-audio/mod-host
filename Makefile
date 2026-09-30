@@ -13,6 +13,8 @@ PROG = mod-host
 # default install paths
 PREFIX = /usr/local
 BINDIR = $(PREFIX)/bin
+LIBDIR = $(PREFIX)/lib
+INCLUDEDIR = $(PREFIX)/include
 SHAREDIR = $(PREFIX)/share
 MANDIR = $(SHAREDIR)/man/man1/
 
@@ -168,7 +170,8 @@ install: install_man
 
 # clean rule
 clean:
-	@rm -f $(SRC_DIR)/*.o $(SRC_DIR)/*/*.o $(PROG) $(PROG).exe $(PROG).so fake-input.so mod-monitor.so src/info.h tests/protocol_test tests/host_scenarios
+	@rm -f $(SRC_DIR)/*.o $(SRC_DIR)/*/*.o $(PROG) $(PROG).exe $(PROG).so fake-input.so mod-monitor.so src/info.h tests/protocol_test tests/host_scenarios \
+	      $(PROTOCOL_LIB) $(PROTOCOL_SONAME) $(PROTOCOL_DEVLINK)
 
 test:
 	py.test tests/test_host.py
@@ -185,6 +188,49 @@ tests/protocol_test: tests/protocol_test.c $(PROTOCOL_OBJ)
 
 tests/host_scenarios: tests/host_scenarios.c $(PROTOCOL_OBJ)
 	$(CC) $(INCS) $(filter-out -c,$(CFLAGS)) -Werror -o $@ $< $(PROTOCOL_OBJ) -lpthread -lm
+
+# the same objects as a shared library, for another host that speaks this protocol.
+# Opt-in: `make lib` and `make install-lib`; mod-host itself does not link it.
+# The soname is bumped on any ABI change while the version is 0.x, a field appended to
+# host_backend_t included.
+PROTOCOL_VERSION = 0.1.0
+PROTOCOL_SOVERSION = 0
+PROTOCOL_DEVLINK = libmod-host-protocol.so
+PROTOCOL_SONAME = $(PROTOCOL_DEVLINK).$(PROTOCOL_SOVERSION)
+PROTOCOL_LIB = $(PROTOCOL_DEVLINK).$(PROTOCOL_VERSION)
+PROTOCOL_LIB_OBJ = $(PROTOCOL_OBJ:.o=.lib.o)
+PROTOCOL_HDR = $(SRC_DIR)/host-backend.h $(SRC_DIR)/host-dispatch.h $(SRC_DIR)/host-errors.h $(SRC_DIR)/mod-host.h \
+               $(SRC_DIR)/host-scenario.h $(SRC_DIR)/protocol.h $(SRC_DIR)/socket.h $(SRC_DIR)/utils.h
+PROTOCOL_PC_LIBDIR = $(patsubst $(PREFIX)/%,$${prefix}/%,$(LIBDIR))
+PROTOCOL_PC_INCLUDEDIR = $(patsubst $(PREFIX)/%,$${prefix}/%,$(INCLUDEDIR))
+PROTOCOL_PC_SHAREDIR = $(patsubst $(PREFIX)/%,$${prefix}/%,$(SHAREDIR))
+
+lib: $(PROTOCOL_DEVLINK)
+
+$(PROTOCOL_LIB): $(PROTOCOL_LIB_OBJ)
+	$(CC) $^ $(LDFLAGS) -shared -Wl,-soname,$(PROTOCOL_SONAME) -lpthread -lm -o $@
+
+$(PROTOCOL_DEVLINK): $(PROTOCOL_LIB)
+	ln -sf $(PROTOCOL_LIB) $(PROTOCOL_SONAME)
+	ln -sf $(PROTOCOL_SONAME) $@
+
+# the library's objects keep their symbols visible
+$(SRC_DIR)/%.lib.o: $(SRC_DIR)/%.$(EXT) src/info.h
+	$(CC) $(INCS) $(CFLAGS) -fvisibility=default -o $@ $<
+
+install-lib: $(PROTOCOL_LIB)
+	install -d $(DESTDIR)$(LIBDIR)/pkgconfig
+	install -m 755 $(PROTOCOL_LIB) $(DESTDIR)$(LIBDIR)
+	ln -sf $(PROTOCOL_LIB) $(DESTDIR)$(LIBDIR)/$(PROTOCOL_SONAME)
+	ln -sf $(PROTOCOL_SONAME) $(DESTDIR)$(LIBDIR)/$(PROTOCOL_DEVLINK)
+	install -d $(DESTDIR)$(INCLUDEDIR)/mod-host
+	install -m 644 $(PROTOCOL_HDR) $(DESTDIR)$(INCLUDEDIR)/mod-host
+	install -d $(DESTDIR)$(SHAREDIR)/mod-host
+	install -m 644 tests/host-scenarios.txt $(DESTDIR)$(SHAREDIR)/mod-host
+	sed -e 's,@PREFIX@,$(PREFIX),' -e 's,@LIBDIR@,$(PROTOCOL_PC_LIBDIR),' \
+	    -e 's,@INCLUDEDIR@,$(PROTOCOL_PC_INCLUDEDIR),' -e 's,@SHAREDIR@,$(PROTOCOL_PC_SHAREDIR),' \
+	    -e 's,@VERSION@,$(PROTOCOL_VERSION),' \
+	    mod-host-protocol.pc.in > $(DESTDIR)$(LIBDIR)/pkgconfig/mod-host-protocol.pc
 
 # manual page rule
 # Uses md2man to convert the README to groff man page
