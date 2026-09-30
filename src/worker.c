@@ -61,7 +61,9 @@ void worker_init(worker_t *worker, LilvInstance *instance, const LV2_Worker_Inte
     worker->iface = iface;
     worker->instance = instance;
     sem_init(&worker->sem, 0, 0);
-    zix_thread_create(&worker->thread, size + sizeof(void*) * 4, worker_func, worker);
+    // the thread stack has nothing to do with the ring buffer size below. 4096 is below
+    // PTHREAD_STACK_MIN, so the thread keeps the default stack, as before the buffers were resizable
+    zix_thread_create(&worker->thread, 4096, worker_func, worker);
     worker->requests  = jack_ringbuffer_create(size);
     worker->responses = jack_ringbuffer_create(size);
     worker->response  = malloc(size);
