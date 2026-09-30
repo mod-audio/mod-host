@@ -4629,10 +4629,12 @@ int effects_add(const char *uri, int instance, const char *client_name)
             jack_client = jack_client_open(requested_name, JackNoStartServer | JackUseExactName,
                                             &jack_status);
 
-            if (!jack_client && (jack_status & JackNameNotUnique))
+            if (!jack_client)
             {
                 /* Deterministic disambiguation: append this (already-unique) instance
-                   number rather than trusting JACK's own mangling. */
+                   number rather than trusting JACK's own mangling. Retried on any failure,
+                   not only JackNameNotUnique: jack2 reports a taken exact name as
+                   JackFailure|JackServerError. */
                 char suffixed_name[REQUESTED_CLIENT_NAME_BUF_SIZE];
                 char id_suffix[16];
                 snprintf(id_suffix, sizeof(id_suffix), "_%i", instance);
