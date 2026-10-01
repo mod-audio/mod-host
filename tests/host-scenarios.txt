@@ -45,6 +45,15 @@ disconnect $PORT_A $PORT_B => resp 0 | resp -206 | resp -902
 # a verb outside the table is refused or served, never a grammar error
 patch_set 3 urn:no:such:property 1 => resp -902 | resp 0
 
+# plugin info: track, remote-control pages and parameter facts, or -902 from a host without them
+track_info 3 Kick #FF800 => resp -902
+track_info 3 Kick - aux => resp -902
+remote_pages 9 => resp -3 | resp -902
+remote_page_get 9 0 => resp -3 | resp -902
+param_info 9 $PARAM => resp -3 | resp -902
+param_info 3 no_such_symbol => resp -103 | resp -902
+param_info 3 :bypass => resp -103 | resp -902
+
 # remove
 remove 3 => resp 0
 remove 3 => $REMOVE_TWICE

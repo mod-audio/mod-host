@@ -80,6 +80,7 @@ typedef unsigned int uint;
 #include <lv2/resize-port/resize-port.h>
 #include <lv2/state/state.h>
 #include <lv2/time/time.h>
+#include <lv2/units/units.h>
 #include <lv2/urid/urid.h>
 #include <lv2/uri-map/uri-map.h>
 #include <lv2/worker/worker.h>
@@ -6616,6 +6617,124 @@ int effects_monitor_output_parameter(int effect_id, const char *control_symbol_o
 
     // activate output monitor
     effect->hints |= HINT_OUTPUT_MONITORS;
+
+    return SUCCESS;
+}
+
+int effects_remote_pages(int effect_id)
+{
+    if (!InstanceExist(effect_id))
+        return ERR_INSTANCE_NON_EXISTS;
+
+    // LV2 has no remote-control pages
+    return 0;
+}
+
+int effects_remote_page_get(int effect_id, int page, host_remote_page_t *page_out)
+{
+    (void)page;
+    (void)page_out;
+
+    if (!InstanceExist(effect_id))
+        return ERR_INSTANCE_NON_EXISTS;
+
+    return ERR_INVALID_OPERATION;
+}
+
+// the shortest decimal that reads back to the same float, as a double
+static double FloatAsDecimal(float value)
+{
+    char buf[32];
+
+    for (int precision = 1; precision < 9; precision++)
+    {
+        snprintf(buf, sizeof(buf), "%.*g", precision, value);
+        if (strtof(buf, NULL) == value)
+            return strtod(buf, NULL);
+    }
+    snprintf(buf, sizeof(buf), "%.9g", value);
+    return strtod(buf, NULL);
+}
+
+int effects_param_info(int effect_id, const char *control_symbol, host_param_info_t *info)
+{
+    static const char *const units[] = {
+        LV2_UNITS__bar, LV2_UNITS__beat, LV2_UNITS__bpm, LV2_UNITS__cent, LV2_UNITS__cm, LV2_UNITS__coef,
+        LV2_UNITS__db, LV2_UNITS__degree, LV2_UNITS__frame, LV2_UNITS__hz, LV2_UNITS__inch, LV2_UNITS__khz,
+        LV2_UNITS__km, LV2_UNITS__m, LV2_UNITS__mhz, LV2_UNITS__midiNote, LV2_UNITS__mile, LV2_UNITS__min,
+        LV2_UNITS__mm, LV2_UNITS__ms, LV2_UNITS__oct, LV2_UNITS__pc, LV2_UNITS__s, LV2_UNITS__semitone12TET,
+        NULL
+    };
+    port_t *port = NULL;
+
+    if (!InstanceExist(effect_id))
+        return ERR_INSTANCE_NON_EXISTS;
+
+    effect_t *effect = &g_effects[effect_id];
+
+    // only the plugin's own input controls; the lv2:enabled port is the host's bypass
+    for (uint32_t i = 0; i < effect->input_control_ports_count; i++)
+    {
+        if (strcmp(effect->input_control_ports[i]->symbol, control_symbol) == 0)
+        {
+            port = effect->input_control_ports[i];
+            break;
+        }
+    }
+    if (port == NULL || (effect->enabled_index >= 0 && port == effect->ports[effect->enabled_index]))
+        return ERR_HOST_INVALID_PARAM_SYMBOL;
+
+    const LilvPlugin *plugin = effect->lilv_plugin;
+    const LilvPort *lilv_port = lilv_plugin_get_port_by_index(plugin, port->index);
+
+    info->unit = "none";
+    LilvNode *unit_pred = lilv_new_uri(g_lv2_data, LV2_UNITS__unit);
+    LilvNodes *unit = lilv_port_get_value(plugin, lilv_port, unit_pred);
+    if (unit != NULL && lilv_node_is_uri(lilv_nodes_get_first(unit)))
+    {
+        const char *uri = lilv_node_as_uri(lilv_nodes_get_first(unit));
+        for (int i = 0; units[i] != NULL; i++)
+            if (strcmp(uri, units[i]) == 0)
+                info->unit = strrchr(units[i], '#') + 1;
+    }
+    lilv_nodes_free(unit);
+    lilv_node_free(unit_pred);
+
+    info->min = FloatAsDecimal(port->min_value);
+    info->max = FloatAsDecimal(port->max_value);
+    info->def = FloatAsDecimal(port->def_value);
+    info->step = 0.0;
+    info->stable_symbol = port->symbol;
+
+    if (port->hints & (HINT_INTEGER|HINT_ENUMERATION|HINT_TOGGLE))
+    {
+        info->scale = "stepped";
+        info->step = 1.0;
+        return SUCCESS;
+    }
+
+    if (port->hints & HINT_LOGARITHMIC)
+    {
+        // a log scale needs both bounds positive; never answered as linear
+        if (port->min_value <= 0.0f || port->max_value <= 0.0f)
+            return ERR_INVALID_OPERATION;
+        info->scale = "log";
+    }
+    else
+    {
+        info->scale = "linear";
+    }
+
+    LilvNode *steps_pred = lilv_new_uri(g_lv2_data, LV2_PORT_PROPS__rangeSteps);
+    LilvNodes *steps = lilv_port_get_value(plugin, lilv_port, steps_pred);
+    if (steps != NULL)
+    {
+        int n = lilv_node_as_int(lilv_nodes_get_first(steps));
+        if (n >= 2)
+            info->step = ((double)info->max - info->min) / (n - 1);
+    }
+    lilv_nodes_free(steps);
+    lilv_node_free(steps_pred);
 
     return SUCCESS;
 }

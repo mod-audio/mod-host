@@ -121,6 +121,14 @@ static const host_backend_t g_lv2_backend = {
     effects_disconnect,
 };
 
+/* LV2 has no track info and no remote-control pages; param_info reads the port's TTL */
+static const host_plugin_info_t g_lv2_plugin_info = {
+    NULL,
+    effects_remote_pages,
+    effects_remote_page_get,
+    effects_param_info,
+};
+
 
 /*
 ************************************************************************************************************************
@@ -638,6 +646,7 @@ static int mod_host_init(jack_client_t* client, int socket_port, int feedback_po
     protocol_add_command(TRANSPORT_SYNC, transport_sync);
     protocol_add_command(SHOW_EXTERNAL_UI, show_external_ui);
     protocol_add_command(OUTPUT_DATA_READY, output_data_ready);
+    host_dispatch_register_plugin_info(&g_lv2_plugin_info);
 
     /* skip help and quit for internal client */
     if (client == NULL)
