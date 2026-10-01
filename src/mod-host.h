@@ -98,11 +98,16 @@
 #define TRANSPORT_SYNC       "transport_sync %s"
 #define SHOW_EXTERNAL_UI     "show_external_ui %i"
 #define OUTPUT_DATA_READY    "output_data_ready"
+#define TRACK_INFO           "track_info %i %s %s ..."
+#define REMOTE_PAGES         "remote_pages %i"
+#define REMOTE_PAGE_GET      "remote_page_get %i %i"
+#define PARAM_INFO           "param_info %i %s"
 #define HELP                 "help"
 #define QUIT                 "quit"
 
 /* Feedback messages definition */
 #define OUTPUT_SET           "output_set %i %s %f"
+#define REMOTE_PAGES_CHANGED "remote_pages_changed %i"
 
 
 /*

@@ -114,3 +114,14 @@ def test_add_still_accepts_the_old_three_token_form():
     assert int(r[0]) == 0
 
 
+
+def test_plugin_info_of_an_lv2_port():
+    r = load_egamp()
+    assert int(r[0]) == 0
+    assert s("param_info 0 gain") == ["0", "db", "linear", "-90", "24", "0", "0", "gain"]
+    assert s("param_info 0 out") == ["-103"]
+    assert s("param_info 0 :bypass") == ["-103"]
+    assert s("param_info 1 gain") == ["-3"]
+    assert s("remote_pages 0") == ["0"]
+    assert s("remote_page_get 0 0") == ["-902"]
+    assert s('track_info 0 "Kick In" #FF8000') == ["-902"]

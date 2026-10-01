@@ -88,6 +88,10 @@ static const char *g_commands[] = {
     "transport",
     "transport_sync",
     "output_data_ready",
+    "track_info",
+    "remote_pages",
+    "remote_page_get",
+    "param_info",
     "help",
     "quit",
     NULL

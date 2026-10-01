@@ -145,8 +145,80 @@ static int fake_monitor_output(int instance, const char *symbol)
     if (instance != 3)
         return ERR_INSTANCE_NON_EXISTS;
     host_dispatch_output_set(instance, symbol, 0.25f);
+    host_dispatch_remote_pages_changed(instance);
     return SUCCESS;
 }
+
+static int fake_track_info(int instance, const char *name, const char *color, const char *kind)
+{
+    char buf[512];
+    snprintf(buf, sizeof(buf), "track_info(%i,%s,%s,%s) ", instance, name, color, kind ? kind : "-");
+    record(buf);
+    return instance == 3 ? SUCCESS : ERR_INSTANCE_NON_EXISTS;
+}
+
+static int fake_remote_pages(int instance)
+{
+    return instance == 3 ? 2 : ERR_INSTANCE_NON_EXISTS;
+}
+
+static int fake_remote_page_get(int instance, int page, host_remote_page_t *page_out)
+{
+    if (instance != 3)
+        return ERR_INSTANCE_NON_EXISTS;
+    if (page != 0)
+        return ERR_INVALID_OPERATION;
+    page_out->id = 7;
+    strcpy(page_out->section, "Main \"A\"");
+    strcpy(page_out->name, "Page 1");
+    strcpy(page_out->slots[0], "gain");
+    strcpy(page_out->slots[1], "level");
+    return SUCCESS;
+}
+
+static int fake_param_info(int instance, const char *symbol, host_param_info_t *info)
+{
+    if (instance != 3)
+        return ERR_INSTANCE_NON_EXISTS;
+    if (strcmp(symbol, "time") == 0)
+    {
+        info->unit = "ms"; info->scale = "linear";
+        info->min = 1; info->max = 2000; info->def = 350; info->step = 1;
+        info->stable_symbol = "time_ms";
+        return SUCCESS;
+    }
+    if (strcmp(symbol, "cutoff") == 0)
+    {
+        info->unit = "hz"; info->scale = "log";
+        info->min = 20; info->max = 20000; info->def = 8000; info->step = 0;
+        info->stable_symbol = "cutoff";
+        return SUCCESS;
+    }
+    if (strcmp(symbol, "mix") == 0)
+    {
+        info->unit = "none"; info->scale = "linear";
+        info->min = -0.0; info->max = 0.1; info->def = 1.0 / 3.0; info->step = 0;
+        info->stable_symbol = "mix";
+        return SUCCESS;
+    }
+    if (strcmp(symbol, "range") == 0)
+    {
+        info->unit = "none"; info->scale = "linear";
+        info->min = -1e-7; info->max = 1e21; info->def = 0.000001; info->step = 1e20;
+        info->stable_symbol = "range";
+        return SUCCESS;
+    }
+    return ERR_HOST_INVALID_PARAM_SYMBOL;
+}
+
+static const host_plugin_info_t g_fake_info = {
+    fake_track_info,
+    fake_remote_pages,
+    fake_remote_page_get,
+    fake_param_info,
+};
+
+static const host_plugin_info_t g_empty_info = { NULL, NULL, NULL, NULL };
 
 static const host_backend_t g_fake_backend = {
     fake_add,
@@ -161,6 +233,11 @@ static const host_backend_t g_fake_backend = {
     fake_disconnect,
 };
 
+#define NAME_16  "aaaaaaaaaaaaaaaa"
+#define NAME_255 NAME_16 NAME_16 NAME_16 NAME_16 NAME_16 NAME_16 NAME_16 NAME_16 \
+                 NAME_16 NAME_16 NAME_16 NAME_16 NAME_16 NAME_16 NAME_16 "aaaaaaaaaaaaaaa"
+#define NAME_256 NAME_255 "a"
+
 static const exchange_t g_fake_exchanges[] = {
     { "add http://x/y 3 chan1",     "resp 3" },
     { "add http://x/y 4",           "resp 4" },
@@ -174,6 +251,28 @@ static const exchange_t g_fake_exchanges[] = {
     { "state_load /tmp/s",          "resp -105" },
     { "monitor_output 3 level",     "resp 1" },
     { "monitor_output 9 level",     "resp 0" },
+    { "track_info 3 \"Kick \\\"In\\\" \xc3\xb1\" #FF8000 bus", "resp 0" },
+    { "track_info 3 \"\" -",          "resp 0" },
+    { "track_info 3 Kick #ff8000",  "resp 0" },
+    { "track_info 9 Kick -",        "resp -3" },
+    { "track_info 3 Kick #FF800",   "resp -902" },
+    { "track_info 3 Kick FF8000",   "resp -902" },
+    { "track_info 3 Kick - aux",    "resp -902" },
+    { "track_info 3 Kick - bus x",  "resp -902" },
+    { "track_info 3 \"a\tb\" -",     "resp -902" },
+    { "track_info 3 \xff -",        "resp -902" },
+    { "track_info 3 " NAME_256 " -", "resp -902" },
+    { "track_info 3 " NAME_255 " -", "resp 0" },
+    { "remote_pages 3",             "resp 2" },
+    { "remote_pages 9",             "resp -3" },
+    { "remote_page_get 3 0",        "resp 0 7 \"Main \\\"A\\\"\" \"Page 1\" gain level - - - - - -" },
+    { "remote_page_get 3 2",        "resp -902" },
+    { "param_info 3 time",          "resp 0 ms linear 1 2000 350 1 time_ms" },
+    { "param_info 3 cutoff",        "resp 0 hz log 20 20000 8000 0 cutoff" },
+    { "param_info 3 mix",           "resp 0 none linear 0 0.1 0.3333333333333333 0 mix" },
+    { "param_info 3 range",         "resp 0 none linear -1e-7 1e+21 0.000001 100000000000000000000 range" },
+    { "param_info 3 nope",          "resp -103" },
+    { "param_info 9 time",          "resp -3" },
     { "remove 3",                   "resp 0" },
     { "licensee 3",                 "resp -902" },
     { "cpu_load",                   "not found" },
@@ -184,7 +283,9 @@ static const exchange_t g_fake_exchanges[] = {
 static const char g_fake_calls[] =
     "add(http://x/y,3,chan1) add(http://x/y,4,-) bypass(3,1) param_set(3,gain,0.500000) "
     "param_get(3,gain) preset_load(3,urn:p) connect(a:out,b:in) disconnect(a:out,b:in) "
-    "state_save(/tmp/s) state_load(/tmp/s) monitor_output(3,level) monitor_output(9,level) remove(3) ";
+    "state_save(/tmp/s) state_load(/tmp/s) monitor_output(3,level) monitor_output(9,level) "
+    "track_info(3,Kick \"In\" \xc3\xb1,#FF8000,bus) track_info(3,,-,-) track_info(3,Kick,#ff8000,-) "
+    "track_info(9,Kick,-,-) track_info(3," NAME_255 ",-,-) remove(3) ";
 
 /* a backend with nothing behind it answers every verb with ERR_INVALID_OPERATION */
 static const host_backend_t g_empty_backend = {
@@ -196,6 +297,10 @@ static const exchange_t g_empty_exchanges[] = {
     { "param_get 3 gain",           "resp -902" },
     { "state_save /tmp/s",          "resp -902" },
     { "monitor_output 3 level",     "resp -902" },
+    { "track_info 3 Kick -",        "resp -902" },
+    { "remote_pages 3",             "resp -902" },
+    { "remote_page_get 3 0",        "resp -902" },
+    { "param_info 3 time",          "resp -902" },
     { NULL, NULL }
 };
 
@@ -505,6 +610,7 @@ static int connect_port(int port)
 
 /* the line mod-host's effects.c sends for an output port, terminator included */
 static const char g_output_set_line[] = "output_set 3 level 0.250000";
+static const char g_remote_pages_changed_line[] = "remote_pages_changed 3";
 
 static void *feedback_client_thread(void *arg)
 {
@@ -548,6 +654,27 @@ static void *feedback_client_thread(void *arg)
         g_failures++;
     }
 
+    got = 0;
+    while (got < sizeof(line))
+    {
+        ssize_t n = recv(fbfd, line + got, 1, 0);
+        if (n <= 0)
+            break;
+        if (line[got++] == '\0')
+            break;
+    }
+
+    if (got == sizeof(g_remote_pages_changed_line) && memcmp(line, g_remote_pages_changed_line, got) == 0)
+    {
+        printf("ok   feedback '%s'\n", line);
+    }
+    else
+    {
+        printf("FAIL feedback: got %zu bytes '%.*s', want '%s'\n", got, (int)got, line,
+               g_remote_pages_changed_line);
+        g_failures++;
+    }
+
 out:
     if (fbfd >= 0)
         close(fbfd);
@@ -565,6 +692,11 @@ static int run_feedback_session(int port)
     if (host_dispatch_output_set(3, "level", 0.25f) != -1)
     {
         printf("FAIL output_set without a feedback client\n");
+        g_failures++;
+    }
+    if (host_dispatch_remote_pages_changed(3) != -1)
+    {
+        printf("FAIL remote_pages_changed without a feedback client\n");
         g_failures++;
     }
 
@@ -589,7 +721,7 @@ static int run_feedback_session(int port)
 }
 
 static int run_session(int port, const host_backend_t *backend, int (*monitor_output)(int, const char *),
-                       const exchange_t *exchanges, const char *expected_calls)
+                       const host_plugin_info_t *info, const exchange_t *exchanges, const char *expected_calls)
 {
     session_t session = { port, exchanges };
     pthread_t thread;
@@ -605,6 +737,7 @@ static int run_session(int port, const host_backend_t *backend, int (*monitor_ou
     socket_set_receive_cb(protocol_parse);
     host_dispatch_register(backend);
     host_dispatch_register_monitor_output(monitor_output);
+    host_dispatch_register_plugin_info(info);
     protocol_add_command("licensee %i", host_dispatch_unsupported_cb);
 
     pthread_create(&thread, NULL, client_thread, &session);
@@ -628,9 +761,9 @@ int main(void)
     const char *env = getenv("PROTOCOL_TEST_PORT");
     int port = env ? atoi(env) : TEST_PORT_DEFAULT;
 
-    if (run_session(port, &g_fake_backend, fake_monitor_output, g_fake_exchanges, g_fake_calls) != 0)
+    if (run_session(port, &g_fake_backend, fake_monitor_output, &g_fake_info, g_fake_exchanges, g_fake_calls) != 0)
         return 1;
-    if (run_session(port, &g_empty_backend, NULL, g_empty_exchanges, "") != 0)
+    if (run_session(port, &g_empty_backend, NULL, &g_empty_info, g_empty_exchanges, "") != 0)
         return 1;
     if (run_feedback_session(port) != 0)
         return 1;
