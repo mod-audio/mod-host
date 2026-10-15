@@ -20,7 +20,7 @@ s.connect(('localhost', 5555))
 s.settimeout(5)
 
 def send_command(command):
-    s.send(command)
+    s.send(command + '\0')
     print command
 
     try:
