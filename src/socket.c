@@ -284,7 +284,7 @@ void socket_run(int exit_on_failure)
     SOCKET clientfd, fbclientfd;
     int count;
     char *buffer, *newbuffer, *command, *scan, *end;
-    size_t buffer_size, used;
+    size_t buffer_size, new_size, used;
     msg_t msg;
 
     /* Allocates memory to receive buffer */
@@ -342,7 +342,18 @@ void socket_run(int exit_on_failure)
          * the buffer keeps the unfinished tail for the next read, and one spare byte for a terminator */
         if (used == buffer_size - 1)
         {
-            newbuffer = realloc(buffer, buffer_size * 2);
+            if (used >= SOCKET_MSG_MAX_SIZE)
+            {
+                fprintf(stderr, "socket error: command longer than %d bytes, closing the connection\n",
+                        SOCKET_MSG_MAX_SIZE);
+                break;
+            }
+
+            new_size = buffer_size * 2;
+            if (new_size > SOCKET_MSG_MAX_SIZE + 1)
+                new_size = SOCKET_MSG_MAX_SIZE + 1;
+
+            newbuffer = realloc(buffer, new_size);
             if (newbuffer == NULL)
             {
                 if (! exit_on_failure)
@@ -353,7 +364,7 @@ void socket_run(int exit_on_failure)
             }
 
             buffer = newbuffer;
-            buffer_size *= 2;
+            buffer_size = new_size;
         }
 
         count = recv(clientfd, buffer + used, buffer_size - 1 - used, 0);
