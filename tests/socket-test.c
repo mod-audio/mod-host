@@ -83,6 +83,19 @@ static void client_answers(int fd, char *out, size_t out_size)
         out[len - 1] = '\0';
 }
 
+/* like socket_send(), but gives up when the host closes the connection */
+static void client_send(int fd, const char *data, size_t size)
+{
+    while (size > 0)
+    {
+        ssize_t count = send(fd, data, size, 0);
+        if (count <= 0)
+            return;
+        data += count;
+        size -= count;
+    }
+}
+
 /* sends each chunk as its own write, with a pause between them so they reach the host as separate reads */
 static void check(const char *name, const char *expected, int nchunks, const char **chunks, const size_t *sizes)
 {
@@ -93,7 +106,7 @@ static void check(const char *name, const char *expected, int nchunks, const cha
     {
         if (i > 0)
             usleep(100 * 1000);
-        socket_send(fd, chunks[i], sizes[i]);
+        client_send(fd, chunks[i], sizes[i]);
     }
 
     client_answers(fd, got, sizeof(got));
@@ -199,6 +212,25 @@ int main(void)
         const char *c[] = { cmd };
         const size_t n[] = { 1024 };
         check("1024 bytes without a terminator", "", 1, c, n);
+        free(cmd);
+    }
+
+    {
+        /* the longest command accepted */
+        char *cmd = command_of_size(SOCKET_MSG_MAX_SIZE);
+        const char *c[] = { cmd };
+        const size_t n[] = { SOCKET_MSG_MAX_SIZE };
+        snprintf(expected, sizeof(expected), "%d", SOCKET_MSG_MAX_SIZE - 1);
+        check("command of SOCKET_MSG_MAX_SIZE bytes", expected, 1, c, n);
+        free(cmd);
+    }
+
+    {
+        /* one byte too long: the host closes the connection instead of growing its buffer */
+        char *cmd = command_of_size(SOCKET_MSG_MAX_SIZE + 1);
+        const char *c[] = { cmd };
+        const size_t n[] = { SOCKET_MSG_MAX_SIZE + 1 };
+        check("command of SOCKET_MSG_MAX_SIZE + 1 bytes", "closed", 1, c, n);
         free(cmd);
     }
 
