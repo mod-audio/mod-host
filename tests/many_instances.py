@@ -20,7 +20,7 @@ def check_mod_host():
         exit(1)
 
 def send_command(command):
-    s.send(command)
+    s.send(command + '\0')
     print 'sent:', command
     check_mod_host()
 

@@ -8,7 +8,7 @@ s.settimeout(0.2)
 
 while True:
     a = raw_input('send: ')
-    s.send(a)
+    s.send(a + '\0')
     try:
         b = s.recv(1024)
         if b != '': print 'resp:', b
