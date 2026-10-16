@@ -21,6 +21,7 @@ void effects_idle_external_uis(void)
 static volatile int g_running = 1;
 static int g_port;
 static int g_failures;
+static int g_half_close;  /* check(): shut down the client's sending side after the last chunk */
 
 static void answer_with_length(msg_t *msg)
 {
@@ -70,7 +71,7 @@ static void client_answers(int fd, char *out, size_t out_size)
         int count = recv(fd, buf, sizeof(buf), 0);
         if (count <= 0)
         {
-            snprintf(out + len, out_size - len, "%sclosed", len ? " " : "");
+            snprintf(out + len, out_size - len, "%sclosed", len && out[len - 1] != ' ' ? " " : "");
             return;
         }
 
@@ -108,6 +109,8 @@ static void check(const char *name, const char *expected, int nchunks, const cha
             usleep(100 * 1000);
         client_send(fd, chunks[i], sizes[i]);
     }
+    if (g_half_close)
+        shutdown(fd, SHUT_WR);
 
     client_answers(fd, got, sizeof(got));
     closesocket(fd);
@@ -241,6 +244,30 @@ int main(void)
         check("1024 bytes without a terminator", "", 1, c, n);
         free(cmd);
     }
+
+    g_half_close = 1;
+
+    {
+        /* a client that sends no NUL at all, then closes its end: the command still runs, once */
+        const char *c[] = { "cpu_load" };
+        const size_t n[] = { 8 };
+        check("a command with no terminator, then the client closes", "8 closed", 1, c, n);
+    }
+
+    {
+        const char *c[] = { "cpu_load\0bypass 0 1" };
+        const size_t n[] = { 19 };
+        check("two commands, the last with no terminator, then the client closes", "8 10 closed", 1, c, n);
+    }
+
+    {
+        /* the start of a command kept from one read is joined to the rest, not run on its own at the close */
+        const char *c[] = { "cpu_", "load" };
+        const size_t n[] = { 4, 5 };
+        check("one command in two writes, then the client closes", "8 closed", 2, c, n);
+    }
+
+    g_half_close = 0;
 
     {
         /* the longest command accepted */

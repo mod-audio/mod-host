@@ -70,7 +70,8 @@ The default socket port is 5555, this can be changed by passing the option
 -p (or --socket-port) to mod-host.
 Each command sent to the socket ends with a NUL byte, and so does each
 response. Several commands can be sent in one write; they are answered in
-order.
+order. A command that is not NUL-terminated when the client closes the
+connection is still run.
 
 The other way to control mod-host is the interactive mode, in this case the
 commands must be provided on the shell prompt.
