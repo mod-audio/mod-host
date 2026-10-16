@@ -348,17 +348,8 @@ void socket_run(int exit_on_failure)
          * the buffer keeps the unfinished tail for the next read, and one spare byte for a terminator */
         if (used == buffer_size - 1)
         {
-            if (used >= SOCKET_MSG_MAX_SIZE)
-            {
-                fprintf(stderr, "socket error: command longer than %d bytes, closing the connection\n",
-                        SOCKET_MSG_MAX_SIZE);
-                break;
-            }
-
+            /* the limit below keeps the tail shorter than SOCKET_MSG_MAX_SIZE: this never goes past twice that */
             new_size = buffer_size * 2;
-            if (new_size > SOCKET_MSG_MAX_SIZE + 1)
-                new_size = SOCKET_MSG_MAX_SIZE + 1;
-
             newbuffer = realloc(buffer, new_size);
             if (newbuffer == NULL)
             {
@@ -386,6 +377,10 @@ void socket_run(int exit_on_failure)
             /* hand over each complete command */
             while ((end = memchr(scan, '\0', buffer + used - scan)) != NULL)
             {
+                /* too long: left in the tail, which the limit below refuses */
+                if (end - command >= SOCKET_MSG_MAX_SIZE)
+                    break;
+
                 msg.sender_id = clientfd;
                 msg.data = command;
                 msg.data_size = end - command;
@@ -398,6 +393,14 @@ void socket_run(int exit_on_failure)
             used -= command - buffer;
             memmove(buffer, command, used);
             buffer[used] = '\0';
+
+            /* a command that reaches the limit, finished or not, is refused, not read on without end */
+            if (used >= SOCKET_MSG_MAX_SIZE)
+            {
+                fprintf(stderr, "socket error: command longer than %d bytes, closing the connection\n",
+                        SOCKET_MSG_MAX_SIZE);
+                break;
+            }
 
             effects_idle_external_uis();
         }

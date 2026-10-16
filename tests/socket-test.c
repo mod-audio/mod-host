@@ -280,12 +280,44 @@ int main(void)
     }
 
     {
-        /* one byte too long: the host closes the connection instead of growing its buffer */
+        /* as long as the longest command and still no terminator: it cannot end within the limit */
+        char *cmd = command_of_size(SOCKET_MSG_MAX_SIZE + 1);
+        const char *c[] = { cmd };
+        const size_t n[] = { SOCKET_MSG_MAX_SIZE };
+        check("SOCKET_MSG_MAX_SIZE bytes and no terminator", "closed", 1, c, n);
+        free(cmd);
+    }
+
+    {
+        /* one byte too long: the host says why on stderr and closes the connection instead of growing its buffer */
         char *cmd = command_of_size(SOCKET_MSG_MAX_SIZE + 1);
         const char *c[] = { cmd };
         const size_t n[] = { SOCKET_MSG_MAX_SIZE + 1 };
+        char said[256] = "";
+        FILE *err = tmpfile();
+        int saved = dup(STDERR_FILENO);
+
+        fflush(stderr);
+        dup2(fileno(err), STDERR_FILENO);
         check("command of SOCKET_MSG_MAX_SIZE + 1 bytes", "closed", 1, c, n);
+        fflush(stderr);
+        dup2(saved, STDERR_FILENO);
+        close(saved);
+        rewind(err);
+        if (fgets(said, sizeof(said), err) == NULL)
+            said[0] = '\0';
+        fclose(err);
         free(cmd);
+
+        if (strstr(said, "command longer than") != NULL)
+        {
+            printf("ok      the refusal is on stderr\n");
+        }
+        else
+        {
+            printf("FAILED  the refusal is on stderr: got \"%s\"\n", said);
+            g_failures++;
+        }
     }
 
     {
