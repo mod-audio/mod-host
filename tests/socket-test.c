@@ -126,6 +126,33 @@ static void check(const char *name, const char *expected, int nchunks, const cha
     usleep(100 * 1000);
 }
 
+/* socket_send() to a client that is gone: it returns an error, at once, and the process is still here */
+static void check_send_to_closed_client(void)
+{
+    int sv[2];
+    int ret;
+
+    socketpair(AF_UNIX, SOCK_STREAM, 0, sv);
+    closesocket(sv[1]);
+
+    signal(SIGPIPE, SIG_DFL);
+    alarm(5);
+    ret = socket_send(sv[0], "resp 0", 7);
+    alarm(0);
+    signal(SIGPIPE, SIG_IGN);
+    closesocket(sv[0]);
+
+    if (ret < 0)
+    {
+        printf("ok      send to a client that is gone\n");
+    }
+    else
+    {
+        printf("FAILED  send to a client that is gone: returned %d\n", ret);
+        g_failures++;
+    }
+}
+
 /* a command of the given total size, NUL included: "cpu_load" padded with trailing spaces */
 static char *command_of_size(size_t size)
 {
@@ -239,6 +266,8 @@ int main(void)
         const size_t n[] = { 9 };
         check("one command after all that", "8", 1, c, n);
     }
+
+    check_send_to_closed_client();
 
     g_running = 0;
     socket_finish();
