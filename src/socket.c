@@ -258,10 +258,16 @@ int socket_send(int destination, const char *buffer, int size)
 
     while (size > 0)
     {
+        /* a client that went away must not end the host with SIGPIPE */
+#ifdef MSG_NOSIGNAL
+        ret = send(destination, buffer, size, MSG_NOSIGNAL);
+#else
         ret = send(destination, buffer, size, 0);
+#endif
         if (ret < 0)
         {
             perror("send error");
+            break;
         }
         size -= ret;
         buffer += ret;
