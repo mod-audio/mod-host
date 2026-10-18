@@ -1,0 +1,57 @@
+@prefix doap: <http://usefulinc.com/ns/doap#> .
+@prefix foaf: <http://xmlns.com/foaf/0.1/> .
+@prefix lv2:  <http://lv2plug.in/ns/lv2core#> .
+@prefix mod:  <http://moddevices.com/ns/mod#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+# Buffer is implemented by mod-host itself (src/effects.c, BufferInstanceAdd), so this bundle has no lv2:binary.
+# It only describes the block for the plugin scanners: lilv inside mod-host and the mod-ui plugin list.
+# Any other LV2 host lists it but cannot instantiate it, which is intended: it is a MOD OS feature.
+
+<http://moddevices.com/plugins/mod-devel/Buffer>
+    a lv2:Plugin, lv2:UtilityPlugin ;
+    doap:name "Buffer" ;
+    doap:license <http://opensource.org/licenses/GPL-3.0> ;
+    doap:developer [
+        foaf:name "MOD Audio" ;
+        foaf:homepage <https://mod.audio> ;
+    ] ;
+    doap:maintainer [
+        foaf:name "MOD Audio" ;
+        foaf:homepage <https://mod.audio> ;
+    ] ;
+    lv2:minorVersion 1 ;
+    lv2:microVersion 0 ;
+    lv2:optionalFeature lv2:hardRTCapable ;
+    mod:brand "MOD" ;
+    mod:label "Buffer" ;
+    rdfs:comment """
+Lets the part of the pedalboard after it run on another processor core, so a chain that is too heavy for one core can be split in two.
+
+Everything connected before the Buffer and everything connected after it are processed in parallel. The signal passes through unchanged, delayed by exactly one audio cycle (one buffer size, 128 frames by default).
+
+Mixing a buffered path with a direct one causes phasing: when two paths meet again, send them through the same number of Buffers.
+
+The Buffer has no controls and no bypass.
+""" ;
+    lv2:port [
+        a lv2:InputPort, lv2:AudioPort ;
+        lv2:index 0 ;
+        lv2:symbol "in1" ;
+        lv2:name "In 1" ;
+    ] , [
+        a lv2:InputPort, lv2:AudioPort ;
+        lv2:index 1 ;
+        lv2:symbol "in2" ;
+        lv2:name "In 2" ;
+    ] , [
+        a lv2:OutputPort, lv2:AudioPort ;
+        lv2:index 2 ;
+        lv2:symbol "out1" ;
+        lv2:name "Out 1" ;
+    ] , [
+        a lv2:OutputPort, lv2:AudioPort ;
+        lv2:index 3 ;
+        lv2:symbol "out2" ;
+        lv2:name "Out 2" ;
+    ] .

@@ -15,6 +15,7 @@ PREFIX = /usr/local
 BINDIR = $(PREFIX)/bin
 SHAREDIR = $(PREFIX)/share
 MANDIR = $(SHAREDIR)/man/man1/
+LV2DIR = $(PREFIX)/lib/lv2
 
 # default compiler and linker flags
 CFLAGS += -O3 -Wall -Wextra -c -std=gnu99 -fPIC -D_GNU_SOURCE -pthread
@@ -187,6 +188,13 @@ man:
 install_man:
 	install -d $(DESTDIR)$(MANDIR)
 	install -m 644 doc/*.1 $(DESTDIR)$(MANDIR)
+
+# the TTL-only bundle for the host-implemented Buffer plugin (see src/effects.c)
+install: install_bundles
+
+install_bundles:
+	install -d $(DESTDIR)$(LV2DIR)/mod-buffer.lv2
+	cp -r bundles/mod-buffer.lv2/. $(DESTDIR)$(LV2DIR)/mod-buffer.lv2/
 
 # generate the source file with the help message
 A=`grep -n 'The commands supported' README.md | cut -d':' -f1`
