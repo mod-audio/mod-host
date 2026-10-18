@@ -1,0 +1,107 @@
+/* Buffer: a small black MOD box with no controls and no footswitch.
+   Layout and typography follow the boxy-small style used by the other MOD utilities. */
+
+@import url(/fonts/nexa/stylesheet.css);
+@import url(/fonts/questrial/stylesheet.css);
+
+/* = CONTAINER
+================================================ */
+.mod-pedal-boxy{{{cns}}} {
+    background-position:center center;
+    background-repeat:no-repeat;
+    background-size:301px 315px;
+    height:315px;
+    position:absolute;
+    width:301px;
+    border-radius: 21px;
+}
+.mod-pedal-boxy{{{cns}}}.mod-black {
+    background-image:url(/resources/pedals/boxy-small/black.png{{{ns}}});
+}
+
+/* = PORTS
+================================================ */
+.mod-pedal-boxy{{{cns}}} .mod-pedal-input,
+.mod-pedal-boxy{{{cns}}} .mod-pedal-output {
+    top: 66px;
+}
+
+/* = BRAND
+================================================ */
+.mod-pedal-boxy{{{cns}}} .mod-plugin-brand {
+    left:0;
+    position:absolute;
+    right:0;
+    text-align:center;
+    text-transform:uppercase;
+    top:16px;
+}
+.mod-pedal-boxy{{{cns}}} .mod-plugin-brand h1 {
+    border-color:#fff;
+    border-radius:12px;
+    border-style:solid;
+    border-width:4px;
+    color:#fff;
+    display:inline-block;
+    font-family:"Nexa";
+    font-size:32px;
+    margin:0;
+    padding:3px 9px 0;
+}
+
+/* = NAME
+================================================ */
+.mod-pedal-boxy{{{cns}}} .mod-plugin-name {
+    left:30px;
+    overflow:hidden;
+    position:absolute;
+    right:30px;
+    text-align:center;
+    top:262px;
+}
+.mod-pedal-boxy{{{cns}}} .mod-plugin-name h1 {
+    color:#fff;
+    font-family:"Questrial";
+    font-size:26px;
+    line-height:1;
+    margin:0;
+    text-transform:uppercase;
+    letter-spacing:2px;
+}
+
+/* = GRAPHIC
+================================================ */
+.mod-pedal-boxy{{{cns}}} .mod-buffer-graphic {
+    left:0;
+    position:absolute;
+    right:0;
+    text-align:center;
+    top:92px;
+}
+.mod-pedal-boxy{{{cns}}} .mod-buffer-graphic svg {
+    display:block;
+    margin:0 auto;
+}
+.mod-pedal-boxy{{{cns}}} .mod-buffer-graphic path,
+.mod-pedal-boxy{{{cns}}} .mod-buffer-graphic rect {
+    fill:none;
+    stroke:#fff;
+    stroke-width:4;
+    stroke-linecap:round;
+}
+.mod-pedal-boxy{{{cns}}} .mod-buffer-graphic rect.mod-buffer-slot {
+    stroke-width:3;
+}
+.mod-pedal-boxy{{{cns}}} .mod-buffer-graphic rect.mod-buffer-slot.filled,
+.mod-pedal-boxy{{{cns}}} .mod-buffer-graphic path.mod-buffer-arrow {
+    fill:#fff;
+}
+.mod-pedal-boxy{{{cns}}} .mod-buffer-caption {
+    color:#ddd;
+    display:block;
+    font-family:"Questrial";
+    font-size:13px;
+    letter-spacing:1px;
+    margin-top:4px;
+    text-transform:uppercase;
+}

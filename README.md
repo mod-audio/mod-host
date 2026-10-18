@@ -277,6 +277,32 @@ The commands supported by mod-host are:
 For each effect added one client on JACK will be created. The names of clients
 follow the standard: effect_\<instance_number\>
 
+Buffer (host-implemented plugin)
+--------------------------------
+
+mod-host implements one plugin itself, without any LV2 binary:
+
+    http://moddevices.com/plugins/mod-devel/Buffer
+
+It is described by the TTL-only bundle in `bundles/mod-buffer.lv2` (installed to
+`$(PREFIX)/lib/lv2` by `make install`) so that plugin scanners list it, and it is
+added, connected and removed exactly like any other plugin.
+
+A regular instance has one JACK client holding both its inputs and its outputs, so
+JACK must run everything connected after it once everything connected before it has
+finished. The Buffer registers its input ports on the usual `effect_<n>` client and
+its output ports on a hidden second client, `effect_<n>_out`, which has no inputs.
+JACK sees no dependency between the two halves, so jack2 can process the part of the
+graph after the Buffer in parallel with the part before it, on another core. The
+price is one cycle of latency: the input side writes into one of two slots selected
+by the cycle number and the output side plays the slot written in the previous cycle.
+
+Clients keep naming the output ports as `effect_<n>:<symbol>`; `connect` and
+`disconnect` map those to the hidden client. The Buffer has audio ports only, no
+controls and no bypass: `bypass` on it is accepted and ignored, and `midi_learn`,
+`midi_map`, `cc_map` and `cv_map` on it return ERR\_ASSIGNMENT\_INVALID\_OP. It
+is not saved in `state_save` files and has no presets or state.
+
 If a valid command is executed a response is given as following:
 
     resp <status> [value]

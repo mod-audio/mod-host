@@ -1,0 +1,16 @@
+@prefix modgui: <http://moddevices.com/ns/modgui#> .
+@prefix lv2:    <http://lv2plug.in/ns/lv2core#> .
+
+<http://moddevices.com/plugins/mod-devel/Buffer>
+    modgui:gui [
+        modgui:resourcesDirectory <modgui> ;
+        modgui:iconTemplate <modgui/icon-buffer.html> ;
+        modgui:stylesheet <modgui/stylesheet-buffer.css> ;
+        modgui:screenshot <modgui/screenshot-buffer.png> ;
+        modgui:thumbnail <modgui/thumbnail-buffer.png> ;
+        modgui:brand "MOD" ;
+        modgui:label "Buffer" ;
+        modgui:model "boxy-small" ;
+        modgui:panel "none" ;
+        modgui:color "black" ;
+    ] .

@@ -147,6 +147,9 @@ typedef struct {
 
 #define LILV_NS_MOD "http://moddevices.com/ns/mod#"
 
+/* host-implemented plugin, see BufferInstanceAdd() */
+#define MOD_BUFFER_URI "http://moddevices.com/plugins/mod-devel/Buffer"
+
 #define KX_TIME__TicksPerBeat "http://kxstudio.sf.net/ns/lv2ext/props#TimePositionTicksPerBeat"
 
 // custom jack flag used for cv
@@ -367,6 +370,10 @@ typedef struct EFFECT_T {
     LilvInstance *lilv_instance;
     const LilvPlugin *lilv_plugin;
     const LV2_Feature **features;
+
+    // host-implemented Buffer (MOD_BUFFER_URI): no lilv instance, output ports live on a hidden 2nd jack client
+    bool is_buffer;
+    jack_client_t *buffer_jack_client;
 
     port_t **ports;
     uint32_t ports_count;
@@ -830,6 +837,11 @@ static void* PostPonedEventsThread(void* arg);
 static void* HMIClientThread(void* arg);
 #endif
 static int ProcessPlugin(jack_nframes_t nframes, void *arg);
+static int ProcessBufferInput(jack_nframes_t nframes, void *arg);
+static int ProcessBufferOutput(jack_nframes_t nframes, void *arg);
+static int BufferInstanceAdd(effect_t *effect, const LilvPlugin *plugin);
+static const char* BufferResolvePortName(const char *name);
+static void SetupVirtualPorts(effect_t *effect, pthread_mutexattr_t *mutex_atts);
 static bool SetPortValue(port_t *port, float value, int effect_id, bool is_bypass, bool from_ui);
 static float UpdateValueFromMidi(midi_cc_t* mcc, uint16_t mvalue, bool highres);
 static bool UpdateGlobalJackPosition(enum UpdatePositionFlag flag, bool do_post);
@@ -2285,6 +2297,274 @@ static int ProcessPlugin(jack_nframes_t nframes, void *arg)
         sem_post(&g_postevents_semaphore);
 
     return 0;
+}
+
+/*
+ * Buffer: a host-implemented plugin (MOD_BUFFER_URI) that cuts the jack dependency between the part of the
+ * pedalboard before it and the part after it.
+ *
+ * A regular instance has one jack client holding both its inputs and its outputs, so jack must run everything
+ * connected to its outputs after everything connected to its inputs. The Buffer registers its input ports on the
+ * usual "effect_N" client and its output ports on a hidden second client that has no inputs at all. Jack sees no
+ * edge between the two halves, so jack2 can run the part after the Buffer on another core, in parallel with the
+ * part before it. The price is one cycle of latency: the input side writes into one of two slots, selected by the
+ * cycle number, and the output side plays the slot written in the previous cycle. The two sides never touch the
+ * same slot in the same cycle, so no locking is needed.
+ *
+ * The Buffer has no bypass, no controls and no state; it is audio ports only, described by a TTL-only bundle.
+ * mod-ui keeps addressing its outputs as "effect_N:<symbol>", BufferResolvePortName() maps those to the hidden
+ * client for connect/disconnect.
+ */
+
+static inline uint32_t BufferCycleSlot(jack_client_t *client, jack_nframes_t nframes)
+{
+    // frame time at the start of the current cycle, the same value for every client running in it
+    return (jack_last_frame_time(client) / nframes) & 1;
+}
+
+static int ProcessBufferInput(jack_nframes_t nframes, void *arg)
+{
+    effect_t *const effect = arg;
+    const uint32_t slot = BufferCycleSlot(effect->jack_client, nframes);
+    const uint32_t count = effect->input_audio_ports_count < effect->output_audio_ports_count
+                         ? effect->input_audio_ports_count : effect->output_audio_ports_count;
+
+    for (uint32_t i = 0; i < count; i++)
+    {
+        const float *const in = jack_port_get_buffer(effect->input_audio_ports[i]->jack_port, nframes);
+        memcpy(effect->output_audio_ports[i]->buffer + slot * g_sample_rate, in, sizeof(float) * nframes);
+    }
+
+    return 0;
+}
+
+static int ProcessBufferOutput(jack_nframes_t nframes, void *arg)
+{
+    effect_t *const effect = arg;
+    // the slot the input side filled in the previous cycle
+    const uint32_t slot = BufferCycleSlot(effect->buffer_jack_client, nframes) ^ 1;
+    uint32_t count = effect->input_audio_ports_count < effect->output_audio_ports_count
+                   ? effect->input_audio_ports_count : effect->output_audio_ports_count;
+
+    if (!g_processing_enabled)
+        count = 0;
+
+    for (uint32_t i = 0; i < effect->output_audio_ports_count; i++)
+    {
+        port_t *const port = effect->output_audio_ports[i];
+        float *const out = jack_port_get_buffer(port->jack_port, nframes);
+
+        if (i < count)
+            memcpy(out, port->buffer + slot * g_sample_rate, sizeof(float) * nframes);
+        else
+            memset(out, 0, sizeof(float) * nframes);
+    }
+
+    return 0;
+}
+
+/* called from effects_add() in place of the lilv instantiation; effect->jack_client already exists */
+static int BufferInstanceAdd(effect_t *effect, const LilvPlugin *plugin)
+{
+    char client_name[32], port_name[MAX_CHAR_BUF_SIZE+1];
+    jack_status_t jack_status;
+    const LilvPort *lilv_port;
+    port_t *port;
+    uint32_t input_count = 0, output_count = 0;
+
+    client_name[31] = '\0';
+    port_name[MAX_CHAR_BUF_SIZE] = '\0';
+
+    effect->is_buffer = true;
+    effect->control_index = -1;
+    effect->enabled_index = -1;
+    effect->freewheel_index = -1;
+    effect->bpb_index = -1;
+    effect->bpm_index = -1;
+    effect->speed_index = -1;
+
+    const uint32_t ports_count = lilv_plugin_get_num_ports(plugin);
+
+    /* audio ports only; anything else means the bundle does not describe a Buffer */
+    for (uint32_t i = 0; i < ports_count; i++)
+    {
+        lilv_port = lilv_plugin_get_port_by_index(plugin, i);
+
+        if (!lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.audio))
+        {
+            fprintf(stderr, "buffer plugin can only have audio ports\n");
+            return ERR_LV2_INSTANTIATION;
+        }
+
+        if (lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.input))
+            input_count++;
+        else if (lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.output))
+            output_count++;
+        else
+        {
+            fprintf(stderr, "buffer plugin port is neither input nor output\n");
+            return ERR_LV2_INSTANTIATION;
+        }
+    }
+
+    /* The hidden client with the output ports. It has no inputs, so jack runs it at the start of the cycle. */
+    snprintf(client_name, 31, "effect_%i_out", effect->instance);
+    effect->buffer_jack_client = jack_client_open(client_name, JackNoStartServer, &jack_status);
+
+    if (!effect->buffer_jack_client)
+    {
+        fprintf(stderr, "can't get jack client for buffer output\n");
+        return ERR_JACK_CLIENT_CREATION;
+    }
+
+    pthread_mutexattr_t mutex_atts;
+    pthread_mutexattr_init(&mutex_atts);
+#ifdef __MOD_DEVICES__
+    pthread_mutexattr_setprotocol(&mutex_atts, PTHREAD_PRIO_INHERIT);
+#endif
+
+    effect->ports_count = ports_count;
+    effect->ports = (port_t **) mod_calloc(ports_count, sizeof(port_t *));
+    effect->audio_ports_count = ports_count;
+    effect->audio_ports = (port_t **) mod_calloc(ports_count, sizeof(port_t *));
+
+    if (input_count > 0)
+    {
+        effect->input_audio_ports_count = input_count;
+        effect->input_audio_ports = (port_t **) mod_calloc(input_count, sizeof(port_t *));
+    }
+    if (output_count > 0)
+    {
+        effect->output_audio_ports_count = output_count;
+        effect->output_audio_ports = (port_t **) mod_calloc(output_count, sizeof(port_t *));
+    }
+
+    input_count = output_count = 0;
+
+    for (uint32_t i = 0; i < ports_count; i++)
+    {
+        effect->ports[i] = effect->audio_ports[i] = port = (port_t *) mod_calloc(1, sizeof(port_t));
+        pthread_mutex_init(&port->cv_source_mutex, &mutex_atts);
+
+        lilv_port = lilv_plugin_get_port_by_index(plugin, i);
+        port->index = i;
+        port->symbol = lilv_node_as_string(lilv_port_get_symbol(plugin, lilv_port));
+        port->type = TYPE_AUDIO;
+        snprintf(port_name, MAX_CHAR_BUF_SIZE, "%s", port->symbol);
+
+        if (lilv_port_is_a(plugin, lilv_port, g_lilv_nodes.input))
+        {
+            /* input side: the regular client, read straight from the jack buffer */
+            port->flow = FLOW_INPUT;
+            port->jack_port = jack_port_register(effect->jack_client, port_name,
+                                                 JACK_DEFAULT_AUDIO_TYPE, JackPortIsInput, 0);
+            effect->input_audio_ports[input_count++] = port;
+        }
+        else
+        {
+            /* output side: the hidden client, plus the two slots the signal is delayed through */
+            port->flow = FLOW_OUTPUT;
+            port->buffer_count = g_sample_rate * 2;
+            port->buffer = (float *) mod_calloc(port->buffer_count, sizeof(float));
+
+            if (!port->buffer)
+            {
+                fprintf(stderr, "can't get audio buffer\n");
+                pthread_mutexattr_destroy(&mutex_atts);
+                return ERR_MEMORY_ALLOCATION;
+            }
+
+            port->jack_port = jack_port_register(effect->buffer_jack_client, port_name,
+                                                 JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput, 0);
+            effect->output_audio_ports[output_count++] = port;
+        }
+
+        if (port->jack_port == NULL)
+        {
+            fprintf(stderr, "can't get jack port\n");
+            pthread_mutexattr_destroy(&mutex_atts);
+            return ERR_JACK_PORT_REGISTER;
+        }
+    }
+
+    SetupVirtualPorts(effect, &mutex_atts);
+    pthread_mutexattr_destroy(&mutex_atts);
+
+    jack_set_thread_init_callback(effect->jack_client, JackThreadInit, effect);
+    jack_set_process_callback(effect->jack_client, ProcessBufferInput, effect);
+    jack_set_thread_init_callback(effect->buffer_jack_client, JackThreadInit, effect);
+    jack_set_process_callback(effect->buffer_jack_client, ProcessBufferOutput, effect);
+
+    if (jack_activate(effect->buffer_jack_client) != 0 || jack_activate(effect->jack_client) != 0)
+    {
+        fprintf(stderr, "can't activate jack_client\n");
+        return ERR_JACK_CLIENT_ACTIVATION;
+    }
+
+    return SUCCESS;
+}
+
+/* "effect_N:<symbol>" naming a Buffer output port -> the real port name on the hidden client; anything else as is */
+static const char* BufferResolvePortName(const char *name)
+{
+    if (name == NULL || strncmp(name, "effect_", 7) != 0)
+        return name;
+
+    char *end;
+    const long instance_l = strtol(name + 7, &end, 10);
+
+    if (end == name + 7 || *end != ':' || instance_l < 0 || instance_l >= MAX_INSTANCES)
+        return name;
+
+    const int instance = (int)instance_l;
+
+    if (!InstanceExist(instance) || !g_effects[instance].is_buffer)
+        return name;
+
+    const effect_t *const effect = &g_effects[instance];
+    const char *const symbol = end + 1;
+
+    for (uint32_t i = 0; i < effect->output_audio_ports_count; i++)
+    {
+        if (strcmp(effect->output_audio_ports[i]->symbol, symbol) == 0)
+            return jack_port_name(effect->output_audio_ports[i]->jack_port);
+    }
+
+    return name;
+}
+
+/* the virtual ":bypass" and ":presets" control ports every instance has */
+static void SetupVirtualPorts(effect_t *effect, pthread_mutexattr_t *mutex_atts)
+{
+    /* Default value of bypass */
+    effect->bypass = 0.0f;
+    effect->was_bypassed = false;
+
+    effect->bypass_port.buffer_count = 1;
+    effect->bypass_port.buffer = &effect->bypass;
+    effect->bypass_port.min_value = 0.0f;
+    effect->bypass_port.max_value = 1.0f;
+    effect->bypass_port.def_value = 0.0f;
+    effect->bypass_port.prev_value = 0.0f;
+    effect->bypass_port.type = TYPE_CONTROL;
+    effect->bypass_port.flow = FLOW_INPUT;
+    effect->bypass_port.hints = HINT_TOGGLE;
+    effect->bypass_port.symbol = g_bypass_port_symbol;
+    pthread_mutex_init(&effect->bypass_port.cv_source_mutex, mutex_atts);
+
+    // virtual presets port
+    effect->preset_value = 0.0f;
+    effect->presets_port.buffer_count = 1;
+    effect->presets_port.buffer = &effect->preset_value;
+    effect->presets_port.min_value = 0.0f;
+    effect->presets_port.max_value = 1.0f;
+    effect->presets_port.def_value = 0.0f;
+    effect->presets_port.prev_value = 0.0f;
+    effect->presets_port.type = TYPE_CONTROL;
+    effect->presets_port.flow = FLOW_INPUT;
+    effect->presets_port.hints = HINT_ENUMERATION|HINT_INTEGER;
+    effect->presets_port.symbol = g_presets_port_symbol;
+    pthread_mutex_init(&effect->presets_port.cv_source_mutex, mutex_atts);
 }
 
 static bool SetPortValue(port_t *port, float value, int effect_id, bool is_bypass, bool from_ui)
@@ -4623,6 +4903,17 @@ int effects_add(const char *uri, int instance)
 
     effect->lilv_plugin = plugin;
 
+    /* Host-implemented Buffer: no lilv instance, ports split over two jack clients */
+    if (strcmp(uri, MOD_BUFFER_URI) == 0)
+    {
+        error = BufferInstanceAdd(effect, plugin);
+        if (error != SUCCESS)
+            goto error;
+
+        lilv_node_free(plugin_uri);
+        return instance;
+    }
+
     /* Features */
     GetFeatures(effect);
 
@@ -5372,35 +5663,7 @@ int effects_add(const char *uri, int instance)
         jack_ringbuffer_mlock(effect->events_out_buffer);
     }
 
-    /* Default value of bypass */
-    effect->bypass = 0.0f;
-    effect->was_bypassed = false;
-
-    effect->bypass_port.buffer_count = 1;
-    effect->bypass_port.buffer = &effect->bypass;
-    effect->bypass_port.min_value = 0.0f;
-    effect->bypass_port.max_value = 1.0f;
-    effect->bypass_port.def_value = 0.0f;
-    effect->bypass_port.prev_value = 0.0f;
-    effect->bypass_port.type = TYPE_CONTROL;
-    effect->bypass_port.flow = FLOW_INPUT;
-    effect->bypass_port.hints = HINT_TOGGLE;
-    effect->bypass_port.symbol = g_bypass_port_symbol;
-    pthread_mutex_init(&effect->bypass_port.cv_source_mutex, &mutex_atts);
-
-    // virtual presets port
-    effect->preset_value = 0.0f;
-    effect->presets_port.buffer_count = 1;
-    effect->presets_port.buffer = &effect->preset_value;
-    effect->presets_port.min_value = 0.0f;
-    effect->presets_port.max_value = 1.0f;
-    effect->presets_port.def_value = 0.0f;
-    effect->presets_port.prev_value = 0.0f;
-    effect->presets_port.type = TYPE_CONTROL;
-    effect->presets_port.flow = FLOW_INPUT;
-    effect->presets_port.hints = HINT_ENUMERATION|HINT_INTEGER;
-    effect->presets_port.symbol = g_presets_port_symbol;
-    pthread_mutex_init(&effect->presets_port.cv_source_mutex, &mutex_atts);
+    SetupVirtualPorts(effect, &mutex_atts);
 
     pthread_mutexattr_destroy(&mutex_atts);
 
@@ -5472,6 +5735,13 @@ int effects_preset_load(int effect_id, const char *uri)
 
             effect = &g_effects[effect_id];
 
+            if (effect->lilv_instance == NULL)
+            {
+                lilv_state_free(state);
+                lilv_node_free(preset_uri);
+                return ERR_INVALID_OPERATION;
+            }
+
             lilv_state_restore(state, effect->lilv_instance, SetParameterFromState, effect,
                                LV2_STATE_IS_POD|LV2_STATE_IS_PORTABLE, effect->features);
             lilv_state_free(state);
@@ -5519,6 +5789,10 @@ int effects_preset_save(int effect_id, const char *dir, const char *file_name, c
     }
 
     effect = &g_effects[effect_id];
+
+    if (effect->lilv_instance == NULL)
+        return ERR_INVALID_OPERATION;
+
     scratch_dir = GetPluginStateDir(effect->instance, g_lv2_scratch_dir);
 
     LilvState* const state = lilv_state_new_from_instance(
@@ -5632,6 +5906,10 @@ int effects_remove(int effect_id)
         if (InstanceExist(j))
         {
             effect = &g_effects[j];
+
+            // Buffer: stop the output side first, so it never plays a slot the input side no longer fills
+            if (effect->buffer_jack_client)
+                jack_deactivate(effect->buffer_jack_client);
 
             if (jack_deactivate(effect->jack_client) != 0)
                 return ERR_JACK_CLIENT_DEACTIVATION;
@@ -5895,6 +6173,8 @@ int effects_remove(int effect_id)
 
             if (effect->jack_client)
                 jack_client_close(effect->jack_client);
+            if (effect->buffer_jack_client)
+                jack_client_close(effect->buffer_jack_client);
 
             free(effect->audio_ports);
             free(effect->input_audio_ports);
@@ -5971,6 +6251,9 @@ int effects_connect(const char *portA, const char *portB)
 {
     int ret;
 
+    portA = BufferResolvePortName(portA);
+    portB = BufferResolvePortName(portB);
+
     ret = jack_connect(g_jack_global_client, portA, portB);
     if (ret != 0 && ret != EEXIST) ret = jack_connect(g_jack_global_client, portB, portA);
     if (ret == EEXIST) ret = 0;
@@ -5983,6 +6266,9 @@ int effects_connect(const char *portA, const char *portB)
 int effects_disconnect(const char *portA, const char *portB)
 {
     int ret;
+
+    portA = BufferResolvePortName(portA);
+    portB = BufferResolvePortName(portB);
 
     ret = jack_disconnect(g_jack_global_client, portA, portB);
     if (ret != 0) ret = jack_disconnect(g_jack_global_client, portB, portA);
@@ -6525,6 +6811,11 @@ int effects_bypass(int effect_id, int value)
     }
 
     effect_t *effect = &g_effects[effect_id];
+
+    // Buffer has no bypass, it is always passing
+    if (effect->is_buffer)
+        return SUCCESS;
+
     effect->bypass_port.prev_value = effect->bypass = value ? 1.0f : 0.0f;
 
     if (effect->enabled_index >= 0)
@@ -6646,6 +6937,10 @@ int effects_midi_learn(int effect_id, const char *control_symbol, float minimum,
     {
         return ERR_INSTANCE_NON_EXISTS;
     }
+    if (g_effects[effect_id].is_buffer)
+    {
+        return ERR_ASSIGNMENT_INVALID_OP;
+    }
 
     const bool is_bypass = !strcmp(control_symbol, g_bypass_port_symbol);
 
@@ -6730,6 +7025,10 @@ int effects_midi_map(int effect_id, const char *control_symbol, int channel, int
     if (!InstanceExist(effect_id))
     {
         return ERR_INSTANCE_NON_EXISTS;
+    }
+    if (g_effects[effect_id].is_buffer)
+    {
+        return ERR_ASSIGNMENT_INVALID_OP;
     }
 
     const bool is_bypass = !strcmp(control_symbol, g_bypass_port_symbol);
@@ -6907,6 +7206,9 @@ int effects_cc_map(int effect_id, const char *control_symbol, int device_id, int
         return ERR_ASSIGNMENT_INVALID_OP;
 
     effect_t *effect = &(g_effects[effect_id]);
+
+    if (effect->is_buffer)
+        return ERR_ASSIGNMENT_INVALID_OP;
     port_t *port = FindEffectInputPortBySymbol(effect, control_symbol);
 
     if (port == NULL)
@@ -7206,6 +7508,8 @@ int effects_cv_map(int effect_id, const char *control_symbol, const char *source
 {
     if (!InstanceExist(effect_id))
         return ERR_INSTANCE_NON_EXISTS;
+    if (g_effects[effect_id].is_buffer)
+        return ERR_ASSIGNMENT_INVALID_OP;
 
     if (!mode || strlen(mode) != 1) {
         return ERR_INVALID_OPERATION;
@@ -8194,6 +8498,10 @@ int effects_show_external_ui(int effect_id)
         return ERR_ASSIGNMENT_INVALID_OP;
 
     effect_t *effect = &g_effects[effect_id];
+
+    if (effect->lilv_instance == NULL)
+        return ERR_ASSIGNMENT_INVALID_OP;
+
     LilvUIs *uis = lilv_plugin_get_uis(effect->lilv_plugin);
 
     if (uis == NULL)

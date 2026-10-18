@@ -1,0 +1,37 @@
+<div class="mod-pedal mod-pedal-boxy{{{cns}}} mod-boxy50 mod-buffer mod-{{color}} {{color}}">
+    <div mod-role="drag-handle" class="mod-drag-handle"></div>
+    <div class="mod-plugin-brand"><h1>{{brand}}</h1></div>
+    <div class="mod-plugin-name"><h1>{{label}}</h1></div>
+    <!-- no footswitch and no bypass light: the Buffer is always passing -->
+    <div class="mod-buffer-graphic">
+        <svg viewBox="0 0 240 120" width="240" height="120" xmlns="http://www.w3.org/2000/svg">
+            <!-- two signal lanes entering the box -->
+            <path d="M 0 40 H 84" />
+            <path d="M 0 80 H 84" />
+            <!-- the buffer: a box holding two slots -->
+            <rect x="90" y="18" width="60" height="84" rx="8" ry="8" />
+            <rect class="mod-buffer-slot" x="102" y="30" width="36" height="26" rx="3" ry="3" />
+            <rect class="mod-buffer-slot filled" x="102" y="64" width="36" height="26" rx="3" ry="3" />
+            <!-- the lanes leaving one cycle later -->
+            <path d="M 156 40 H 232" />
+            <path d="M 156 80 H 232" />
+            <path class="mod-buffer-arrow" d="M 226 32 L 240 40 L 226 48 Z" />
+            <path class="mod-buffer-arrow" d="M 226 72 L 240 80 L 226 88 Z" />
+        </svg>
+        <span class="mod-buffer-caption">+1 cycle</span>
+    </div>
+    <div class="mod-pedal-input">
+        {{#effect.ports.audio.input}}
+        <div class="mod-input mod-input-disconnected" title="{{name}}" mod-role="input-audio-port" mod-port-symbol="{{symbol}}">
+            <div class="mod-pedal-input-image"></div>
+        </div>
+        {{/effect.ports.audio.input}}
+    </div>
+    <div class="mod-pedal-output">
+        {{#effect.ports.audio.output}}
+        <div class="mod-output mod-output-disconnected" title="{{name}}" mod-role="output-audio-port" mod-port-symbol="{{symbol}}">
+            <div class="mod-pedal-output-image"></div>
+        </div>
+        {{/effect.ports.audio.output}}
+    </div>
+</div>
