@@ -6977,6 +6977,32 @@ int effects_remove(int effect_id)
             }
         }
 
+#ifdef MOD_IO_PROCESSING_ENABLED
+        /* With IO processing the capture side seen by the UI is our own out1/out2,
+         * and the playback side goes through mod-monitor. A direct in->out link on the
+         * previous pedalboard is out1/out2 -> mod-monitor (or system); remove it too,
+         * otherwise the dry signal keeps playing under the next pedalboard. */
+        jack_port_t *const io_out_ports[2] = { g_audio_out1_port, g_audio_out2_port };
+
+        for (int i = 0; i < 2; i++)
+        {
+            if (! io_out_ports[i])
+                continue;
+
+            const char **out_connections = jack_port_get_connections(io_out_ports[i]);
+            if (out_connections)
+            {
+                for (int j = 0; out_connections[j]; j++)
+                {
+                    if (strstr(out_connections[j], "mod-monitor") || strstr(out_connections[j], "system"))
+                        jack_disconnect(g_jack_global_client, jack_port_name(io_out_ports[i]), out_connections[j]);
+                }
+
+                jack_free(out_connections);
+            }
+        }
+#endif
+
         start = 0;
         end = MAX_PLUGIN_INSTANCES;
 
