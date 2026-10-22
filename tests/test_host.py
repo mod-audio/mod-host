@@ -63,4 +63,54 @@ def test_preset_save():
     assert int(r[0]) == 0
     assert float(r[1]) == 5.0
 
+def test_add_without_name_uses_effect_prefix():
+    r = s('add http://lv2plug.in/plugins/eg-amp 0')
+    assert int(r[0]) == 0
+    names = jack_client_names()
+    assert 'effect_0' in names
+    r = s('remove 0')
+    assert int(r[0]) == 0
+
+def test_add_with_name_uses_the_requested_jack_client_name():
+    r = s('add http://lv2plug.in/plugins/eg-amp 0 channel1-eg-amp')
+    assert int(r[0]) == 0
+    names = jack_client_names()
+    assert 'channel1-eg-amp' in names
+    assert 'effect_0' not in names
+    r = s('remove 0')
+    assert int(r[0]) == 0
+
+def test_add_with_name_sanitises_colon():
+    # ':' is jack's client:port separator; a name carrying one must be replaced, not
+    # passed straight through (it would make every one of the client's own ports
+    # unparseable as "client:port").
+    r = s('add http://lv2plug.in/plugins/eg-amp 0 bad:name')
+    assert int(r[0]) == 0
+    names = jack_client_names()
+    assert 'bad_name' in names
+    assert 'bad:name' not in names
+    r = s('remove 0')
+    assert int(r[0]) == 0
+
+def test_add_with_colliding_name_appends_the_instance_number():
+    r = s('add http://lv2plug.in/plugins/eg-amp 0 shared-name')
+    assert int(r[0]) == 0
+    r = s('add http://lv2plug.in/plugins/eg-amp 1 shared-name')
+    assert int(r[0]) == 1
+    names = jack_client_names()
+    assert 'shared-name' in names
+    assert 'shared-name_1' in names
+    r = s('remove 0')
+    assert int(r[0]) == 0
+    r = s('remove 1')
+    assert int(r[0]) == 0
+
+def test_add_still_accepts_the_old_three_token_form():
+    # Protocol backwards-compatibility: a caller that never learned about the optional
+    # 4th token must keep working exactly as before.
+    r = s('add http://lv2plug.in/plugins/eg-amp 0')
+    assert int(r[0]) == 0
+    r = s('remove 0')
+    assert int(r[0]) == 0
+
 

@@ -39,10 +39,6 @@
 ************************************************************************************************************************
 */
 
-#define NOT_FOUND           (-1)
-#define MANY_ARGUMENTS      (-2)
-#define FEW_ARGUMENTS       (-3)
-#define INVALID_ARGUMENT    (-4)
 
 
 /*
@@ -51,7 +47,7 @@
 ************************************************************************************************************************
 */
 
-const char *g_error_messages[] = {
+static const char *g_error_messages[] = {
     MESSAGE_COMMAND_NOT_FOUND,
     MESSAGE_MANY_ARGUMENTS,
     MESSAGE_FEW_ARGUMENTS,
@@ -148,7 +144,7 @@ void protocol_parse(msg_t *msg)
 
     unsigned int match, variable_arguments = 0;
 
-    index = NOT_FOUND;
+    index = PROTOCOL_NOT_FOUND;
 
     // loop all registered commands
     for (i = 0; i < g_command_count; i++)
@@ -187,13 +183,13 @@ void protocol_parse(msg_t *msg)
             // few arguments
             if (proto.list_count < (g_commands[i].count - variable_arguments))
             {
-                index = FEW_ARGUMENTS;
+                index = PROTOCOL_FEW_ARGUMENTS;
             }
 
             // many arguments
             else if (proto.list_count > g_commands[i].count && !variable_arguments)
             {
-                index = MANY_ARGUMENTS;
+                index = PROTOCOL_MANY_ARGUMENTS;
             }
 
             // arguments match
@@ -205,7 +201,7 @@ void protocol_parse(msg_t *msg)
             // not found
             else
             {
-                index = NOT_FOUND;
+                index = PROTOCOL_NOT_FOUND;
             }
 
             break;
@@ -235,13 +231,14 @@ void protocol_parse(msg_t *msg)
     // Protocol error
     else
     {
+        const char *error = protocol_error_message(index);
 #ifndef SKIP_READLINE
         if (msg->sender_id == STDOUT_FILENO)
-            write(msg->sender_id, g_error_messages[-index-1], strlen(g_error_messages[-index-1])+1);
+            write(msg->sender_id, error, strlen(error)+1);
         else
 #endif
-            socket_send(msg->sender_id, g_error_messages[-index-1], strlen(g_error_messages[-index-1])+1);
-        if (g_verbose) printf("PROTOCOL: error '%s'\n", g_error_messages[-index-1]);
+            socket_send(msg->sender_id, error, strlen(error)+1);
+        if (g_verbose) printf("PROTOCOL: error '%s'\n", error);
     }
 
     FREE(proto.list);
@@ -291,8 +288,17 @@ void protocol_remove_commands(void)
         FREE(g_commands[i].command);
         FREE(g_commands[i].list);
     }
+    g_command_count = 0;
 }
 
+
+const char *protocol_error_message(int code)
+{
+    if (code >= 0 || -code > (int)(sizeof(g_error_messages) / sizeof(g_error_messages[0])))
+        return NULL;
+
+    return g_error_messages[-code-1];
+}
 
 void protocol_verbose(int verbose)
 {

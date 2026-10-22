@@ -17,3 +17,5 @@ tests/rtmempool-test
 tests/self-test-result.json
 src/info.h
 PKGBUILD
+tests/protocol_test
+tests/host_scenarios
