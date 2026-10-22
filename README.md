@@ -106,10 +106,22 @@ Commands (or Protocol)
 
 The commands supported by mod-host are:
 
-    add <lv2_uri> <instance_number>
+    add <lv2_uri> <instance_number> [client_name]
         * add an LV2 plugin encapsulated as a jack client
         e.g.: add "http://lv2plug.in/plugins/eg-amp" 0
         instance_number must be any value between 0 ~ 9990, inclusively
+        client_name is optional; when omitted the jack client (and so the graph node) is
+        named "effect_<instance_number>", same as always. When given, mod-host tries to
+        open the jack client under that name instead -- so a host running many plugins
+        shows a graph with a name per plugin instead of an undifferentiated effect_0,
+        effect_1, effect_2... The name is sanitised for jack (':' is replaced with '_',
+        since jack uses ':' as the client:port separator, and it is truncated to the
+        running jack backend's client name limit) and, on a collision with an existing
+        jack client, disambiguated by appending "_<instance_number>". If the sanitised
+        name is empty, or the name still collides after the instance number is appended,
+        mod-host falls back to the default "effect_<instance_number>" rather than fail
+        the add.
+        e.g.: add "http://lv2plug.in/plugins/eg-amp" 0 "channel1-eg-amp"
 
     remove <instance_number>
         * remove an LV2 plugin instance (and also the jack client)
