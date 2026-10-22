@@ -14,7 +14,7 @@ int main (void)
     if (effects_init(NULL) == 0)
     {
         action = "add: http://lv2plug.in/plugins/eg-amp";
-        ret = effects_add("http://lv2plug.in/plugins/eg-amp", 0);
+        ret = effects_add("http://lv2plug.in/plugins/eg-amp", 0, NULL);
         printf("%s, ret: %i\n", action, ret);
 
         if (ret != 0)

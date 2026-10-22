@@ -1,0 +1,50 @@
+# The scenarios every host backend answers the same way: mod-host, omx-clap-host, or a
+# host_backend_t in the same process. One exchange per line, "command => reply"; the replies
+# accepted are separated by "|". The runner substitutes $URI (a plugin the host loads),
+# $BAD_URI (one it cannot), $PARAM (a control of $URI that takes 0.25), $DIR (a writable
+# directory), $PORT_A and $PORT_B (two ports the host can link). A verb that answers
+# "resp -902" is not served by the host; a line starting with "@verb" is skipped after that.
+# $REMOVE_TWICE is what a second remove of the same instance answers: "resp -3" for a host that
+# refuses it, "resp 0" for mod-host, whose remove is idempotent.
+
+# add: the instance number is the caller's
+add $URI 3 => resp 3
+add $URI 3 => resp -2
+add $BAD_URI 4 => resp -101
+
+# parameters, by symbol
+param_set 3 $PARAM 0.25 => resp 0
+param_get 3 $PARAM => resp 0 0.2500
+param_set 3 no_such_symbol 0.5 => resp -103
+param_get 3 no_such_symbol => resp -103
+param_set 9 $PARAM 0.5 => resp -3
+param_get 9 $PARAM => resp -3
+
+# bypass is the host's, read back as :bypass
+bypass 3 1 => resp 0
+param_get 3 :bypass => resp 0 1.0000
+bypass 3 0 => resp 0
+param_get 3 :bypass => resp 0 0.0000
+bypass 9 1 => resp -3
+
+# presets: a preset the host cannot load is refused as a bad URI or as unloadable state
+preset_load 3 urn:no:such:preset => resp -104 | resp -105 | resp -902
+
+# state: saved, then loaded back after a remove and an add. What comes back is the plugin's
+# state, not the host's: mod-host saves only a plugin with lv2:state, so a control value round
+# trip is asserted by each host's own test with a fixture that carries state, not here.
+state_save $DIR => resp 0 | resp -902
+@state_save remove 3 => resp 0
+@state_save add $URI 3 => resp 3
+@state_save state_load $DIR => resp 0
+
+# wiring
+connect $PORT_A $PORT_B => resp 0 | resp -205 | resp -902
+disconnect $PORT_A $PORT_B => resp 0 | resp -206 | resp -902
+
+# a verb outside the table is refused or served, never a grammar error
+patch_set 3 urn:no:such:property 1 => resp -902 | resp 0
+
+# remove
+remove 3 => resp 0
+remove 3 => $REMOVE_TWICE
