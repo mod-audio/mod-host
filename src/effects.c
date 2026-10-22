@@ -488,6 +488,7 @@ typedef struct LILV_NODES_T {
     LilvNode *mod_minimum;
     LilvNode *options_interface;
     LilvNode *output;
+    LilvNode *port;
     LilvNode *patch_readable;
     LilvNode *patch_writable;
     LilvNode *preferMomentaryOff;
@@ -971,9 +972,16 @@ static void AllocatePortBuffers(effect_t* effect, int in_size, int out_size)
 
     for (i = 0; i < effect->event_ports_count; i++)
     {
-        const int size = effect->event_ports[i]->flow == FLOW_INPUT ? in_size : out_size;
+        int size = effect->event_ports[i]->flow == FLOW_INPUT ? in_size : out_size;
+
+        // zero means keep the current buffer, but a port that has none yet still needs one
         if (size == 0)
-            continue;
+        {
+            if (effect->event_ports[i]->evbuf != NULL)
+                continue;
+            size = g_midi_buffer_size * 16; // 16 taken from jalv source code
+        }
+
         lv2_evbuf_free(effect->event_ports[i]->evbuf);
         effect->event_ports[i]->evbuf = lv2_evbuf_new(
             size,
@@ -4152,6 +4160,7 @@ int effects_init(void* client)
     g_lilv_nodes.mod_minimum = lilv_new_uri(g_lv2_data, LILV_NS_MOD "minimum");
     g_lilv_nodes.options_interface = lilv_new_uri(g_lv2_data, LV2_OPTIONS__interface);
     g_lilv_nodes.output = lilv_new_uri(g_lv2_data, LILV_URI_OUTPUT_PORT);
+    g_lilv_nodes.port = lilv_new_uri(g_lv2_data, LV2_CORE__port);
     g_lilv_nodes.patch_writable = lilv_new_uri(g_lv2_data, LV2_PATCH__writable);
     g_lilv_nodes.patch_readable = lilv_new_uri(g_lv2_data, LV2_PATCH__readable);
     g_lilv_nodes.preferMomentaryOff = lilv_new_uri(g_lv2_data, LILV_NS_MOD "preferMomentaryOffByDefault");
@@ -4489,6 +4498,7 @@ int effects_finish(int close_client)
     lilv_node_free(g_lilv_nodes.mod_maximum);
     lilv_node_free(g_lilv_nodes.mod_minimum);
     lilv_node_free(g_lilv_nodes.output);
+    lilv_node_free(g_lilv_nodes.port);
     lilv_node_free(g_lilv_nodes.patch_readable);
     lilv_node_free(g_lilv_nodes.patch_writable);
     lilv_node_free(g_lilv_nodes.preferMomentaryOff);
@@ -4726,6 +4736,22 @@ int effects_add(const char *uri, int instance)
 
     /* Create the URI for identify the ports */
     ports_count = lilv_plugin_get_num_ports(plugin);
+
+    // lilv drops all of a plugin's ports when it cannot read one of them (it logs
+    // "port symbol is invalid"), and the plugin would then run with none connected
+    {
+        LilvNodes *described_ports = lilv_plugin_get_value(plugin, g_lilv_nodes.port);
+        const uint32_t described_ports_count = described_ports != NULL ? lilv_nodes_size(described_ports) : 0;
+        lilv_nodes_free(described_ports);
+
+        if (described_ports_count != ports_count)
+        {
+            fprintf(stderr, "plugin describes %u ports but lilv loaded %u, refusing it\n",
+                    described_ports_count, ports_count);
+            error = ERR_LV2_INSTANTIATION;
+            goto error;
+        }
+    }
 
     /* Allocate memory to ports */
     audio_ports_count = 0;
