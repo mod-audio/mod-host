@@ -31,6 +31,7 @@
 #include <winsock2.h>
 #else
 #include <sys/socket.h>
+#include <sys/select.h>
 #include <netinet/in.h>
 #define closesocket close
 #define INVALID_SOCKET -1
@@ -38,7 +39,6 @@ typedef int SOCKET;
 #endif
 
 #include "socket.h"
-#include "effects.h"
 #include "mod-memset.h"
 
 
@@ -83,6 +83,8 @@ static SOCKET g_fbclientfd = INVALID_SOCKET;
 
 static int g_buffer_size;
 static void (*g_receive_cb)(msg_t *msg);
+static void (*g_idle_cb)(void);
+static int g_idle_interval_ms;
 
 /*
 ************************************************************************************************************************
@@ -252,6 +254,16 @@ void socket_set_receive_cb(void (*receive_cb)(msg_t *msg))
     g_receive_cb = receive_cb;
 }
 
+void socket_set_idle_cb(void (*idle_cb)(void))
+{
+    g_idle_cb = idle_cb;
+}
+
+void socket_set_idle_interval(int interval_ms)
+{
+    g_idle_interval_ms = interval_ms;
+}
+
 
 int socket_send(int destination, const char *buffer, int size)
 {
@@ -337,6 +349,26 @@ void socket_run(int exit_on_failure)
 
     while (g_serverfd != INVALID_SOCKET)
     {
+#ifndef _WIN32
+        /* with an idle interval, call the idle callback when no message arrives in it */
+        if (g_idle_interval_ms > 0)
+        {
+            fd_set readfds;
+            struct timeval timeout;
+
+            FD_ZERO(&readfds);
+            FD_SET(clientfd, &readfds);
+            timeout.tv_sec = g_idle_interval_ms / 1000;
+            timeout.tv_usec = (g_idle_interval_ms % 1000) * 1000;
+
+            if (select(clientfd + 1, &readfds, NULL, NULL, &timeout) == 0)
+            {
+                if (g_idle_cb) g_idle_cb();
+                continue;
+            }
+        }
+#endif
+
         mod_memset(buffer, 0, g_buffer_size);
         count = recv(clientfd, buffer, g_buffer_size, 0);
 
@@ -399,7 +431,7 @@ void socket_run(int exit_on_failure)
             if (msgbuffer != buffer)
                 free(msgbuffer);
 
-            effects_idle_external_uis();
+            if (g_idle_cb) g_idle_cb();
         }
         else if (count < 0) /* Error */
         {
