@@ -39,42 +39,8 @@
 ************************************************************************************************************************
 */
 
-/* Errors definitions */
-enum {
-    SUCCESS = 0,
-    ERR_INSTANCE_INVALID = -1,
-    ERR_INSTANCE_ALREADY_EXISTS = -2,
-    ERR_INSTANCE_NON_EXISTS = -3,
-    ERR_INSTANCE_UNLICENSED = -4,
-
-    ERR_LV2_INVALID_URI = -101,
-    ERR_LV2_INSTANTIATION = -102,
-    ERR_LV2_INVALID_PARAM_SYMBOL = -103,
-    ERR_LV2_INVALID_PRESET_URI = -104,
-    ERR_LV2_CANT_LOAD_STATE = -105,
-
-    ERR_JACK_CLIENT_CREATION = -201,
-    ERR_JACK_CLIENT_ACTIVATION = -202,
-    ERR_JACK_CLIENT_DEACTIVATION = -203,
-    ERR_JACK_PORT_REGISTER = -204,
-    ERR_JACK_PORT_CONNECTION = -205,
-    ERR_JACK_PORT_DISCONNECTION = -206,
-    ERR_JACK_VALUE_OUT_OF_RANGE = -207,
-
-    ERR_ASSIGNMENT_ALREADY_EXISTS = -301,
-    ERR_ASSIGNMENT_INVALID_OP = -302,
-    ERR_ASSIGNMENT_LIST_FULL = -303,
-    ERR_ASSIGNMENT_FAILED = -304,
-    ERR_ASSIGNMENT_UNUSED = -305,
-
-    ERR_CONTROL_CHAIN_UNAVAILABLE = -401,
-    ERR_ABLETON_LINK_UNAVAILABLE = -402,
-    ERR_HMI_UNAVAILABLE = -403,
-    ERR_EXTERNAL_UI_UNAVAILABLE = -404,
-
-    ERR_MEMORY_ALLOCATION = -901,
-    ERR_INVALID_OPERATION = -902
-};
+#include "host-errors.h"
+#include "host-dispatch.h"
 
 /* Log definitions */
 typedef enum {
@@ -135,7 +101,7 @@ typedef struct {
 
 int effects_init(void* client);
 int effects_finish(int close_client);
-int effects_add(const char *uri, int instance);
+int effects_add(const char *uri, int instance, const char *client_name);
 int effects_remove(int effect_id);
 int effects_preset_load(int effect_id, const char *uri);
 int effects_preset_save(int effect_id, const char *dir, const char *file_name, const char *label);
@@ -148,6 +114,9 @@ int effects_set_property(int effect_id, const char *uri, const char *value);
 int effects_get_property(int effect_id, const char *uri);
 int effects_monitor_parameter(int effect_id, const char *control_symbol, const char *op, float value);
 int effects_monitor_output_parameter(int effect_id, const char *control_symbol);
+int effects_remote_pages(int effect_id);
+int effects_remote_page_get(int effect_id, int page, host_remote_page_t *page_out);
+int effects_param_info(int effect_id, const char *control_symbol, host_param_info_t *info);
 int effects_bypass(int effect_id, int value);
 int effects_get_parameter_symbols(int effect_id, int output_ports, const char** symbols);
 int effects_get_presets_uris(int effect_id, const char **uris);

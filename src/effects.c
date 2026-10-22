@@ -80,6 +80,7 @@ typedef unsigned int uint;
 #include <lv2/resize-port/resize-port.h>
 #include <lv2/state/state.h>
 #include <lv2/time/time.h>
+#include <lv2/units/units.h>
 #include <lv2/urid/urid.h>
 #include <lv2/uri-map/uri-map.h>
 #include <lv2/worker/worker.h>
@@ -1281,9 +1282,9 @@ static void RunPostPonedEvents(int ignored_effect_id)
             if (ShouldIgnorePostPonedSymbolEvent(&eventptr->event.parameter, &cached_output_mon))
                 continue;
 
-            snprintf(buf, FEEDBACK_BUF_SIZE, "output_set %i %s %f", eventptr->event.parameter.effect_id,
-                                                                    eventptr->event.parameter.symbol,
-                                                                    eventptr->event.parameter.value);
+            snprintf(buf, FEEDBACK_BUF_SIZE, OUTPUT_SET, eventptr->event.parameter.effect_id,
+                                                        eventptr->event.parameter.symbol,
+                                                        eventptr->event.parameter.value);
             socket_send_feedback_debug(buf);
 
             // save for fast checkup next time
@@ -4538,10 +4539,31 @@ int effects_finish(int close_client)
     return SUCCESS;
 }
 
-int effects_add(const char *uri, int instance)
+/* jack_client_name_size() includes the final NUL, and JACK backends vary it (33 on plain
+   JACK1, up to 256 seen on some PipeWire builds) -- 256 is comfortably above every backend
+   observed, and requested_name is truncated to whatever the live backend actually reports. */
+#define REQUESTED_CLIENT_NAME_BUF_SIZE 256
+
+/* Copy `src` into `dst` (size `dst_size`), replacing JACK's port-separator ':' with '_' (a
+   client name carrying one would make every one of its own ports unparseable as
+   "client:port"), and truncating to at most `max_len` characters. Never NUL if `src` sanitises
+   to nothing -- the caller falls back to the default name in that case. */
+static void sanitize_client_name(char *dst, size_t dst_size, const char *src, size_t max_len)
+{
+    if (max_len >= dst_size) max_len = dst_size - 1;
+    size_t di = 0;
+    for (size_t si = 0; src[si] != '\0' && di < max_len; si++)
+    {
+        dst[di++] = (src[si] == ':') ? '_' : src[si];
+    }
+    dst[di] = '\0';
+}
+
+int effects_add(const char *uri, int instance, const char *client_name)
 {
     unsigned int ports_count;
     char effect_name[32], port_name[MAX_CHAR_BUF_SIZE+1];
+    char requested_name[REQUESTED_CLIENT_NAME_BUF_SIZE];
     float *audio_buffer, *cv_buffer, *control_buffer;
     jack_port_t *jack_port;
     uint32_t audio_ports_count, input_audio_ports_count, output_audio_ports_count;
@@ -4586,7 +4608,63 @@ int effects_add(const char *uri, int instance)
 
     /* Create a client to Jack */
     snprintf(effect_name, 31, "effect_%i", instance);
-    jack_client = jack_client_open(effect_name, JackNoStartServer, &jack_status);
+
+    if (client_name && client_name[0] != '\0')
+    {
+        /* jack_client_name_size() needs a live client/server connection on some backends
+           to report the real limit; g_jack_global_client (opened once at startup for
+           metadata/monitoring) is already up by the time any `add` can run. */
+        size_t name_limit = (size_t)jack_client_name_size() - 1;
+        sanitize_client_name(requested_name, sizeof(requested_name), client_name, name_limit);
+
+        if (requested_name[0] == '\0')
+        {
+            /* Sanitised to nothing (e.g. all-colon input) -- fall through to the default. */
+            jack_client = jack_client_open(effect_name, JackNoStartServer, &jack_status);
+        }
+        else
+        {
+            /* JackUseExactName so a name collision is REPORTED (JackNameNotUnique) rather
+               than silently mangled by JACK's own "-01"/"-02" suffixing, which would leave
+               the caller unable to predict the client it just created. */
+            jack_client = jack_client_open(requested_name, JackNoStartServer | JackUseExactName,
+                                            &jack_status);
+
+            if (!jack_client)
+            {
+                /* Deterministic disambiguation: append this (already-unique) instance
+                   number rather than trusting JACK's own mangling. Retried on any failure,
+                   not only JackNameNotUnique: jack2 reports a taken exact name as
+                   JackFailure|JackServerError. */
+                char suffixed_name[REQUESTED_CLIENT_NAME_BUF_SIZE];
+                char id_suffix[16];
+                snprintf(id_suffix, sizeof(id_suffix), "_%i", instance);
+                size_t base_len = strlen(requested_name);
+                size_t suffix_len = strlen(id_suffix);
+                size_t keep = (base_len + suffix_len <= name_limit)
+                                  ? base_len
+                                  : (name_limit > suffix_len ? name_limit - suffix_len : 0);
+                memcpy(suffixed_name, requested_name, keep);
+                memcpy(suffixed_name + keep, id_suffix, suffix_len + 1);
+
+                jack_client = jack_client_open(suffixed_name, JackNoStartServer | JackUseExactName,
+                                                &jack_status);
+            }
+
+            if (!jack_client)
+            {
+                /* Still no client (a collision even the id-suffixed name couldn't clear, or
+                   any other reason JackUseExactName might refuse) -- an `add` must never fail
+                   just because the caller's requested name didn't stick, so fall back to the
+                   default, unnamed path exactly as an unpatched host would behave. */
+                jack_client = jack_client_open(effect_name, JackNoStartServer, &jack_status);
+            }
+        }
+    }
+    else
+    {
+        jack_client = jack_client_open(effect_name, JackNoStartServer, &jack_status);
+    }
 
     if (!jack_client)
     {
@@ -6539,6 +6617,124 @@ int effects_monitor_output_parameter(int effect_id, const char *control_symbol_o
 
     // activate output monitor
     effect->hints |= HINT_OUTPUT_MONITORS;
+
+    return SUCCESS;
+}
+
+int effects_remote_pages(int effect_id)
+{
+    if (!InstanceExist(effect_id))
+        return ERR_INSTANCE_NON_EXISTS;
+
+    // LV2 has no remote-control pages
+    return 0;
+}
+
+int effects_remote_page_get(int effect_id, int page, host_remote_page_t *page_out)
+{
+    (void)page;
+    (void)page_out;
+
+    if (!InstanceExist(effect_id))
+        return ERR_INSTANCE_NON_EXISTS;
+
+    return ERR_INVALID_OPERATION;
+}
+
+// the shortest decimal that reads back to the same float, as a double
+static double FloatAsDecimal(float value)
+{
+    char buf[32];
+
+    for (int precision = 1; precision < 9; precision++)
+    {
+        snprintf(buf, sizeof(buf), "%.*g", precision, value);
+        if (strtof(buf, NULL) == value)
+            return strtod(buf, NULL);
+    }
+    snprintf(buf, sizeof(buf), "%.9g", value);
+    return strtod(buf, NULL);
+}
+
+int effects_param_info(int effect_id, const char *control_symbol, host_param_info_t *info)
+{
+    static const char *const units[] = {
+        LV2_UNITS__bar, LV2_UNITS__beat, LV2_UNITS__bpm, LV2_UNITS__cent, LV2_UNITS__cm, LV2_UNITS__coef,
+        LV2_UNITS__db, LV2_UNITS__degree, LV2_UNITS__frame, LV2_UNITS__hz, LV2_UNITS__inch, LV2_UNITS__khz,
+        LV2_UNITS__km, LV2_UNITS__m, LV2_UNITS__mhz, LV2_UNITS__midiNote, LV2_UNITS__mile, LV2_UNITS__min,
+        LV2_UNITS__mm, LV2_UNITS__ms, LV2_UNITS__oct, LV2_UNITS__pc, LV2_UNITS__s, LV2_UNITS__semitone12TET,
+        NULL
+    };
+    port_t *port = NULL;
+
+    if (!InstanceExist(effect_id))
+        return ERR_INSTANCE_NON_EXISTS;
+
+    effect_t *effect = &g_effects[effect_id];
+
+    // only the plugin's own input controls; the lv2:enabled port is the host's bypass
+    for (uint32_t i = 0; i < effect->input_control_ports_count; i++)
+    {
+        if (strcmp(effect->input_control_ports[i]->symbol, control_symbol) == 0)
+        {
+            port = effect->input_control_ports[i];
+            break;
+        }
+    }
+    if (port == NULL || (effect->enabled_index >= 0 && port == effect->ports[effect->enabled_index]))
+        return ERR_HOST_INVALID_PARAM_SYMBOL;
+
+    const LilvPlugin *plugin = effect->lilv_plugin;
+    const LilvPort *lilv_port = lilv_plugin_get_port_by_index(plugin, port->index);
+
+    info->unit = "none";
+    LilvNode *unit_pred = lilv_new_uri(g_lv2_data, LV2_UNITS__unit);
+    LilvNodes *unit = lilv_port_get_value(plugin, lilv_port, unit_pred);
+    if (unit != NULL && lilv_node_is_uri(lilv_nodes_get_first(unit)))
+    {
+        const char *uri = lilv_node_as_uri(lilv_nodes_get_first(unit));
+        for (int i = 0; units[i] != NULL; i++)
+            if (strcmp(uri, units[i]) == 0)
+                info->unit = strrchr(units[i], '#') + 1;
+    }
+    lilv_nodes_free(unit);
+    lilv_node_free(unit_pred);
+
+    info->min = FloatAsDecimal(port->min_value);
+    info->max = FloatAsDecimal(port->max_value);
+    info->def = FloatAsDecimal(port->def_value);
+    info->step = 0.0;
+    info->stable_symbol = port->symbol;
+
+    if (port->hints & (HINT_INTEGER|HINT_ENUMERATION|HINT_TOGGLE))
+    {
+        info->scale = "stepped";
+        info->step = 1.0;
+        return SUCCESS;
+    }
+
+    if (port->hints & HINT_LOGARITHMIC)
+    {
+        // a log scale needs both bounds positive; never answered as linear
+        if (port->min_value <= 0.0f || port->max_value <= 0.0f)
+            return ERR_INVALID_OPERATION;
+        info->scale = "log";
+    }
+    else
+    {
+        info->scale = "linear";
+    }
+
+    LilvNode *steps_pred = lilv_new_uri(g_lv2_data, LV2_PORT_PROPS__rangeSteps);
+    LilvNodes *steps = lilv_port_get_value(plugin, lilv_port, steps_pred);
+    if (steps != NULL)
+    {
+        int n = lilv_node_as_int(lilv_nodes_get_first(steps));
+        if (n >= 2)
+            info->step = ((double)info->max - info->min) / (n - 1);
+    }
+    lilv_nodes_free(steps);
+    lilv_node_free(steps_pred);
 
     return SUCCESS;
 }
