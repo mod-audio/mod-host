@@ -776,7 +776,7 @@ int main(int argc, char **argv)
     /* parse command line options */
     int nofork = 0, verbose = 0,  interactive = 0, selftest = 0;
     int socket_port = SOCKET_DEFAULT_PORT, feedback_port = 0;
-    while ((opt = getopt_long(argc, argv, "nvp:f:iVh", long_options, &opt_index)) != -1)
+    while ((opt = getopt_long(argc, argv, "nvp:f:itVh", long_options, &opt_index)) != -1)
     {
         switch (opt)
         {
