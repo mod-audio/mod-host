@@ -835,6 +835,20 @@ static uint64_t g_monotonic_frame_count = 0;
 // Used for the MIDI Beat Clock Slave
 static volatile uint64_t g_previous_midi_event_time = 0;
 
+// MIDI Beat Clock slave: delay-locked loop on the clock tick arrival times (RT thread only).
+// Position is derived from the tick count (24 per beat) instead of free-running at an estimated BPM,
+// so it stays phase-locked to the external clock and follows tempo changes without drifting.
+#define MIDI_CLOCK_TICKS_PER_BEAT 24.0
+#define MIDI_CLOCK_DLL_BANDWIDTH  0.5 // Hz, loop bandwidth of the DLL
+static double   g_mclk_t0;        // (predicted) absolute frame of the last tick
+static double   g_mclk_t1;        // predicted absolute frame of the next tick
+static double   g_mclk_e2;        // DLL period estimate (frames per tick), 0 = unknown
+static double   g_mclk_b, g_mclk_c; // DLL loop coefficients
+static uint32_t g_mclk_tick;      // index of the last received tick since Start (position = tick/24 beats)
+static uint32_t g_mclk_next_tick; // index the next received tick gets (set by Start / Song Position Pointer)
+static bool     g_mclk_valid;     // DLL has a usable t0/t1 pair
+static double   g_mclk_last_beat; // last position given to jack, keeps BBT monotonic
+
 /* LV2 and Lilv */
 static LilvWorld *g_lv2_data;
 static const LilvPlugins *g_plugins;
@@ -3278,39 +3292,57 @@ static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
             switch (event.buffer[0])
             {
             case 0xF8: { // Clock tick
-                // Calculate the timestamp difference to the previous MBC event
+                // absolute frame of this tick (same timeline as g_monotonic_frame_count)
                 const uint64_t current = g_monotonic_frame_count + event.time;
 
-                if (g_previous_midi_event_time != 0)
+                g_mclk_tick = g_mclk_next_tick++;
+
+                if (g_previous_midi_event_time != 0 && current - g_previous_midi_event_time < g_max_allowed_midi_delta)
                 {
-                    const uint64_t delta = current - g_previous_midi_event_time;
+                    const double t = (double)current;
 
-                    if (delta < g_max_allowed_midi_delta)
+                    if (g_mclk_valid)
                     {
-                        const double filtered_delta = beat_clock_tick_filter(delta);
-
-                        // rounded to 2 decimal points
-                        dvalue = rint(beats_per_minute(filtered_delta, g_sample_rate) * 100.0) / 100.0;
-
-                        if (dvalue > 0.0 && doubles_differ_enough(g_transport_bpm, dvalue))
-                        {
-                            // set a sane low limit
-                            if (dvalue <= 20.0)
-                                g_transport_bpm = 20;
-                            // >300 BPM over MIDI is unreasonable
-                            else if (dvalue >= 300.0)
-                                g_transport_bpm = 300.0;
-                            // we are good!
-                            else
-                                g_transport_bpm = dvalue;
-
-                            pos_flag = UPDATE_POSITION_FORCED;
-                        }
-                    } else {
-                        reset_filter();
+                        // DLL update (F. Adriaensen): e = phase error of the prediction
+                        const double e = t - g_mclk_t1;
+                        g_mclk_t0  = g_mclk_t1;
+                        g_mclk_t1 += g_mclk_b * e + g_mclk_e2;
+                        g_mclk_e2 += g_mclk_c * e;
                     }
-                } else {
-                    reset_filter();
+                    else
+                    {
+                        // (re)start the loop from the last two ticks
+                        g_mclk_e2 = (double)(current - g_previous_midi_event_time);
+                        g_mclk_t0 = t;
+                        g_mclk_t1 = t + g_mclk_e2;
+                        g_mclk_valid = true;
+                    }
+
+                    // keep the period estimate sane: 20..300 BPM
+                    const double min_period = 2.5 * g_sample_rate / 300.0;
+                    const double max_period = 2.5 * g_sample_rate / 20.0;
+                    if (g_mclk_e2 < min_period) g_mclk_e2 = min_period;
+                    else if (g_mclk_e2 > max_period) g_mclk_e2 = max_period;
+                    if (g_mclk_t1 <= g_mclk_t0 + 1.0) g_mclk_t1 = g_mclk_t0 + g_mclk_e2;
+
+                    // loop coefficients for the current tempo (omega = 2*pi*bandwidth*period)
+                    const double omega = 2.0 * M_PI * MIDI_CLOCK_DLL_BANDWIDTH * g_mclk_e2 / (double)g_sample_rate;
+                    g_mclk_b = 1.4142135623730950488 * omega;
+                    g_mclk_c = omega * omega;
+
+                    // reported BPM, rounded to 2 decimal points
+                    dvalue = rint(beats_per_minute(g_mclk_e2, g_sample_rate) * 100.0) / 100.0;
+
+                    if (dvalue > 0.0 && doubles_differ_enough(g_transport_bpm, dvalue))
+                    {
+                        g_transport_bpm = dvalue;
+                        pos_flag = UPDATE_POSITION_FORCED;
+                    }
+                }
+                else
+                {
+                    // first tick after Start/Continue, or a gap > 200ms: restart the loop
+                    g_mclk_valid = false;
                 }
 
                 g_previous_midi_event_time = current;
@@ -3318,18 +3350,41 @@ static int ProcessGlobalClient(jack_nframes_t nframes, void *arg)
             }
 
             case 0xFA: // Start
-            case 0xFB: // Continue
+                // next tick is beat 1 of bar 1
+                g_mclk_next_tick = 0;
+                g_mclk_last_beat = 0.0;
                 g_previous_midi_event_time = 0;
+                g_mclk_valid = false;
+                jack_transport_locate(g_jack_global_client, 0);
+                jack_transport_start(g_jack_global_client);
+                break;
+
+            case 0xFB: // Continue
+                // resume from the last position (set by Stop or Song Position Pointer)
+                g_previous_midi_event_time = 0;
+                g_mclk_valid = false;
                 jack_transport_start(g_jack_global_client);
                 break;
 
             case 0xFC: // Stop
+                // keep the position so that Continue resumes from here; Start resets it
                 jack_transport_stop(g_jack_global_client);
-                jack_transport_locate(g_jack_global_client, 0);
+                break;
+
+            case 0xF2: // Song Position Pointer (in 16th notes = 6 clock ticks each)
+                if (event.size >= 3)
+                {
+                    g_mclk_next_tick = ((uint32_t)(event.buffer[2] & 0x7F) << 7 | (event.buffer[1] & 0x7F)) * 6;
+                    g_mclk_last_beat = g_mclk_next_tick / MIDI_CLOCK_TICKS_PER_BEAT;
+                    g_mclk_valid = false;
+                    g_previous_midi_event_time = 0;
+                    if (g_transport_bpm > 0.0)
+                        jack_transport_locate(g_jack_global_client,
+                                              (jack_nframes_t)(g_mclk_last_beat * 60.0 * g_sample_rate / g_transport_bpm));
+                }
                 break;
 
             default:
-                // TODO: Handle MIDI Song Position Pointer
                 break;
             }
         }
@@ -3713,7 +3768,33 @@ static void JackTimebase(jack_transport_state_t state, jack_nframes_t nframes,
     // Is this a hacky way to express rounding? Better use nearbyint()?
     const int32_t beats_per_bar_int = (int32_t)(pos->beats_per_bar + 0.5f);
 
-    if (new_pos || g_transport_reset) // Is caching involved? No.
+    if (g_transport_sync_mode == TRANSPORT_SYNC_MIDI && g_mclk_valid && state == JackTransportRolling)
+    {
+        // Phase-locked to the MIDI clock: position = ticks received / 24, interpolated between
+        // the DLL's predicted tick times. g_monotonic_frame_count already points at the next cycle.
+        pos->valid = JackPositionBBT | JackTickDouble;
+        pos->beat_type = 4.0f;
+        pos->ticks_per_beat = TRANSPORT_TICKS_PER_BEAT;
+
+        const double frac = ((double)g_monotonic_frame_count - g_mclk_t0) / (g_mclk_t1 - g_mclk_t0);
+        double abs_beat = ((double)g_mclk_tick + frac) / MIDI_CLOCK_TICKS_PER_BEAT;
+
+        // never step backwards (early tick after a late prediction)
+        if (abs_beat < g_mclk_last_beat)
+            abs_beat = g_mclk_last_beat;
+        g_mclk_last_beat = abs_beat;
+
+        const double bar  = floor(abs_beat / pos->beats_per_bar);
+        const double beat = floor(fmod(abs_beat, pos->beats_per_bar));
+
+        pos->bar  = (int32_t)(bar) + 1;
+        pos->beat = (int32_t)(beat) + 1;
+        pos->bar_start_tick = ((bar * pos->beats_per_bar) + beat) * TRANSPORT_TICKS_PER_BEAT;
+
+        tick = (abs_beat - floor(abs_beat)) * TRANSPORT_TICKS_PER_BEAT;
+        g_transport_reset = false;
+    }
+    else if (new_pos || g_transport_reset) // Is caching involved? No.
     {
         // Do we have to set every "constant" data field every time?
         pos->valid = JackPositionBBT | JackTickDouble;
@@ -3783,7 +3864,6 @@ static void JackTimebase(jack_transport_state_t state, jack_nframes_t nframes,
     pos->tick_double = tick;
     return;
 
-    UNUSED_PARAM(state);
     UNUSED_PARAM(arg);
 }
 
@@ -10139,6 +10219,10 @@ int effects_transport_sync_mode(const char* mode)
     if (!strcmp(mode, "midi"))
     {
         g_previous_midi_event_time = 0;
+        g_mclk_valid = false;
+        g_mclk_e2 = 0.0;
+        g_mclk_next_tick = 0;
+        g_mclk_last_beat = 0.0;
         g_transport_sync_mode = TRANSPORT_SYNC_MIDI;
         effects_output_data_ready();
         return SUCCESS;
