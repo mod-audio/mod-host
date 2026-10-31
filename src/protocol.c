@@ -248,12 +248,13 @@ void protocol_parse(msg_t *msg)
 }
 
 
-void protocol_add_command(const char *command, void (*callback)(proto_t *proto))
+int protocol_add_command(const char *command, void (*callback)(proto_t *proto))
 {
     if (g_command_count >= PROTOCOL_MAX_COMMANDS)
     {
-        printf("error: PROTOCOL_MAX_COMMANDS reached (reconfigure it)\n");
-        return;
+        fprintf(stderr, "error: PROTOCOL_MAX_COMMANDS (%d) reached, '%s' is not registered\n",
+                PROTOCOL_MAX_COMMANDS, command);
+        return -1;
     }
 
     char *cmd = str_duplicate(command);
@@ -262,6 +263,7 @@ void protocol_add_command(const char *command, void (*callback)(proto_t *proto))
     g_commands[g_command_count].count = strarr_length(g_commands[g_command_count].list);
     g_commands[g_command_count].callback = callback;
     g_command_count++;
+    return 0;
 }
 
 
