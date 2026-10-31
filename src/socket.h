@@ -75,6 +75,10 @@
 ************************************************************************************************************************
 */
 
+// the address the next socket_start binds both ports to, a dotted IPv4 address; until this is called, the loopback
+// address, so only this machine reaches the ports. "0.0.0.0" is every address of the machine. A controller is not
+// authenticated: widen this only on a network whose hosts are trusted. Answers -1, the setting unchanged, for anything else
+int socket_set_bind_address(const char *address);
 int socket_start(int socket_port, int feedback_port, int buffer_size);
 void socket_finish(void);
 void socket_set_receive_cb(void (*receive_cb)(msg_t *msg));
