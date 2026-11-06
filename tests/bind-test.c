@@ -13,6 +13,7 @@
 #include <errno.h>
 #include <ifaddrs.h>
 #include <net/if.h>
+#include <sys/wait.h>
 
 void effects_idle_external_uis(void)
 {
@@ -110,6 +111,102 @@ static void arm(const char *name, const char *const *yes, const char *const *no)
     socket_finish();
 }
 
+/* a child holds both ports with socket_start(): with `serve` it also closes an accepted connection first, so the port
+ * is left in TIME_WAIT on the server's side when the child ends. Answers the child's pid; it ends when told on `go` */
+static pid_t holder(int port, int serve, int go[2], int ready[2])
+{
+    pid_t pid = fork();
+
+    if (pid == 0)
+    {
+        char c = 0;
+
+        if (socket_start(port, port + 1, 1024) != 0)
+            _exit(2);
+        if (serve)
+        {
+            int client = socket(AF_INET, SOCK_STREAM, 0), served;
+            struct sockaddr_in addr;
+
+            memset(&addr, 0, sizeof(addr));
+            addr.sin_family = AF_INET;
+            addr.sin_port = htons(port);
+            addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+            if (connect(client, (struct sockaddr *)&addr, sizeof(addr)) != 0 || (served = accept(g_serverfd, NULL, NULL)) < 0)
+                _exit(3);
+            close(served);
+            usleep(100000);
+            close(client);
+        }
+        if (write(ready[1], &c, 1) != 1 || read(go[0], &c, 1) != 1)
+            _exit(4);
+        _exit(0);
+    }
+    return pid;
+}
+
+/* one port, one daemon: a port a running daemon listens on is refused to a second socket_start (SO_REUSEPORT would
+ * let both listen, and the kernel would split the controllers between them), and a port the daemon before left in
+ * TIME_WAIT is taken again at once (SO_REUSEADDR) */
+static void one_listener(void)
+{
+    const int port = free_ports();
+    int go[2], ready[2], status;
+    char c = 0;
+    pid_t pid;
+
+    if (pipe(go) != 0 || pipe(ready) != 0)
+        exit(EXIT_FAILURE);
+    pid = holder(port, 0, go, ready);
+    if (read(ready[0], &c, 1) != 1)
+    {
+        printf("FAILED  a live daemon: the holder did not start\n");
+        g_failures++;
+    }
+    else if (socket_start(port, port + 1, 1024) == 0)
+    {
+        printf("FAILED  a second daemon was given the ports %d and %d a running one listens on\n", port, port + 1);
+        g_failures++;
+        socket_finish();
+    }
+    else if (socket_start(port, 0, 1024) == 0)
+    {
+        /* the command port alone, with no feedback port: shared, it is the same fault */
+        printf("FAILED  a second daemon was given the command port %d a running one listens on\n", port);
+        g_failures++;
+        socket_finish();
+    }
+    else
+        printf("ok      a second daemon is refused the ports a running one listens on, the command port alone too\n");
+    if (write(go[1], &c, 1) != 1)
+        exit(EXIT_FAILURE);
+    waitpid(pid, &status, 0);
+
+    pid = holder(port, 1, go, ready);
+    if (read(ready[0], &c, 1) != 1 || write(go[1], &c, 1) != 1)
+    {
+        printf("FAILED  a port in TIME_WAIT: the holder did not serve\n");
+        g_failures++;
+        return;
+    }
+    waitpid(pid, &status, 0);
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+    {
+        printf("FAILED  a port in TIME_WAIT: the holder ended %d\n", status);
+        g_failures++;
+    }
+    else if (socket_start(port, port + 1, 1024) != 0)
+    {
+        printf("FAILED  the ports a daemon that ended left in TIME_WAIT are not taken again\n");
+        g_failures++;
+    }
+    else
+    {
+        printf("ok      the ports a daemon that ended left in TIME_WAIT are taken again\n");
+        socket_finish();
+    }
+}
+
 int main(void)
 {
     const char *const nic = off_loopback();
@@ -162,6 +259,7 @@ int main(void)
 
         arm("after refused addresses", yes, no);
     }
+    one_listener();
 
     if (g_failures)
         printf("%d failed\n", g_failures);

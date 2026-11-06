@@ -178,11 +178,13 @@ int socket_start(int socket_port, int feedback_port, int buffer_size)
     }
 
 #ifndef _WIN32
-    /* Allow the reuse of the socket address */
+    /* a port the daemon before left in TIME_WAIT is taken again at once; a port another daemon listens on is not:
+     * SO_REUSEADDR, never SO_REUSEPORT, which would let a second daemon listen beside the first and the kernel split
+     * the controllers between them */
     int value = 1;
-    setsockopt(g_serverfd, SOL_SOCKET, SO_REUSEPORT, &value, sizeof(value));
+    setsockopt(g_serverfd, SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value));
     if (feedback_port != 0)
-        setsockopt(g_fbserverfd, SOL_SOCKET, SO_REUSEPORT, &value, sizeof(value));
+        setsockopt(g_fbserverfd, SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value));
 
     /* increase socket size */
     value = 131071;

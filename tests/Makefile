@@ -67,6 +67,10 @@ bind-test: bind-test.c ../src/socket.c ../src/socket.h
 bind-run: bind-test
 	./$<
 
+# one daemon on a port: bind-sabotage.sh holds bind-test to failing when the rule is broken
+bind-sabotage:
+	cd .. && sh tests/bind-sabotage.sh "$(CC)" "-std=gnu99 -D_GNU_SOURCE -O1 -g -Wall -Wextra -fsanitize=address -fno-omit-frame-pointer"
+
 # meta-rule to generate the object files
 %.o: %.$(EXT)
 	$(CC) $(CFLAGS) -c $(INCS) -o $@ $<
