@@ -202,14 +202,14 @@ double beat_clock_tick_filter(unsigned int raw_delta) {
   // Binomial filter following
 
   if (reset_average) {
-    result = sum/AVERAGE_FILTER_STEPS;
+    result = (double)sum/AVERAGE_FILTER_STEPS;
     for (unsigned int i = 0; i < BINOMIAL_FILTER_ORDER; ++i) {
       g_average[i] = result;
     }
   } else {
     // Shift
     memmove(g_average+1, g_average, sizeof(g_average[0])*(BINOMIAL_FILTER_ORDER-1));
-    g_average[0] = sum/AVERAGE_FILTER_STEPS;
+    g_average[0] = (double)sum/AVERAGE_FILTER_STEPS;
   }
 
   // Sum
