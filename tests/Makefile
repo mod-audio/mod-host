@@ -71,10 +71,17 @@ bind-run: bind-test
 bind-sabotage:
 	cd .. && sh tests/bind-sabotage.sh "$(CC)" "-std=gnu99 -D_GNU_SOURCE -O1 -g -Wall -Wextra -fsanitize=address -fno-omit-frame-pointer"
 
+# a plugin's state paths stay inside its instance's directory: no ".." component, nothing absolute
+state-paths-test: state-paths-test.c ../src/state-paths.c ../src/state-paths.h ../src/utils.c ../src/utils.h
+	$(CC) $< -std=gnu99 -D_GNU_SOURCE -O1 -g -Wall -Wextra -fsanitize=address -fno-omit-frame-pointer -I../src -lm -o $@
+
+state-paths-run: state-paths-test
+	./$<
+
 # meta-rule to generate the object files
 %.o: %.$(EXT)
 	$(CC) $(CFLAGS) -c $(INCS) -o $@ $<
 
 # clean rule
 clean:
-	$(RM) $(SRC_DIR)/*.o $(PROG) bind-test
+	$(RM) $(SRC_DIR)/*.o $(PROG) bind-test state-paths-test
