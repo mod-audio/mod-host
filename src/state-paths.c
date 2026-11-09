@@ -146,9 +146,31 @@ char* GetPluginStateDir(int instance, const char *dir)
     return newpath;
 }
 
+/* a request a plugin may make: relative, not empty, and no component of it "..", so the path it names stays inside the
+   instance's directory ("." alone names the directory itself) */
+static bool RequestStaysInside(const char *path)
+{
+    if (path[0] == '\0' || path[0] == '/')
+        return false;
+
+    for (const char *c = path; *c != '\0';)
+    {
+        const size_t n = strcspn(c, "/");
+
+        if (n == 2 && c[0] == '.' && c[1] == '.')
+            return false;
+
+        c += n;
+        if (*c == '/')
+            ++c;
+    }
+
+    return true;
+}
+
 char* MakePluginStatePath(int instance, const char *dir, const char *path)
 {
-    if (dir == NULL || path == NULL)
+    if (dir == NULL || path == NULL || ! RequestStaysInside(path))
         return NULL;
 
     char effidstr[24] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
