@@ -24,6 +24,7 @@
     lv2:microVersion 0 ;
     lv2:optionalFeature lv2:hardRTCapable ;
     mod:brand "MOD" ;
+    mod:buildEnvironment "prod" ;
     mod:label "Buffer" ;
     rdfs:comment """
 Lets the part of the pedalboard after it run on another processor core, so a chain that is too heavy for one core can be split in two.
