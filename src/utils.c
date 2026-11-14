@@ -96,14 +96,14 @@ static void parse_quote(char *str)
 
 static void trim_spaces(char *str)
 {
-    char *pstr = str;
+    char *pstr = str + strlen(str);
     char c;
 
-    while (*pstr) pstr++;
-    while (1)
+    /* stop at the start: an empty or all-blank string has nothing before it to look at */
+    while (pstr > str)
     {
-        c = *(--pstr);
-        if (c == ' ' || c == '\t' || c == '\r' || c == '\n') *pstr = 0;
+        c = *(pstr - 1);
+        if (c == ' ' || c == '\t' || c == '\r' || c == '\n') *(--pstr) = 0;
         else break;
     }
 }
