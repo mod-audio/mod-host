@@ -110,3 +110,14 @@ def s(msg):
 
 def load_egamp(instance=0):
     return s("add http://lv2plug.in/plugins/eg-amp %d" % instance)
+
+def jack_client_names():
+    # One "client:port" per line; the client name is everything before the last ':'.
+    out = subprocess.check_output(["jack_lsp"], env=env).decode()
+    names = set()
+    for line in out.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        names.add(line.rsplit(":", 1)[0])
+    return names
