@@ -106,10 +106,22 @@ Commands (or Protocol)
 
 The commands supported by mod-host are:
 
-    add <lv2_uri> <instance_number>
+    add <lv2_uri> <instance_number> [client_name]
         * add an LV2 plugin encapsulated as a jack client
         e.g.: add "http://lv2plug.in/plugins/eg-amp" 0
         instance_number must be any value between 0 ~ 9990, inclusively
+        client_name is optional; when omitted the jack client (and so the graph node) is
+        named "effect_<instance_number>", same as always. When given, mod-host tries to
+        open the jack client under that name instead -- so a host running many plugins
+        shows a graph with a name per plugin instead of an undifferentiated effect_0,
+        effect_1, effect_2... The name is sanitised for jack (':' is replaced with '_',
+        since jack uses ':' as the client:port separator, and it is truncated to the
+        running jack backend's client name limit) and, on a collision with an existing
+        jack client, disambiguated by appending "_<instance_number>". If the sanitised
+        name is empty, or the name still collides after the instance number is appended,
+        mod-host falls back to the default "effect_<instance_number>" rather than fail
+        the add.
+        e.g.: add "http://lv2plug.in/plugins/eg-amp" 0 "channel1-eg-amp"
 
     remove <instance_number>
         * remove an LV2 plugin instance (and also the jack client)
@@ -268,6 +280,24 @@ The commands supported by mod-host are:
     output_data_ready
         * report feedback port ready for more messages
 
+    track_info <instance_number> <name> <color> [bus|return|master]
+        * pass the name and color of the mixer track the instance sits on, color as #RRGGBB or - for none
+        * an LV2 plugin has no way to receive them, so mod-host answers -902
+        e.g.: track_info 0 "Kick In" #FF8000
+
+    remote_pages <instance_number>
+        * get the number of remote-control pages of the plugin (8 parameters per page); 0 for an LV2 plugin
+        e.g.: remote_pages 0
+
+    remote_page_get <instance_number> <page_index>
+        * get one remote-control page: resp 0 <page_id> <section_name> <page_name> <symbol> x8, - for an empty slot
+        e.g.: remote_page_get 0 0
+
+    param_info <instance_number> <param_symbol>
+        * get what a control means: resp 0 <unit> <scale> <minimum> <maximum> <default> <step> <stable_symbol>
+        * unit is an LV2 unit name (db, hz, ms, ...) or none, scale is linear, log or stepped, step 0 is continuous
+        e.g.: param_info 0 "gain"
+
     help
         * show a help message
 
@@ -315,4 +345,8 @@ If status is a negative number an error has occurred. The table below shows the 
 
 A status zero or positive means that the command was executed successfully.
 In case of the add command, the status returned is the instance number.
-The value field currently only exists for the param_get command.
+The value field exists for the param_get, remote_page_get and param_info commands.
+
+When the plugin changes its remote-control pages, the feedback port gets:
+
+    remote_pages_changed <instance_number>
