@@ -1,0 +1,11 @@
+prefix=@PREFIX@
+libdir=@LIBDIR@
+includedir=@INCLUDEDIR@
+scenarios=@SHAREDIR@/mod-host/host-scenarios.txt
+
+Name: mod-host-protocol
+Description: mod-host socket server, protocol and command dispatch
+Version: @VERSION@
+Cflags: -I${includedir}/mod-host
+Libs: -L${libdir} -lmod-host-protocol
+Libs.private: -lpthread -lm
