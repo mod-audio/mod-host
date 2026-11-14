@@ -168,10 +168,23 @@ install: install_man
 
 # clean rule
 clean:
-	@rm -f $(SRC_DIR)/*.o $(SRC_DIR)/*/*.o $(PROG) $(PROG).exe $(PROG).so fake-input.so mod-monitor.so src/info.h
+	@rm -f $(SRC_DIR)/*.o $(SRC_DIR)/*/*.o $(PROG) $(PROG).exe $(PROG).so fake-input.so mod-monitor.so src/info.h tests/protocol_test tests/host_scenarios
 
 test:
 	py.test tests/test_host.py
+
+# the socket protocol and command dispatch, tested against a fake backend: no jack, no plugins
+PROTOCOL_OBJ = $(SRC_DIR)/socket.o $(SRC_DIR)/protocol.o $(SRC_DIR)/utils.o $(SRC_DIR)/host-dispatch.o \
+               $(SRC_DIR)/host-scenario.o
+
+test-protocol: tests/protocol_test
+	./tests/protocol_test
+
+tests/protocol_test: tests/protocol_test.c $(PROTOCOL_OBJ)
+	$(CC) $(INCS) $(filter-out -c,$(CFLAGS)) -Werror -o $@ $< $(PROTOCOL_OBJ) -lpthread -lm
+
+tests/host_scenarios: tests/host_scenarios.c $(PROTOCOL_OBJ)
+	$(CC) $(INCS) $(filter-out -c,$(CFLAGS)) -Werror -o $@ $< $(PROTOCOL_OBJ) -lpthread -lm
 
 # manual page rule
 # Uses md2man to convert the README to groff man page
