@@ -16,7 +16,7 @@ s.settimeout(0.1)
 
 
 def send_command(command):
-    s.send(command)
+    s.send(command + '\0')
     print 'sent:', command
 
     try:

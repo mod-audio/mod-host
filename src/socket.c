@@ -39,7 +39,6 @@ typedef int SOCKET;
 
 #include "socket.h"
 #include "effects.h"
-#include "mod-memset.h"
 
 
 /*
@@ -259,10 +258,16 @@ int socket_send(int destination, const char *buffer, int size)
 
     while (size > 0)
     {
+        /* a client that went away must not end the host with SIGPIPE */
+#ifdef MSG_NOSIGNAL
+        ret = send(destination, buffer, size, MSG_NOSIGNAL);
+#else
         ret = send(destination, buffer, size, 0);
+#endif
         if (ret < 0)
         {
             perror("send error");
+            break;
         }
         size -= ret;
         buffer += ret;
@@ -284,12 +289,14 @@ void socket_run(int exit_on_failure)
 {
     SOCKET clientfd, fbclientfd;
     int count;
-    char *buffer;
-    char *msgbuffer;
+    char *buffer, *newbuffer, *command, *scan, *end;
+    size_t buffer_size, new_size, used;
     msg_t msg;
 
     /* Allocates memory to receive buffer */
-    buffer = malloc(g_buffer_size);
+    buffer_size = g_buffer_size;
+    used = 0;
+    buffer = malloc(buffer_size);
     if (buffer == NULL)
     {
         if (! exit_on_failure)
@@ -337,67 +344,63 @@ void socket_run(int exit_on_failure)
 
     while (g_serverfd != INVALID_SOCKET)
     {
-        mod_memset(buffer, 0, g_buffer_size);
-        count = recv(clientfd, buffer, g_buffer_size, 0);
+        /* Commands end with a NUL byte. A read can hold several of them, or only part of one:
+         * the buffer keeps the unfinished tail for the next read, and one spare byte for a terminator */
+        if (used == buffer_size - 1)
+        {
+            /* the limit below keeps the tail shorter than SOCKET_MSG_MAX_SIZE: this never goes past twice that */
+            new_size = buffer_size * 2;
+            newbuffer = realloc(buffer, new_size);
+            if (newbuffer == NULL)
+            {
+                if (! exit_on_failure)
+                    break;
+
+                perror("realloc error");
+                exit(EXIT_FAILURE);
+            }
+
+            buffer = newbuffer;
+            buffer_size = new_size;
+        }
+
+        count = recv(clientfd, buffer + used, buffer_size - 1 - used, 0);
 
         if (count > 0) /* Data received */
         {
-            if (count == g_buffer_size)
+            /* the kept tail has no terminator, look only at the new bytes */
+            command = buffer;
+            scan = buffer + used;
+            used += count;
+            buffer[used] = '\0';
+
+            /* hand over each complete command */
+            while ((end = memchr(scan, '\0', buffer + used - scan)) != NULL)
             {
-                /* if message is bigger than our buffer, dynamically allocate more data until we receive it all */
-                int new_count, new_buffer_size;
+                /* too long: left in the tail, which the limit below refuses */
+                if (end - command >= SOCKET_MSG_MAX_SIZE)
+                    break;
 
-                msgbuffer = NULL;
-                new_count = g_buffer_size;
-                new_buffer_size = g_buffer_size;
+                msg.sender_id = clientfd;
+                msg.data = command;
+                msg.data_size = end - command;
+                if (g_receive_cb) g_receive_cb(&msg);
 
-                while (new_count == g_buffer_size)
-                {
-                    new_buffer_size += g_buffer_size;
-
-                    if (msgbuffer == NULL)
-                    {
-                        msgbuffer = malloc(new_buffer_size);
-                        memcpy(msgbuffer, buffer, g_buffer_size);
-                    }
-                    else
-                    {
-                        msgbuffer = realloc(msgbuffer, new_buffer_size);
-                    }
-
-                    mod_memset(msgbuffer + count, 0, g_buffer_size);
-                    new_count = recv(clientfd, msgbuffer + count, g_buffer_size, 0);
-
-                    if (new_count > 0) /* Data received */
-                    {
-                        count += new_count;
-                    }
-                    else if (new_count < 0) /* Error */
-                    {
-                        if (! exit_on_failure)
-                            goto outside_loop;
-
-                        perror("read error");
-                        exit(EXIT_FAILURE);
-                    }
-                    else if (new_count == 0) /* Client disconnected */
-                    {
-                        goto outside_loop;
-                    }
-                }
-            }
-            else
-            {
-                msgbuffer = buffer;
+                command = scan = end + 1;
             }
 
-            msg.sender_id = clientfd;
-            msg.data = msgbuffer;
-            msg.data_size = count;
-            if (g_receive_cb) g_receive_cb(&msg);
+            /* keep the unfinished tail */
+            used -= command - buffer;
+            memmove(buffer, command, used);
+            buffer[used] = '\0';
 
-            if (msgbuffer != buffer)
-                free(msgbuffer);
+            /* a command that reaches the limit, finished or not, is refused, not read on without end */
+            if (used >= SOCKET_MSG_MAX_SIZE)
+            {
+                fprintf(stderr, "socket error: command longer than %d bytes, closing the connection\n",
+                        SOCKET_MSG_MAX_SIZE);
+                break;
+            }
 
             effects_idle_external_uis();
         }
@@ -411,11 +414,18 @@ void socket_run(int exit_on_failure)
         }
         else /* Client disconnected */
         {
+            /* a last command the client did not terminate is still run, as a client that sends no NUL expects */
+            if (used > 0)
+            {
+                msg.sender_id = clientfd;
+                msg.data = buffer;
+                msg.data_size = used;
+                if (g_receive_cb) g_receive_cb(&msg);
+            }
             break;
         }
     }
 
-outside_loop:
     if (fbclientfd != INVALID_SOCKET)
     {
         g_fbclientfd = INVALID_SOCKET;
