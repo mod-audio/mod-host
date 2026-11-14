@@ -51,7 +51,12 @@
 #define SOCKET_MSG_BUFFER_SIZE  1024
 
 /* Protocol commands definition */
-#define EFFECT_ADD           "add %s %i"
+/* The trailing "..." makes the client-name argument OPTIONAL: a 3-token "add <uri> <id>"
+   still matches (protocol_parse() treats a shorter-than-template message ending exactly
+   where "..." starts as satisfied), so a caller that never sends a 4th token is unaffected.
+   A caller that does send one gets it forwarded to effects_add() as the requested JACK
+   client name. */
+#define EFFECT_ADD           "add %s %i ..."
 #define EFFECT_REMOVE        "remove %i"
 #define EFFECT_PRESET_LOAD   "preset_load %i %s"
 #define EFFECT_PRESET_SAVE   "preset_save %i %s %s %s"
