@@ -192,3 +192,27 @@ src/info.h:
 	@utils/txt2cvar.py help_msg > src/info.h
 	@rm help_msg
 	@echo "const char version[] = {\""`git describe --tags 2>/dev/null || echo 0.0.0`\""};" >> src/info.h
+
+# libFuzzer harnesses (fuzz/README.md): the command parser and the state paths. They compile the sources
+# they exercise with AddressSanitizer and UndefinedBehaviorSanitizer. `make fuzz` builds them with clang;
+# `make fuzz-run FUZZ_TIME=60` runs each over its seed corpus for that many seconds. fuzz/socket_fuzz.c
+# stands in for src/socket.c, so a reply is copied into a buffer and no socket is opened.
+FUZZ_CC        ?= clang
+FUZZ_BUILD     ?= build/fuzz
+FUZZ_TIME      ?= 60
+FUZZ_HARNESSES := protocol statepaths
+FUZZ_BINS      := $(FUZZ_HARNESSES:%=$(FUZZ_BUILD)/fuzz_%)
+FUZZ_CFLAGS    := -O1 -g -std=gnu99 -D_GNU_SOURCE -fno-omit-frame-pointer -fsanitize=fuzzer,address,undefined \
+                  -fno-sanitize-recover=undefined
+FUZZ_SRCS      := $(SRC_DIR)/protocol.c $(SRC_DIR)/utils.c fuzz/socket_fuzz.c $(SRC_DIR)/state-paths.c
+
+$(FUZZ_BUILD)/fuzz_%: fuzz/fuzz_%.c fuzz/fuzz.h $(FUZZ_SRCS)
+	@mkdir -p $(FUZZ_BUILD)
+	$(FUZZ_CC) $(FUZZ_CFLAGS) -o $@ $< $(FUZZ_SRCS) -lpthread -lm
+
+fuzz: $(FUZZ_BINS)
+
+fuzz-run: fuzz
+	FUZZ_BUILD=$(FUZZ_BUILD) FUZZ_TIME=$(FUZZ_TIME) sh fuzz/run.sh $(FUZZ_HARNESSES)
+
+.PHONY: fuzz fuzz-run
