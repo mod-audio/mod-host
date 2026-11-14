@@ -61,10 +61,27 @@ rtmempool-test: rtmempool-test.c ../src/rtmempool/*
 rtmempool-run: rtmempool-test
 	valgrind --leak-check=full --show-reachable=yes ./$<
 
+bind-test: bind-test.c ../src/socket.c ../src/socket.h
+	$(CC) $< -std=gnu99 -D_GNU_SOURCE -O1 -g -Wall -Wextra -fsanitize=address -fno-omit-frame-pointer -I../src -lpthread -o $@
+
+bind-run: bind-test
+	./$<
+
+# one daemon on a port: bind-sabotage.sh holds bind-test to failing when the rule is broken
+bind-sabotage:
+	cd .. && sh tests/bind-sabotage.sh "$(CC)" "-std=gnu99 -D_GNU_SOURCE -O1 -g -Wall -Wextra -fsanitize=address -fno-omit-frame-pointer"
+
+# a plugin's state paths stay inside its instance's directory: no ".." component, nothing absolute
+state-paths-test: state-paths-test.c ../src/state-paths.c ../src/state-paths.h ../src/utils.c ../src/utils.h
+	$(CC) $< -std=gnu99 -D_GNU_SOURCE -O1 -g -Wall -Wextra -fsanitize=address -fno-omit-frame-pointer -I../src -lm -o $@
+
+state-paths-run: state-paths-test
+	./$<
+
 # meta-rule to generate the object files
 %.o: %.$(EXT)
 	$(CC) $(CFLAGS) -c $(INCS) -o $@ $<
 
 # clean rule
 clean:
-	$(RM) $(SRC_DIR)/*.o $(PROG)
+	$(RM) $(SRC_DIR)/*.o $(PROG) bind-test state-paths-test

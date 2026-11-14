@@ -764,6 +764,7 @@ int main(int argc, char **argv)
         {"verbose", no_argument, 0, 'v'},
         {"socket-port", required_argument, 0, 'p'},
         {"feedback-port", required_argument, 0, 'f'},
+        {"bind-address", required_argument, 0, 'b'},
         {"interactive", no_argument, 0, 'i'},
         {"self-test", no_argument, 0, 't'},
         {"version", no_argument, 0, 'V'},
@@ -776,7 +777,7 @@ int main(int argc, char **argv)
     /* parse command line options */
     int nofork = 0, verbose = 0,  interactive = 0, selftest = 0;
     int socket_port = SOCKET_DEFAULT_PORT, feedback_port = 0;
-    while ((opt = getopt_long(argc, argv, "nvp:f:iVh", long_options, &opt_index)) != -1)
+    while ((opt = getopt_long(argc, argv, "nvp:f:b:iVh", long_options, &opt_index)) != -1)
     {
         switch (opt)
         {
@@ -795,6 +796,14 @@ int main(int argc, char **argv)
 
             case 'f':
                 feedback_port = atoi(optarg);
+                break;
+
+            case 'b':
+                if (socket_set_bind_address(optarg) != 0)
+                {
+                    fprintf(stderr, "--bind-address '%s' is not an IPv4 address\n", optarg);
+                    exit(EXIT_FAILURE);
+                }
                 break;
 
             case 'i':
@@ -817,10 +826,12 @@ int main(int argc, char **argv)
 
             case 'h':
                 printf(
-                    "Usage: %s [-vih] [-p <port>]\n"
+                    "Usage: %s [-vih] [-p <port>] [-b <address>]\n"
                     "  -v, --verbose                  verbose messages\n"
                     "  -p, --socket-port=<port>       socket port definition\n"
                     "  -f, --feedback-port=<port>     feedback port definition\n"
+                    "  -b, --bind-address=<address>   IPv4 address both ports listen on (default 127.0.0.1;\n"
+                    "                                 0.0.0.0 is every address of this machine)\n"
 #ifndef SKIP_READLINE
                     "  -i, --interactive              interactive mode\n"
 #endif
@@ -932,6 +943,7 @@ int jack_initialize(jack_client_t* client, const char* load_init);
 int jack_initialize(jack_client_t* client, const char* load_init)
 {
     const char* const mod_log = getenv("MOD_LOG");
+    const char* const bind_address = getenv("MOD_DEVICE_HOST_BIND_ADDRESS");
     int socket_port = SOCKET_DEFAULT_PORT;
     int feedback_port = 0;
 
@@ -946,6 +958,12 @@ int jack_initialize(jack_client_t* client, const char* load_init)
 
     if (mod_log != NULL && atoi(mod_log) != 0)
         protocol_verbose(1);
+
+    if (bind_address != NULL && bind_address[0] != '\0' && socket_set_bind_address(bind_address) != 0)
+    {
+        fprintf(stderr, "MOD_DEVICE_HOST_BIND_ADDRESS '%s' is not an IPv4 address\n", bind_address);
+        return 1;
+    }
 
     if (mod_host_init(client, socket_port, feedback_port) != 0)
         return 1;

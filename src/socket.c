@@ -32,6 +32,7 @@
 #else
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 #define closesocket close
 #define INVALID_SOCKET -1
 typedef int SOCKET;
@@ -76,6 +77,7 @@ typedef int SOCKET;
 ************************************************************************************************************************
 */
 
+static unsigned long g_bind_address = INADDR_LOOPBACK;  // in host order
 static SOCKET g_serverfd = INVALID_SOCKET;
 static SOCKET g_fbserverfd = INVALID_SOCKET;
 static SOCKET g_clientfd = INVALID_SOCKET;
@@ -110,6 +112,28 @@ static void (*g_receive_cb)(msg_t *msg);
 *           GLOBAL FUNCTIONS
 ************************************************************************************************************************
 */
+
+int socket_set_bind_address(const char *address)
+{
+    unsigned long parsed;
+
+    if (address == NULL)
+        return -1;
+#ifdef _WIN32
+    parsed = inet_addr(address);
+    if (parsed == INADDR_NONE)
+        return -1;
+#else
+    struct in_addr in;
+
+    if (inet_pton(AF_INET, address, &in) != 1)
+        return -1;
+    parsed = in.s_addr;
+#endif
+    g_bind_address = ntohl(parsed);
+    return 0;
+}
+
 
 int socket_start(int socket_port, int feedback_port, int buffer_size)
 {
@@ -154,11 +178,13 @@ int socket_start(int socket_port, int feedback_port, int buffer_size)
     }
 
 #ifndef _WIN32
-    /* Allow the reuse of the socket address */
+    /* a port the daemon before left in TIME_WAIT is taken again at once; a port another daemon listens on is not:
+     * SO_REUSEADDR, never SO_REUSEPORT, which would let a second daemon listen beside the first and the kernel split
+     * the controllers between them */
     int value = 1;
-    setsockopt(g_serverfd, SOL_SOCKET, SO_REUSEPORT, &value, sizeof(value));
+    setsockopt(g_serverfd, SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value));
     if (feedback_port != 0)
-        setsockopt(g_fbserverfd, SOL_SOCKET, SO_REUSEPORT, &value, sizeof(value));
+        setsockopt(g_fbserverfd, SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value));
 
     /* increase socket size */
     value = 131071;
@@ -171,11 +197,7 @@ int socket_start(int socket_port, int feedback_port, int buffer_size)
     struct sockaddr_in serv_addr;
     memset(&serv_addr, 0, sizeof(serv_addr));
     serv_addr.sin_family = AF_INET;
-#if defined(__MOD_DEVICES__) || defined(_WIN32)
-    serv_addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-#else
-    serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-#endif
+    serv_addr.sin_addr.s_addr = htonl(g_bind_address);
 
     /* Try assign the server address */
     serv_addr.sin_port = htons(socket_port);

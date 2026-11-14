@@ -68,6 +68,12 @@ If you run mod-host without options the process will be forked and it can only
 be controlled through the socket.
 The default socket port is 5555, this can be changed by passing the option
 -p (or --socket-port) to mod-host.
+Both ports listen on the loopback address, 127.0.0.1, so only programs on the same
+machine reach them. To listen on another IPv4 address pass -b (or --bind-address),
+and `-b 0.0.0.0` listens on every address of the machine. The socket has no
+authentication and a client can load plugins from any path, so widen it only on a
+network whose hosts you trust. A JACK internal client reads the same setting from
+the environment variable MOD_DEVICE_HOST_BIND_ADDRESS.
 
 The other way to control mod-host is the interactive mode, in this case the
 commands must be provided on the shell prompt.
